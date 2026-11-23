@@ -1,34 +1,9 @@
-import React, { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { DashboardBackground } from "@/components/DashboardBackground";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  RefreshCw,
-  ShoppingCart,
-  Receipt,
-  CreditCard,
-  CheckCircle2,
-  Clock,
-  TrendingUp,
-} from "lucide-react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { usePageRights } from "@/hooks/usePageRights";
-import {
-  SalesShell,
-  SalesGlassCard,
-  SalesSection,
-} from "@/components/sales/SalesShell";
+import { SHEET_CSS, Detail, Skel, SheetMark } from "@/components/sheet/Sheet";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface SalesDashboardData {
@@ -73,483 +48,188 @@ interface RecentSaleInvoice {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-const fmt = (n: number) =>
-  new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 0,
-  }).format(n);
-
+const n = (v: unknown) => Number(v) || 0;
+const fmt = (v: unknown) =>
+  new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(n(v));
+const fmtNum = (v: unknown) => n(v).toLocaleString("en-IN");
 const fmtDate = (d: string | null) =>
-  d
-    ? new Date(d).toLocaleDateString("en-IN", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-      })
-    : "—";
+  d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
 
-const StatCardSkeleton = () => (
-  <div className="rounded-xl overflow-hidden border border-border/40 bg-card/40 backdrop-blur-sm p-4">
-    <div className="flex items-start justify-between mb-3">
-      <Skeleton className="h-3 w-24" />
-      <Skeleton className="h-7 w-7 rounded-lg" />
-    </div>
-    <Skeleton className="h-7 w-20 mb-2" />
-    <Skeleton className="h-3 w-32" />
-  </div>
-);
+// Every page of the module (same routes and names as the Sales sidebar).
+const SHORTCUTS = [
+  { label: "Sale Order", path: "/sales/sale-order" },
+  { label: "Sale Invoice", path: "/sales/sale-invoice" },
+  { label: "Received Payment", path: "/sales/payment" },
+];
 
-const EMPTY_DATA: SalesDashboardData = {
-  saleOrders: {
-    totalCount: 0,
-    todayCount: 0,
-    totalAmount: 0,
-    draftCount: 0,
-    pendingCount: 0,
-    approvedCount: 0,
-    rejectedCount: 0,
-  },
-  saleInvoices: {
-    totalCount: 0,
-    todayCount: 0,
-    totalAmount: 0,
-    totalReceived: 0,
-    paidCount: 0,
-    pendingCount: 0,
-  },
-  recentSaleOrders: [],
-  recentSaleInvoices: [],
-};
+const empty = (text: string) => <p style={{ fontSize: 13, color: "var(--graphite)", margin: 0 }}>{text}</p>;
 
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
-const SalesDashboard = () => {
-  const navigate = useNavigate();
-  const { theme } = useTheme();
+export default function SalesDashboard() {
   usePageRights("sales-dashboard");
+  const navigate = useNavigate();
 
-  const isDark = !isLightTheme(theme);
-
-  const {
-    data: rawData,
-    isLoading,
-    isError,
-    refetch,
-    isFetching,
-  } = useQuery<SalesDashboardData>({
+  const { data: d, isLoading, isError, error, refetch, isFetching, dataUpdatedAt } = useQuery<SalesDashboardData>({
     queryKey: ["salesDashboard"],
     queryFn: async () => {
       const res = await fetchWithAuth(`/api/sales-dashboard`);
       if (!res.ok) throw new Error("Failed to fetch dashboard data");
-      return res.json().catch(() => ({}));
+      return res.json();
     },
     staleTime: 2 * 60_000,
     refetchInterval: 5 * 60_000,
     refetchOnWindowFocus: true,
   });
 
-  const data = rawData ?? EMPTY_DATA;
+  const readAt = dataUpdatedAt ? new Date(dataUpdatedAt) : new Date();
+  const so = d?.saleOrders;
+  const si = d?.saleInvoices;
 
-  const tableGlass = useMemo(
-    () => ({
-      background: isDark ? "rgba(17,11,26,0.5)" : "rgba(255,255,255,0.72)",
-      border: isDark
-        ? "1px solid rgba(168,85,247,0.15)"
-        : "1px solid rgba(168,85,247,0.18)",
-      backdropFilter: "blur(16px) saturate(150%)",
-      WebkitBackdropFilter: "blur(16px) saturate(150%)",
-      boxShadow: isDark
-        ? "0 4px 24px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)"
-        : "0 4px 24px rgba(168,85,247,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
-    }),
-    [isDark],
+  const figures: { path: string; label: string; value: string; sub: string; warn?: boolean }[] =
+    so && si
+      ? [
+          { path: "/sales/sale-order", label: "Sale orders today", value: fmtNum(so.todayCount), sub: `${fmtNum(so.totalCount)} orders in all` },
+          { path: "/sales/sale-invoice", label: "Invoices today", value: fmtNum(si.todayCount), sub: `${fmtNum(si.totalCount)} invoices in all` },
+          { path: "/sales/sale-order", label: "Total order value", value: fmt(so.totalAmount), sub: `${fmtNum(so.approvedCount)} approved · ${fmtNum(so.pendingCount)} pending` },
+          { path: "/sales/payment", label: "Amount received", value: fmt(si.totalReceived), sub: `of ${fmt(si.totalAmount)} invoiced` },
+          { path: "/sales/sale-order", label: "Draft orders", value: fmtNum(so.draftCount), sub: "Not yet submitted" },
+          { path: "/sales/sale-order", label: "Pending approval", value: fmtNum(so.pendingCount), sub: "Awaiting approval", warn: so.pendingCount > 0 },
+          { path: "/sales/sale-invoice", label: "Invoices paid", value: fmtNum(si.paidCount), sub: "Fully settled" },
+          { path: "/sales/sale-invoice", label: "Invoices pending", value: fmtNum(si.pendingCount), sub: "Payment outstanding", warn: si.pendingCount > 0 },
+        ]
+      : [];
+
+  const viewAll = (path: string) => (
+    <button onClick={() => navigate(path)} className="label link" style={{ color: "var(--blue)" }}>
+      View all →
+    </button>
   );
 
   return (
-    <>
+    <div>
+      <style>{SHEET_CSS}</style>
       <Breadcrumbs items={["Dashboard", "Sales"]} />
-      <DashboardBackground />
-      <SalesShell
-        title="Sales Overview"
-        subtitle="Sale orders, invoices and collections at a glance"
-        action={
-          <button
-            onClick={() => refetch()}
-            disabled={isFetching}
-            className="group flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-violet-500/30 hover:bg-violet-500/10 transition-all duration-200 active:scale-90 disabled:opacity-50"
-            style={{ color: "#c084fc" }}
-          >
-            <RefreshCw size={12} className={`transition-transform duration-500 ${isFetching ? "animate-spin" : "group-hover:rotate-180"}`} />
-            Refresh
-          </button>
-        }
-      >
-        {isError && (
-          <div className="px-4 py-3 rounded-lg bg-destructive/10 text-destructive text-sm border border-destructive/20">
-            Failed to load dashboard data. Please refresh the page.
+      <div className="crm-sheet sheet-in">
+        {/* Title block */}
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "stretch" }}>
+          <div style={{ flex: "1 1 320px", padding: "22px 22px 20px", minWidth: 0 }}>
+            <p className="label">CivilierERP · Sales</p>
+            <h1 className="title" style={{ fontSize: "clamp(28px, 3.4vw, 44px)", margin: "8px 0 0", lineHeight: 1.05 }}>Sales overview</h1>
+            <p style={{ margin: "8px 0 0", fontSize: 13, color: "var(--ink-2)", maxWidth: "60ch" }}>
+              Sale orders, invoices and collections at a glance.
+            </p>
+          </div>
+          <div className="mono titleblock" style={{ flex: "1 1 280px", maxWidth: 380, minWidth: 240, display: "grid", gridTemplateColumns: "1fr 1fr", borderLeft: "1px solid var(--ink)", fontSize: 13 }}>
+            <div style={{ gridColumn: "1 / -1", padding: "10px 14px", borderBottom: "1px solid var(--ink)" }}>
+              <span className="label" style={{ display: "block", marginBottom: 3 }}>Date</span>
+              {readAt.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+            </div>
+            <div style={{ padding: "10px 14px", borderRight: "1px solid var(--ink)" }}>
+              <span className="label" style={{ display: "block", marginBottom: 3 }}>Read at</span>
+              {readAt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+            </div>
+            <div style={{ padding: "10px 14px", display: "flex", alignItems: "flex-end" }}>
+              <button onClick={() => refetch()} disabled={isFetching} className="label link" style={{ color: "var(--blue)" }}>
+                {isFetching ? "Reading…" : "Re-read"}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {isError && !d && (
+          <div className="cell" style={{ color: "var(--red)", fontSize: 13 }}>
+            Could not load the sales figures{(error as Error)?.message ? ` (${(error as Error).message})` : ""}. Use Re-read to try again.
           </div>
         )}
 
-        {/* ── Primary stat cards ────────────────────────────────────────────── */}
-        <SalesSection
-          title="Today's Activity"
-          icon={ShoppingCart}
-          accentColor="#a855f7"
-        >
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            {isLoading ? (
-              Array.from({ length: 4 }).map((_, i) => (
-                <StatCardSkeleton key={i} />
-              ))
-            ) : (
-              <>
-                <SalesGlassCard
-                  label="Sale Orders Today"
-                  value={data.saleOrders.todayCount.toString()}
-                  sub={`${data.saleOrders.totalCount} total orders`}
-                  icon={ShoppingCart}
-                  accentColor="#a855f7"
-                  onClick={() => navigate("/sales/sale-order")}
-                  trend="up"
-                />
-                <SalesGlassCard
-                  label="Invoices Today"
-                  value={data.saleInvoices.todayCount.toString()}
-                  sub={`${data.saleInvoices.totalCount} total invoices`}
-                  icon={Receipt}
-                  accentColor="#d946ef"
-                  onClick={() => navigate("/sales/sale-invoice")}
-                  trend="up"
-                />
-                <SalesGlassCard
-                  label="Total Order Value"
-                  value={fmt(data.saleOrders.totalAmount)}
-                  sub={`${data.saleOrders.approvedCount} approved · ${data.saleOrders.pendingCount} pending`}
-                  icon={TrendingUp}
-                  accentColor="#8b5cf6"
-                  onClick={() => navigate("/sales/sale-order")}
-                />
-                <SalesGlassCard
-                  label="Amount Received"
-                  value={fmt(data.saleInvoices.totalReceived)}
-                  sub={`of ${fmt(data.saleInvoices.totalAmount)} invoiced`}
-                  icon={CreditCard}
-                  accentColor="#10b981"
-                  onClick={() => navigate("/sales/payment")}
-                />
-              </>
-            )}
-          </div>
-        </SalesSection>
-
-        {/* ── Pipeline summary ─────────────────────────────────────────────── */}
-        <SalesSection
-          title="Pipeline Summary"
-          icon={Clock}
-          accentColor="#a855f7"
-        >
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            {isLoading ? (
-              Array.from({ length: 4 }).map((_, i) => (
-                <StatCardSkeleton key={i} />
-              ))
-            ) : (
-              <>
-                <SalesGlassCard
-                  label="Draft Orders"
-                  value={data.saleOrders.draftCount.toString()}
-                  sub="Not yet submitted"
-                  icon={Clock}
-                  accentColor="#3b82f6"
-                  onClick={() => navigate("/sales/sale-order")}
-                />
-                <SalesGlassCard
-                  label="Pending Approval"
-                  value={data.saleOrders.pendingCount.toString()}
-                  sub="Awaiting approval"
-                  icon={Clock}
-                  accentColor="#f59e0b"
-                  onClick={() => navigate("/sales/sale-order")}
-                />
-                <SalesGlassCard
-                  label="Invoices Paid"
-                  value={data.saleInvoices.paidCount.toString()}
-                  sub="Fully settled"
-                  icon={CheckCircle2}
-                  accentColor="#10b981"
-                  onClick={() => navigate("/sales/sale-invoice")}
-                />
-                <SalesGlassCard
-                  label="Invoices Pending"
-                  value={data.saleInvoices.pendingCount.toString()}
-                  sub="Payment outstanding"
-                  icon={Clock}
-                  accentColor="#ef4444"
-                  onClick={() => navigate("/sales/sale-invoice")}
-                />
-              </>
-            )}
-          </div>
-        </SalesSection>
-
-        {/* ── Recent tables ─────────────────────────────────────────────────── */}
-        <SalesSection title="Recent Activity" icon={Receipt} accentColor="#a855f7">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* Recent Sale Orders */}
-            <div className="rounded-xl overflow-hidden" style={tableGlass}>
-              <div
-                className="flex items-center justify-between px-4 py-3 border-b"
-                style={{
-                  borderColor: isDark
-                    ? "rgba(168,85,247,0.15)"
-                    : "rgba(168,85,247,0.12)",
-                }}
-              >
-                <div className="flex items-center gap-2">
-                  <div
-                    className="w-5 h-5 rounded-md flex items-center justify-center"
-                    style={{ background: "rgba(168,85,247,0.15)" }}
-                  >
-                    <ShoppingCart size={11} style={{ color: "#a855f7" }} />
-                  </div>
-                  <span
-                    className="text-xs font-heading font-semibold"
-                    style={{ color: isDark ? "#e2e8f0" : "#1e1b4b" }}
-                  >
-                    Recent Sale Orders
-                  </span>
-                </div>
-                <button
-                  onClick={() => navigate("/sales/sale-order")}
-                  className="text-[0.625rem] font-medium hover:opacity-70 transition-opacity"
-                  style={{ color: "#a855f7" }}
-                >
-                  View all →
+        {/* A — figures */}
+        <Detail tag="A" title="Right now" note="Open a figure for its page">
+          {isLoading ? (
+            <div className="grid4" style={{ gap: 16 }}>{Array.from({ length: 8 }).map((_, i) => <Skel key={i} h={58} />)}</div>
+          ) : (
+            <div className="grid4" style={{ rowGap: 22, columnGap: 24 }}>
+              {figures.map((f) => (
+                <button key={f.label} onClick={() => navigate(f.path)} style={{ textAlign: "left", minWidth: 0 }}>
+                  <span className="label link" style={{ display: "inline-block", marginBottom: 8 }}>{f.label}</span>
+                  <span className="figure" style={{ display: "block", fontSize: "clamp(22px, 2.4vw, 32px)", color: f.warn ? "var(--red)" : undefined }}>{f.value}</span>
+                  <span style={{ display: "block", fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{f.sub}</span>
                 </button>
-              </div>
-              {isLoading ? (
-                <div className="p-4 space-y-2">
-                  {Array.from({ length: 4 }).map((_, i) => (
-                    <Skeleton key={i} className="h-7 w-full" />
-                  ))}
-                </div>
-              ) : data.recentSaleOrders.length === 0 ? (
-                <div className="text-center text-muted-foreground py-10 text-sm">
-                  No sale orders recorded yet
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow
-                        className="border-b"
-                        style={{
-                          borderColor: isDark
-                            ? "rgba(168,85,247,0.10)"
-                            : "rgba(168,85,247,0.08)",
-                        }}
-                      >
-                        <TableHead className="text-xs">Doc No</TableHead>
-                        <TableHead className="text-xs">To</TableHead>
-                        <TableHead className="text-xs text-right">
-                          Amount
-                        </TableHead>
-                        <TableHead className="text-xs">Date</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {data.recentSaleOrders.map((o) => (
-                        <TableRow
-                          key={o.SaleOrderID}
-                          className="border-b border-violet-500/5 hover:bg-violet-500/5 transition-colors"
-                        >
-                          <TableCell className="text-xs font-mono font-medium">
-                            {o.DocNo || "—"}
-                          </TableCell>
-                          <TableCell className="text-xs truncate max-w-[120px]">
-                            {o.ToCompanyName || "—"}
-                          </TableCell>
-                          <TableCell
-                            className="text-xs text-right font-semibold"
-                            style={{ color: "#a855f7" }}
-                          >
-                            {o.TotalAmount != null ? fmt(o.TotalAmount) : "—"}
-                          </TableCell>
-                          <TableCell className="text-xs text-muted-foreground">
-                            {fmtDate(o.OrderDate)}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
+              ))}
             </div>
+          )}
+        </Detail>
 
-            {/* Recent Sale Invoices */}
-            <div className="rounded-xl overflow-hidden" style={tableGlass}>
-              <div
-                className="flex items-center justify-between px-4 py-3 border-b"
-                style={{
-                  borderColor: isDark
-                    ? "rgba(168,85,247,0.15)"
-                    : "rgba(168,85,247,0.12)",
-                }}
-              >
-                <div className="flex items-center gap-2">
-                  <div
-                    className="w-5 h-5 rounded-md flex items-center justify-center"
-                    style={{ background: "rgba(217,70,239,0.15)" }}
-                  >
-                    <Receipt size={11} style={{ color: "#d946ef" }} />
-                  </div>
-                  <span
-                    className="text-xs font-heading font-semibold"
-                    style={{ color: isDark ? "#e2e8f0" : "#1e1b4b" }}
-                  >
-                    Recent Sale Invoices
-                  </span>
-                </div>
-                <button
-                  onClick={() => navigate("/sales/sale-invoice")}
-                  className="text-[0.625rem] font-medium hover:opacity-70 transition-opacity"
-                  style={{ color: "#d946ef" }}
-                >
-                  View all →
-                </button>
+        {/* B + C — recent */}
+        <div className="grid2">
+          <Detail tag="B" title="Recent sale orders" note={viewAll("/sales/sale-order")}>
+            {isLoading || !d ? (<><Skel h={26} /><Skel h={26} /><Skel h={26} /></>) : d.recentSaleOrders.length === 0 ? empty("No sale orders recorded yet.") : (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ minWidth: 380 }}>
+                  <thead>
+                    <tr>
+                      <th>Doc no</th>
+                      <th>To</th>
+                      <th style={{ textAlign: "right" }}>Amount</th>
+                      <th>Date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {d.recentSaleOrders.map((o) => (
+                      <tr key={o.SaleOrderID} className="go" onClick={() => navigate("/sales/sale-order")}>
+                        <td className="mono" style={{ whiteSpace: "nowrap" }}>{o.DocNo || "—"}</td>
+                        <td style={{ maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.ToCompanyName || "—"}</td>
+                        <td className="figure" style={{ textAlign: "right", whiteSpace: "nowrap" }}>{o.TotalAmount != null ? fmt(o.TotalAmount) : "—"}</td>
+                        <td className="mono" style={{ whiteSpace: "nowrap", color: "var(--graphite)" }}>{fmtDate(o.OrderDate)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-              {isLoading ? (
-                <div className="p-4 space-y-2">
-                  {Array.from({ length: 4 }).map((_, i) => (
-                    <Skeleton key={i} className="h-7 w-full" />
-                  ))}
-                </div>
-              ) : data.recentSaleInvoices.length === 0 ? (
-                <div className="text-center text-muted-foreground py-10 text-sm">
-                  No sale invoices recorded yet
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow
-                        className="border-b"
-                        style={{
-                          borderColor: isDark
-                            ? "rgba(168,85,247,0.10)"
-                            : "rgba(168,85,247,0.08)",
-                        }}
-                      >
-                        <TableHead className="text-xs">Customer</TableHead>
-                        <TableHead className="text-xs text-right">
-                          Amount
-                        </TableHead>
-                        <TableHead className="text-xs">Status</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {data.recentSaleInvoices.map((inv) => (
-                        <TableRow
-                          key={inv.SaleInvoiceID}
-                          className="border-b border-violet-500/5 hover:bg-violet-500/5 transition-colors"
-                        >
-                          <TableCell className="text-xs font-medium truncate max-w-[120px]">
-                            {inv.CustomerName || "—"}
-                          </TableCell>
-                          <TableCell
-                            className="text-xs text-right font-semibold"
-                            style={{ color: "#d946ef" }}
-                          >
-                            {inv.Amount != null ? fmt(inv.Amount) : "—"}
-                          </TableCell>
-                          <TableCell>
-                            <span
-                              className={`text-[0.625rem] px-2 py-0.5 rounded-full font-medium ${
-                                inv.PaymentStatus === "Paid"
-                                  ? "bg-emerald-500/15 text-emerald-500"
-                                  : "bg-amber-500/15 text-amber-500"
-                              }`}
-                            >
-                              {inv.PaymentStatus || "Pending Payment"}
-                            </span>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-            </div>
-          </div>
-        </SalesSection>
+            )}
+          </Detail>
 
-        {/* ── Quick Actions ─────────────────────────────────────────────────── */}
-        <SalesSection title="Quick Actions" icon={CreditCard} accentColor="#a855f7">
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            {[
-              {
-                label: "New Sale Order",
-                icon: ShoppingCart,
-                path: "/sales/sale-order",
-                color: "#a855f7",
-              },
-              {
-                label: "New Sale Invoice",
-                icon: Receipt,
-                path: "/sales/sale-invoice",
-                color: "#d946ef",
-              },
-              {
-                label: "Received Payments",
-                icon: CreditCard,
-                path: "/sales/payment",
-                color: "#10b981",
-              },
-            ].map(({ label, icon: Icon, path, color }) => (
-              <button
-                key={path}
-                onClick={() => navigate(path)}
-                className="group flex flex-col items-center gap-3 py-5 rounded-xl transition-all duration-200 active:scale-95"
-                style={{
-                  background: isDark ? `${color}0A` : `${color}08`,
-                  border: `1px solid ${color}25`,
-                }}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLElement).style.background =
-                    `${color}18`;
-                  (e.currentTarget as HTMLElement).style.borderColor =
-                    `${color}40`;
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLElement).style.background = isDark
-                    ? `${color}0A`
-                    : `${color}08`;
-                  (e.currentTarget as HTMLElement).style.borderColor =
-                    `${color}25`;
-                }}
-              >
-                <div
-                  className="w-10 h-10 rounded-xl flex items-center justify-center transition-transform group-hover:scale-110"
-                  style={{
-                    background: `${color}20`,
-                    border: `1px solid ${color}35`,
-                  }}
-                >
-                  <Icon size={18} style={{ color }} />
-                </div>
-                <span
-                  className="text-xs font-medium text-center leading-tight"
-                  style={{ color: isDark ? "#cbd5e1" : "#475569" }}
-                >
-                  {label}
-                </span>
+          <Detail tag="C" title="Recent sale invoices" note={viewAll("/sales/sale-invoice")}>
+            {isLoading || !d ? (<><Skel h={26} /><Skel h={26} /><Skel h={26} /></>) : d.recentSaleInvoices.length === 0 ? empty("No sale invoices recorded yet.") : (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ minWidth: 340 }}>
+                  <thead>
+                    <tr>
+                      <th>Customer</th>
+                      <th style={{ textAlign: "right" }}>Amount</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {d.recentSaleInvoices.map((inv) => {
+                      const status = inv.PaymentStatus || "Pending Payment";
+                      return (
+                        <tr key={inv.SaleInvoiceID} className="go" onClick={() => navigate("/sales/sale-invoice")}>
+                          <td style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{inv.CustomerName || "—"}</td>
+                          <td className="figure" style={{ textAlign: "right", whiteSpace: "nowrap" }}>{inv.Amount != null ? fmt(inv.Amount) : "—"}</td>
+                          <td><SheetMark text={status} tone={status === "Paid" ? "done" : "waiting"} /></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Detail>
+        </div>
+
+        {/* D — shortcuts */}
+        <Detail tag="D" title="Go to">
+          <div className="grid3" style={{ gap: 0 }}>
+            {SHORTCUTS.map((s) => (
+              <button key={s.path} onClick={() => navigate(s.path)} className="row"
+                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 10px", borderBottom: "1px solid var(--rule-soft)" }}>
+                <span className="label link" style={{ color: "var(--ink)" }}>{s.label}</span>
+                <span style={{ color: "var(--graphite)", fontSize: 13 }}>→</span>
               </button>
             ))}
           </div>
-        </SalesSection>
-      </SalesShell>
-    </>
+        </Detail>
+      </div>
+    </div>
   );
-};
-
-export default SalesDashboard;
+}

@@ -4,14 +4,13 @@ import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tansta
 import { ServerPager } from "@/components/ServerPager";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { SalesShell } from "@/components/sales/SalesShell";
+import { SheetShell } from "@/components/sheet/Sheet";
+import { KEY_INK, KEY_LINE } from "@/components/sheet/sheetParts";
+import { HR_HEAD, HR_NUM } from "@/components/hrpayroll/HrUi";
+import { SheetBox, SheetTabs, TH, TD, ICON_ACT, ICON_ACT_RED } from "@/components/maintenance/maintParts";
 import {
-  ShoppingCart,
   ArrowLeftRight,
-  Building2,
-  FolderKanban,
   Warehouse,
-  Package,
   Search,
   ChevronDown,
   Plus,
@@ -95,76 +94,44 @@ const emptyItem = (): SOItem => ({
   glHeadLabel: null,
 });
 
-type Accent = "blue" | "violet";
-
-const ACCENT: Record<
-  Accent,
-  { border: string; bg: string; icon: string; label: string; solidBg: string }
-> = {
-  blue: {
-    border: "border-blue-400/40 focus:border-blue-500/60",
-    bg: "bg-blue-500/5",
-    icon: "text-blue-500",
-    label: "text-blue-600 dark:text-blue-400",
-    solidBg: "bg-blue-500/10 border-blue-400/20 text-blue-600",
-  },
-  violet: {
-    border: "border-violet-400/40 focus:border-violet-500/60",
-    bg: "bg-violet-500/5",
-    icon: "text-violet-500",
-    label: "text-violet-600 dark:text-violet-400",
-    solidBg: "bg-violet-500/10 border-violet-400/20 text-violet-600",
-  },
-};
+// ─── Sheet styles (docs/DESIGN.md) ────────────────────────────────────────────
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const INPUT =
+  "w-full h-9 px-3 border border-foreground/30 bg-card text-sm text-foreground outline-none focus:border-foreground disabled:opacity-50 rounded-none";
+const MUTED_BOX =
+  "flex items-center gap-2 h-9 px-3 border border-dashed border-foreground/30 text-xs text-muted-foreground";
+const CELL =
+  "w-full h-9 px-2 border bg-card text-xs text-foreground outline-none focus:border-foreground disabled:opacity-50 rounded-none";
 
 // ─── Generic Select ───────────────────────────────────────────────────────────
 function SelectField({
-  icon: Icon,
   label,
   value,
   onChange,
   options,
   placeholder,
-  accent,
   disabled,
 }: {
-  icon: React.ElementType;
   label: string;
   value: string;
   onChange: (v: string) => void;
   options: { value: string; label: string }[];
   placeholder: string;
-  accent: Accent;
   disabled?: boolean;
 }) {
-  const c = ACCENT[accent];
   return (
     <div className="flex-1 space-y-1.5 min-w-0">
-      <p
-        className={`text-[0.6875rem] font-semibold uppercase tracking-wider ${c.label}`}
-      >
-        {label}
-      </p>
+      <p className={LBL}>{label}</p>
       <div className="relative">
-        <span className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none z-10">
-          <Icon size={14} className={c.icon} />
-        </span>
         <select
           value={value}
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
-          className={`w-full pl-9 pr-8 py-2.5 rounded-xl border-2 text-sm text-foreground outline-none appearance-none transition-colors disabled:opacity-50 ${c.border} ${c.bg}`}
-          style={{ colorScheme: "dark" }}
+          className={`${INPUT} pr-8 appearance-none`}
         >
-          <option value="" className="bg-popover text-foreground">
-            {placeholder}
-          </option>
+          <option value="">{placeholder}</option>
           {options.map((o) => (
-            <option
-              key={o.value}
-              value={o.value}
-              className="bg-popover text-foreground"
-            >
+            <option key={o.value} value={o.value}>
               {o.label}
             </option>
           ))}
@@ -183,20 +150,16 @@ function GodownPanel({
   godowns,
   value,
   onChange,
-  accent,
   placeholder,
 }: {
   godowns: Godown[];
   value: number | null;
   onChange: (v: number | null) => void;
-  accent: Accent;
   placeholder: string;
 }) {
-  const c = ACCENT[accent];
-
   if (godowns.length === 0) {
     return (
-      <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl border-2 border-dashed border-border bg-muted/20 text-xs text-muted-foreground">
+      <div className={MUTED_BOX}>
         <AlertCircle size={13} className="shrink-0" />
         No godown linked to this project yet
       </div>
@@ -206,14 +169,10 @@ function GodownPanel({
   if (godowns.length === 1) {
     const g = godowns[0];
     return (
-      <div
-        className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border-2 ${c.border} ${c.bg}`}
-      >
-        <Warehouse size={14} className={`shrink-0 ${c.icon}`} />
+      <div className="flex items-center gap-2 min-h-9 px-3 py-1.5 border border-foreground/30 bg-foreground/5">
+        <Warehouse size={13} className="shrink-0 text-muted-foreground" />
         <div className="min-w-0">
-          <p className="text-xs font-semibold text-foreground truncate">
-            {g.GodownName}
-          </p>
+          <p className="text-xs font-semibold text-foreground truncate">{g.GodownName}</p>
           <p className="text-[0.625rem] text-muted-foreground">{g.GodownCode}</p>
         </div>
       </div>
@@ -222,16 +181,10 @@ function GodownPanel({
 
   return (
     <div className="relative">
-      <span className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none z-10">
-        <Warehouse size={14} className={c.icon} />
-      </span>
       <select
         value={value ?? ""}
-        onChange={(e) =>
-          onChange(e.target.value ? Number(e.target.value) : null)
-        }
-        className={`w-full pl-9 pr-8 py-2.5 rounded-xl border-2 text-sm text-foreground outline-none appearance-none transition-colors ${c.border} ${c.bg}`}
-        style={{ colorScheme: "dark" }}
+        onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
+        className={`${INPUT} pr-8 appearance-none`}
       >
         <option value="">{placeholder}</option>
         {godowns.map((g) => (
@@ -251,7 +204,6 @@ function GodownPanel({
 // ─── Company + Project + Godown side panel ──────────────────────────────────
 function SidePanel({
   title,
-  accent,
   companyOptions,
   companyId,
   onCompanyChange,
@@ -263,7 +215,6 @@ function SidePanel({
   onGodownChange,
 }: {
   title: string;
-  accent: Accent;
   companyOptions: { value: string; label: string }[];
   companyId: string;
   onCompanyChange: (v: string) => void;
@@ -274,53 +225,30 @@ function SidePanel({
   godownId: number | null;
   onGodownChange: (v: number | null) => void;
 }) {
-  const c = ACCENT[accent];
   return (
-    <div
-      className={`flex-1 min-w-0 rounded-xl border border-border bg-card p-4 space-y-3 border-l-4 ${
-        accent === "blue" ? "border-l-blue-500" : "border-l-violet-500"
-      }`}
-    >
-      <p className={`text-xs font-bold uppercase tracking-wider ${c.label}`}>
-        {title}
-      </p>
+    <div className="flex-1 min-w-0 bg-card border border-foreground p-4 space-y-3">
+      <p className={HR_HEAD}>{title}</p>
       <SelectField
-        icon={Building2}
         label="Company"
         value={companyId}
         onChange={onCompanyChange}
         options={companyOptions}
         placeholder="Select company…"
-        accent={accent}
       />
       <SelectField
-        icon={FolderKanban}
         label="Project"
         value={projectId}
         onChange={onProjectChange}
         options={projectOptions}
         placeholder={companyId ? "Select project…" : "Select company first"}
-        accent={accent}
         disabled={!companyId}
       />
       <div className="space-y-1.5">
-        <p
-          className={`text-[0.6875rem] font-semibold uppercase tracking-wider ${c.label}`}
-        >
-          Godown
-        </p>
+        <p className={LBL}>Godown</p>
         {projectId ? (
-          <GodownPanel
-            godowns={godowns}
-            value={godownId}
-            onChange={onGodownChange}
-            accent={accent}
-            placeholder="Select godown…"
-          />
+          <GodownPanel godowns={godowns} value={godownId} onChange={onGodownChange} placeholder="Select godown…" />
         ) : (
-          <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl border-2 border-dashed border-border bg-muted/20 text-xs text-muted-foreground">
-            Select a project to resolve its godown
-          </div>
+          <div className={MUTED_BOX}>Select a project to resolve its godown</div>
         )}
       </div>
     </div>
@@ -386,171 +314,154 @@ function SOItemRow({
 
   return (
     <div
-      className={`p-3 rounded-xl border transition-colors space-y-2 ${
-        overLimit
-          ? "border-red-400/40 bg-red-500/5"
-          : "border-border bg-muted/20"
+      className={`p-3 border space-y-2 transition-colors ${
+        overLimit ? "border-destructive bg-destructive/5" : "border-foreground/20"
       }`}
     >
-    <div className="grid grid-cols-12 gap-2 items-start">
-      {/* # */}
-      <div className="col-span-1 flex items-center h-9 text-xs font-mono text-muted-foreground">
-        {idx + 1}
-      </div>
+      <div className="grid grid-cols-12 gap-2 items-start">
+        {/* # */}
+        <div className={`col-span-1 flex items-center h-9 text-xs text-muted-foreground ${HR_NUM}`}>
+          {idx + 1}
+        </div>
 
-      {/* Item search */}
-      <div className="col-span-3 relative" ref={containerRef}>
-        <div className="relative">
-          <Search
-            size={12}
-            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-          />
+        {/* Item search */}
+        <div className="col-span-3 relative" ref={containerRef}>
+          <div className="relative">
+            <Search
+              size={12}
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+            />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setOpen(true);
+                if (!e.target.value) {
+                  onUpdate(idx, {
+                    itemId: "",
+                    itemName: "",
+                    uom: "",
+                    availableQty: 0,
+                  });
+                }
+              }}
+              onFocus={() => setOpen(true)}
+              placeholder={isLoadingStock ? "Loading items…" : "Search item…"}
+              disabled={isLoadingStock}
+              className={`${CELL} pl-8 border-foreground/30`}
+            />
+          </div>
+
+          {open && (
+            <div className="absolute z-50 top-full left-0 right-0 mt-1 border border-foreground bg-card overflow-hidden">
+              {filtered.length === 0 ? (
+                <div className="px-3 py-4 text-xs text-muted-foreground text-center">
+                  {search.trim() ? `No items match "${search}"` : "No items in stock"}
+                </div>
+              ) : (
+                <div className="max-h-52 overflow-y-auto">
+                  {filtered.map((a) => (
+                    <button
+                      key={a.itemId}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        selectItem(a);
+                      }}
+                      className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-primary/10 text-left transition-colors border-b border-foreground/10 last:border-0"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium text-foreground truncate">{a.itemName}</p>
+                        <p className="text-[0.625rem] text-muted-foreground mt-0.5">{a.uom}</p>
+                      </div>
+                      <span
+                        className={`text-[0.625rem] font-semibold shrink-0 ml-2 ${HR_NUM} ${
+                          a.available > 0 ? "text-primary" : "text-destructive"
+                        }`}
+                      >
+                        {fmtNum(a.available)} {a.uom}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Available */}
+        <div className="col-span-1 flex items-center h-9">
+          {item.itemId && (
+            <span className={`text-xs font-semibold text-primary whitespace-nowrap ${HR_NUM}`}>
+              {fmtNum(item.availableQty)}
+            </span>
+          )}
+        </div>
+
+        {/* Qty */}
+        <div className="col-span-1">
           <input
-            type="text"
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setOpen(true);
-              if (!e.target.value) {
-                onUpdate(idx, {
-                  itemId: "",
-                  itemName: "",
-                  uom: "",
-                  availableQty: 0,
-                });
-              }
-            }}
-            onFocus={() => setOpen(true)}
-            placeholder={isLoadingStock ? "Loading items…" : "Search item…"}
-            disabled={isLoadingStock}
-            className="w-full pl-8 pr-3 py-2 rounded-lg border border-border bg-background text-xs text-foreground outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500/50 disabled:opacity-60"
+            type="number"
+            min="0.01"
+            step="any"
+            value={item.qty}
+            onChange={(e) => onUpdate(idx, { qty: e.target.value })}
+            placeholder="Qty"
+            disabled={!item.itemId}
+            className={`${CELL} ${HR_NUM} ${overLimit ? "border-destructive" : "border-foreground/30"}`}
+          />
+          {overLimit && (
+            <p className={`text-[0.625rem] text-destructive mt-0.5 whitespace-nowrap ${HR_NUM}`}>
+              Max: {fmtNum(item.availableQty)}
+            </p>
+          )}
+        </div>
+
+        {/* UOM */}
+        <div className="col-span-1">
+          <input
+            value={item.uom}
+            readOnly
+            placeholder="UOM"
+            className={`${CELL} border-foreground/20 bg-foreground/5 text-muted-foreground`}
           />
         </div>
 
-        {open && (
-          <div className="absolute z-50 top-full left-0 right-0 mt-1 rounded-lg border border-border bg-popover shadow-lg overflow-hidden">
-            {filtered.length === 0 ? (
-              <div className="px-3 py-4 text-xs text-muted-foreground text-center">
-                {search.trim()
-                  ? `No items match "${search}"`
-                  : "No items in stock"}
-              </div>
-            ) : (
-              <div className="max-h-52 overflow-y-auto">
-                {filtered.map((a) => (
-                  <button
-                    key={a.itemId}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      selectItem(a);
-                    }}
-                    className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-muted/60 text-left transition-colors border-b border-border/40 last:border-0"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-xs font-medium text-foreground truncate">
-                        {a.itemName}
-                      </p>
-                      <p className="text-[0.625rem] text-muted-foreground mt-0.5">
-                        {a.uom}
-                      </p>
-                    </div>
-                    <span
-                      className={`text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-full shrink-0 ml-2 ${
-                        a.available > 0
-                          ? "bg-emerald-500/10 text-emerald-600"
-                          : "bg-red-500/10 text-red-500"
-                      }`}
-                    >
-                      {fmtNum(a.available)} {a.uom}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Available badge */}
-      <div className="col-span-1 flex items-center h-9">
-        {item.itemId && (
-          <span className="text-[0.625rem] text-emerald-600 bg-emerald-500/10 px-1.5 py-0.5 rounded-full font-semibold whitespace-nowrap">
-            {fmtNum(item.availableQty)}
+        {/* Rate */}
+        <div className="col-span-2 relative">
+          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none">
+            <IndianRupee size={11} />
           </span>
-        )}
-      </div>
+          <input
+            type="number"
+            min="0"
+            step="any"
+            value={item.rate}
+            onChange={(e) => onUpdate(idx, { rate: e.target.value })}
+            placeholder="Rate"
+            disabled={!item.itemId}
+            className={`${CELL} pl-6 border-foreground/30 ${HR_NUM}`}
+          />
+        </div>
 
-      {/* Qty */}
-      <div className="col-span-1">
-        <input
-          type="number"
-          min="0.01"
-          step="any"
-          value={item.qty}
-          onChange={(e) => onUpdate(idx, { qty: e.target.value })}
-          placeholder="Qty"
-          disabled={!item.itemId}
-          className={`w-full px-2 py-2 rounded-lg border text-xs text-foreground bg-background outline-none disabled:opacity-50 ${
-            overLimit ? "border-red-400" : "border-border"
-          }`}
-        />
-        {overLimit && (
-          <p className="text-[0.625rem] text-red-500 mt-0.5 whitespace-nowrap">
-            Max: {fmtNum(item.availableQty)}
-          </p>
-        )}
-      </div>
+        {/* Amount */}
+        <div className="col-span-2 flex items-center h-9">
+          <span className={`text-xs font-semibold text-foreground truncate ${HR_NUM}`}>
+            {item.itemId ? fmtAmt(amount) : "—"}
+          </span>
+        </div>
 
-      {/* UOM */}
-      <div className="col-span-1">
-        <input
-          value={item.uom}
-          readOnly
-          placeholder="UOM"
-          className="w-full px-2 py-2 rounded-lg border border-border bg-muted text-xs text-muted-foreground outline-none"
-        />
+        {/* Remove */}
+        <div className="col-span-1 flex items-center h-9 justify-end">
+          <button onClick={() => onRemove(idx)} className={ICON_ACT_RED} title="Remove item">
+            <Trash2 size={13} />
+          </button>
+        </div>
       </div>
-
-      {/* Rate */}
-      <div className="col-span-2 relative">
-        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none">
-          <IndianRupee size={11} />
-        </span>
-        <input
-          type="number"
-          min="0"
-          step="any"
-          value={item.rate}
-          onChange={(e) => onUpdate(idx, { rate: e.target.value })}
-          placeholder="Rate"
-          disabled={!item.itemId}
-          className="w-full pl-6 pr-2 py-2 rounded-lg border border-border text-xs text-foreground bg-background outline-none disabled:opacity-50"
-        />
-      </div>
-
-      {/* Amount */}
-      <div className="col-span-2 flex items-center h-9">
-        <span className="text-xs font-semibold text-foreground truncate">
-          {item.itemId ? fmtAmt(amount) : "—"}
-        </span>
-      </div>
-
-      {/* Remove */}
-      <div className="col-span-1 flex items-center h-9 justify-end">
-        <button
-          onClick={() => onRemove(idx)}
-          className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition-colors"
-        >
-          <Trash2 size={13} />
-        </button>
-      </div>
-    </div>
 
       {/* GL Head — which revenue ledger this item posts to once invoiced */}
       <div className="flex items-center gap-2 pl-8">
-        <span className="text-[0.625rem] uppercase tracking-widest text-muted-foreground shrink-0">
-          GL Head
-        </span>
+        <span className={`${LBL} shrink-0`}>GL Head</span>
         <div className="flex-1 max-w-xs">
           <GLAccountSelect
             value={item.glHeadId}
@@ -608,44 +519,23 @@ function SaleOrderHistory() {
   };
 
   return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden">
-      <div className="px-5 py-3 border-b border-border flex items-center justify-between">
-        <div>
-          <p className="text-sm font-heading font-semibold text-foreground">
-            Sale Order History
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Recent inter-company / inter-project sale orders
-          </p>
-        </div>
-        <button
-          onClick={() => refetch()}
-          disabled={isFetching}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
-        >
-          <RefreshCw size={12} className={isFetching ? "animate-spin" : ""} />{" "}
-          Refresh
+    <SheetBox
+      title="Sale Order History"
+      note={total ? `${fmtNum(total)} orders` : undefined}
+      flush
+      action={
+        <button onClick={() => refetch()} disabled={isFetching} className={`${KEY_LINE} h-8 px-3`}>
+          <RefreshCw size={12} className={isFetching ? "animate-spin" : ""} /> Refresh
         </button>
-      </div>
-      <div className="overflow-x-auto">
+      }
+    >
+      <p className="px-4 pt-3 text-xs text-muted-foreground">Recent inter-company / inter-project sale orders</p>
+      <div className="overflow-x-auto mt-2">
         <table className="w-full text-xs">
-          <thead className="border-b border-border bg-muted/40">
+          <thead>
             <tr>
-              {[
-                "Doc No",
-                "Date",
-                "From",
-                "To",
-                "Items",
-                "Amount",
-                "Status",
-                "By",
-                "",
-              ].map((h) => (
-                <th
-                  key={h}
-                  className="px-4 py-3 text-left font-semibold text-muted-foreground whitespace-nowrap"
-                >
+              {["Doc No", "Date", "From", "To", "Items", "Amount", "Status", "By", ""].map((h) => (
+                <th key={h} className={`${TH} ${h === "Amount" ? "text-right" : ""}`}>
                   {h}
                 </th>
               ))}
@@ -654,59 +544,44 @@ function SaleOrderHistory() {
           <tbody>
             {isLoading ? (
               Array.from({ length: 5 }).map((_, i) => (
-                <tr key={i} className="border-b border-border">
+                <tr key={i}>
                   {Array.from({ length: 9 }).map((_, j) => (
-                    <td key={j} className="px-4 py-3">
-                      <div className="h-3 bg-muted rounded animate-pulse" />
+                    <td key={j} className={TD}>
+                      <div className="h-3 bg-foreground/10 animate-pulse" />
                     </td>
                   ))}
                 </tr>
               ))
             ) : orders.length === 0 ? (
               <tr>
-                <td
-                  colSpan={9}
-                  className="px-4 py-12 text-center text-muted-foreground"
-                >
+                <td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">
                   No sale orders yet.
                 </td>
               </tr>
             ) : (
               orders.map((o) => (
-                <tr
-                  key={o.SaleOrderID}
-                  className="border-b border-border hover:bg-muted/20 transition-colors"
-                >
-                  <td className="px-4 py-3 font-mono text-primary font-semibold whitespace-nowrap">
-                    {o.DocNo}
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
-                    {fmtDate(o.OrderDate)}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="inline-flex flex-col gap-0.5 px-2 py-1 rounded-lg text-[0.625rem] bg-blue-500/10 text-blue-600 border border-blue-400/20">
-                      <span className="font-semibold">{o.FromCompanyName}</span>
-                      <span className="opacity-80">
-                        {o.FromProjectName} · {o.FromGodownName}
-                      </span>
+                <tr key={o.SaleOrderID} className="hover:bg-primary/5 transition-colors">
+                  <td className={`${TD} ${HR_NUM} font-semibold text-foreground whitespace-nowrap`}>{o.DocNo}</td>
+                  <td className={`${TD} ${HR_NUM} text-muted-foreground whitespace-nowrap`}>{fmtDate(o.OrderDate)}</td>
+                  <td className={TD}>
+                    <span className="block text-xs font-semibold text-foreground">{o.FromCompanyName}</span>
+                    <span className="block text-[0.625rem] text-muted-foreground">
+                      {o.FromProjectName} · {o.FromGodownName}
                     </span>
                   </td>
-                  <td className="px-4 py-3">
-                    <span className="inline-flex flex-col gap-0.5 px-2 py-1 rounded-lg text-[0.625rem] bg-violet-500/10 text-violet-600 border border-violet-400/20">
-                      <span className="font-semibold">{o.ToCompanyName}</span>
-                      <span className="opacity-80">
-                        {o.ToProjectName} · {o.ToGodownName}
-                      </span>
+                  <td className={TD}>
+                    <span className="block text-xs font-semibold text-foreground">{o.ToCompanyName}</span>
+                    <span className="block text-[0.625rem] text-muted-foreground">
+                      {o.ToProjectName} · {o.ToGodownName}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
-                    {o.SaleItems.length} item
-                    {o.SaleItems.length !== 1 ? "s" : ""}
+                  <td className={`${TD} ${HR_NUM} text-muted-foreground whitespace-nowrap`}>
+                    {o.SaleItems.length} item{o.SaleItems.length !== 1 ? "s" : ""}
                   </td>
-                  <td className="px-4 py-3 font-semibold text-foreground whitespace-nowrap">
+                  <td className={`${TD} ${HR_NUM} font-semibold text-foreground whitespace-nowrap text-right`}>
                     {fmtAmt(o.TotalAmount)}
                   </td>
-                  <td className="px-4 py-3">
+                  <td className={TD}>
                     <ApprovalStatusChain
                       table="SaleOrders"
                       recordId={o.SaleOrderID}
@@ -716,26 +591,22 @@ function SaleOrderHistory() {
                       preloadedLoading={soApprovalTrailsLoading}
                     />
                   </td>
-                  <td className="px-4 py-3 text-muted-foreground truncate max-w-[120px]">
+                  <td className={`${TD} text-muted-foreground truncate max-w-[120px]`}>
                     {o.CreatedBy?.split("@")[0] || "—"}
                   </td>
-                  <td className="px-4 py-3">
+                  <td className={TD}>
                     <div className="flex items-center gap-1">
-                      <button data-row-view
-                        onClick={() => setViewingOrder(o)}
-                        className="text-muted-foreground hover:bg-muted p-2 rounded-lg transition-colors"
-                        title="View"
-                      >
-                        <Eye size={15} />
+                      <button data-row-view onClick={() => setViewingOrder(o)} className={ICON_ACT} title="View">
+                        <Eye size={14} />
                       </button>
                       {rights.canDelete && (
                         <button
                           onClick={() => handleDelete(o)}
                           disabled={deleteMutation.isPending}
-                          className="text-muted-foreground hover:bg-red-500/10 hover:text-red-500 p-2 rounded-lg transition-colors disabled:opacity-50"
+                          className={ICON_ACT_RED}
                           title="Delete"
                         >
-                          <Trash2 size={15} />
+                          <Trash2 size={14} />
                         </button>
                       )}
                     </div>
@@ -753,7 +624,7 @@ function SaleOrderHistory() {
       {/*  VIEW / PRINT MODAL                                                */}
       {/* ══════════════════════════════════════════════════════════════════ */}
       {viewingOrder && createPortal(
-        <div className="fixed inset-0 z-[70] flex items-stretch sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
+        <div className="fixed inset-0 z-[70] flex items-stretch sm:items-center justify-center bg-foreground/40 p-0 sm:p-4">
           <style>{`
             @media print {
               body * { visibility: hidden; }
@@ -774,46 +645,35 @@ function SaleOrderHistory() {
               .so-print-modal .sticky { position: static !important; }
             }
           `}</style>
-          <div className="so-print-modal bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-3xl h-[100dvh] max-h-[100dvh] sm:h-auto sm:max-h-[88vh] overflow-y-auto">
+          <div
+            role="dialog"
+            className="so-print-modal bg-card border border-foreground w-full max-w-3xl h-[100dvh] max-h-[100dvh] sm:h-auto sm:max-h-[88vh] overflow-y-auto"
+          >
             {/* Modal header */}
-            <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-6 py-4 border-b border-border">
+            <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-6 py-4 border-b border-foreground">
               <div>
-                <h2 className="font-heading font-bold text-base">
-                  {viewingOrder.DocNo}
-                </h2>
-                <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mt-0.5">
-                  Sale Order
-                </p>
+                <p className={LBL}>Sale Order</p>
+                <h2 className={`font-heading font-bold text-lg tracking-tight mt-0.5 ${HR_NUM}`}>{viewingOrder.DocNo}</h2>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 print:hidden">
                 {rights.canPrint && (
-                  <button
-                    onClick={() => window.print()}
-                    title="Print Sale Order"
-                    className="p-2 hover:bg-muted rounded-lg transition-colors text-muted-foreground hover:text-foreground print:hidden"
-                  >
-                    <Printer size={18} />
+                  <button onClick={() => window.print()} title="Print Sale Order" className={`${KEY_LINE} h-8 px-3`}>
+                    <Printer size={12} /> Print
                   </button>
                 )}
-                <button
-                  onClick={() => setViewingOrder(null)}
-                  className="p-2 hover:bg-muted rounded-lg transition-colors print:hidden"
-                >
-                  <X size={18} />
+                <button onClick={() => setViewingOrder(null)} className={ICON_ACT} title="Close">
+                  <X size={16} />
                 </button>
               </div>
             </div>
 
             <div className="p-5 sm:p-6 space-y-6">
               {/* Meta grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 border-t border-l border-foreground/20">
                 {[
-                  { label: "Doc No", value: viewingOrder.DocNo, mono: true },
-                  { label: "Date", value: fmtDate(viewingOrder.OrderDate) },
-                  {
-                    label: "Created By",
-                    value: viewingOrder.CreatedBy?.split("@")[0] || "—",
-                  },
+                  { label: "Doc No", value: viewingOrder.DocNo, num: true },
+                  { label: "Date", value: fmtDate(viewingOrder.OrderDate), num: true },
+                  { label: "Created By", value: viewingOrder.CreatedBy?.split("@")[0] || "—" },
                   {
                     label: "From",
                     value: `${viewingOrder.FromCompanyName} · ${viewingOrder.FromProjectName} · ${viewingOrder.FromGodownName}`,
@@ -822,29 +682,15 @@ function SaleOrderHistory() {
                     label: "To",
                     value: `${viewingOrder.ToCompanyName} · ${viewingOrder.ToProjectName} · ${viewingOrder.ToGodownName}`,
                   },
-                  {
-                    label: "Stock Posted",
-                    value: viewingOrder.PostedToStock ? "Yes" : "Not yet",
-                  },
-                ].map(({ label, value, mono }) => (
-                  <div
-                    key={label}
-                    className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50"
-                  >
-                    <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
-                      {label}
-                    </p>
-                    <p
-                      className={`text-xs font-semibold ${mono ? "font-mono" : ""} text-foreground`}
-                    >
-                      {value}
-                    </p>
+                  { label: "Stock Posted", value: viewingOrder.PostedToStock ? "Yes" : "Not yet" },
+                ].map(({ label, value, num }) => (
+                  <div key={label} className="px-3 py-2.5 border-r border-b border-foreground/20 min-w-0">
+                    <p className={`${LBL} mb-0.5`}>{label}</p>
+                    <p className={`text-xs font-semibold text-foreground break-words ${num ? HR_NUM : ""}`}>{value}</p>
                   </div>
                 ))}
-                <div className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
-                    Status
-                  </p>
+                <div className="px-3 py-2.5 border-r border-b border-foreground/20">
+                  <p className={`${LBL} mb-0.5`}>Status</p>
                   <ApprovalStatusChain
                     table="SaleOrders"
                     recordId={viewingOrder.SaleOrderID}
@@ -856,25 +702,13 @@ function SaleOrderHistory() {
 
               {/* Items */}
               <div>
-                <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-3">
-                  Items
-                </p>
-                <div className="overflow-x-auto rounded-xl border border-border/50">
+                <p className={`${HR_HEAD} mb-3`}>Items</p>
+                <div className="overflow-x-auto border border-foreground/20">
                   <table className="w-full text-xs">
-                    <thead className="bg-muted/40">
+                    <thead>
                       <tr>
-                        {[
-                          "Item",
-                          "Qty",
-                          "UOM",
-                          "Rate",
-                          "Amount",
-                          "Remarks",
-                        ].map((h) => (
-                          <th
-                            key={h}
-                            className="px-3 py-2 text-left font-semibold text-muted-foreground whitespace-nowrap"
-                          >
+                        {["Item", "Qty", "UOM", "Rate", "Amount", "Remarks"].map((h) => (
+                          <th key={h} className={`${TH} ${["Qty", "Rate", "Amount"].includes(h) ? "text-right" : ""}`}>
                             {h}
                           </th>
                         ))}
@@ -882,21 +716,15 @@ function SaleOrderHistory() {
                     </thead>
                     <tbody>
                       {viewingOrder.SaleItems.map((it, i) => (
-                        <tr key={i} className="border-t border-border/50">
-                          <td className="px-3 py-2 font-medium">
-                            {it.itemName || it.itemId}
-                          </td>
-                          <td className="px-3 py-2">{fmtNum(it.qty)}</td>
-                          <td className="px-3 py-2">{it.uom || "—"}</td>
-                          <td className="px-3 py-2">
-                            {it.rate ? fmtAmt(it.rate) : "—"}
-                          </td>
-                          <td className="px-3 py-2 font-semibold">
+                        <tr key={i}>
+                          <td className={`${TD} font-medium`}>{it.itemName || it.itemId}</td>
+                          <td className={`${TD} ${HR_NUM} text-right`}>{fmtNum(it.qty)}</td>
+                          <td className={TD}>{it.uom || "—"}</td>
+                          <td className={`${TD} ${HR_NUM} text-right`}>{it.rate ? fmtAmt(it.rate) : "—"}</td>
+                          <td className={`${TD} ${HR_NUM} text-right font-semibold`}>
                             {fmtAmt(it.amount ?? it.qty * it.rate)}
                           </td>
-                          <td className="px-3 py-2 text-muted-foreground">
-                            {it.remarks || "—"}
-                          </td>
+                          <td className={`${TD} text-muted-foreground`}>{it.remarks || "—"}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -905,24 +733,16 @@ function SaleOrderHistory() {
               </div>
 
               {/* Total + Remarks */}
-              <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 pt-2 border-t border-border">
+              <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 pt-3 border-t border-foreground">
                 {viewingOrder.Remarks && (
                   <div className="text-xs">
-                    <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
-                      Remarks
-                    </p>
-                    <p className="text-muted-foreground">
-                      {viewingOrder.Remarks}
-                    </p>
+                    <p className={`${LBL} mb-0.5`}>Remarks</p>
+                    <p className="text-muted-foreground">{viewingOrder.Remarks}</p>
                   </div>
                 )}
-                <div className="text-right">
-                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
-                    Total Amount
-                  </p>
-                  <p className="text-lg font-bold text-foreground">
-                    {fmtAmt(viewingOrder.TotalAmount)}
-                  </p>
+                <div className="text-right sm:ml-auto">
+                  <p className={`${LBL} mb-0.5`}>Total Amount</p>
+                  <p className={`text-xl font-bold text-foreground ${HR_NUM}`}>{fmtAmt(viewingOrder.TotalAmount)}</p>
                 </div>
               </div>
             </div>
@@ -930,7 +750,7 @@ function SaleOrderHistory() {
         </div>,
         document.body,
       )}
-    </div>
+    </SheetBox>
   );
 }
 
@@ -1155,47 +975,40 @@ export default function SaleOrder() {
     setErrorMsg("");
   };
 
+  const tabs = [
+    ...(rights.canCreate ? [{ value: "create" as const, label: <><Send size={12} /> New Sale Order</> }] : []),
+    { value: "history" as const, label: <><ClipboardList size={12} /> History</> },
+  ];
+
+  // Columns of the items grid header (same spans as SOItemRow).
+  const ITEM_HEAD: [string, string][] = [
+    ["#", "col-span-1"],
+    ["Item", "col-span-3"],
+    ["Avail", "col-span-1"],
+    ["Qty", "col-span-1"],
+    ["UOM", "col-span-1"],
+    ["Rate", "col-span-2"],
+    ["Amount", "col-span-2"],
+    ["", "col-span-1"],
+  ];
+
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Sales Module", "Sale Order"]} />
 
-      <SalesShell
+      <SheetShell
+        eyebrow="CivilierERP · Sales"
         title="Sale Order"
         subtitle="Transfer items between company projects with a fixed sale rate"
-        icon={ShoppingCart}
-        action={
-          <div className="flex items-center gap-1 p-1 rounded-xl bg-muted border border-border">
-            {rights.canCreate && (
-              <button
-                onClick={() => setActiveTab("create")}
-                className={`inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg transition-colors ${
-                  activeTab === "create"
-                    ? "btn-module text-white shadow-sm"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                }`}
-              >
-                <Send size={13} /> New Sale Order
-              </button>
-            )}
-            <button
-              onClick={() => setActiveTab("history")}
-              className={`inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg transition-colors ${
-                activeTab === "history"
-                  ? "btn-module text-white shadow-sm"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
-              }`}
-            >
-              <ClipboardList size={13} /> History
-            </button>
-          </div>
-        }
       >
+        <SheetTabs<"create" | "history"> tabs={tabs} value={activeTab} onChange={setActiveTab} />
+
         {activeTab === "history" && <SaleOrderHistory />}
 
         {activeTab === "create" && (
           <div className="space-y-4">
             {successMsg && (
-              <div className="px-4 py-3 rounded-lg bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 flex items-center gap-2 text-sm">
+              <div className="px-4 py-3 bg-primary/10 text-primary border border-primary/30 flex items-center gap-2 text-sm">
                 <CheckCircle2 size={15} /> {successMsg}
                 <button onClick={() => setSuccessMsg("")} className="ml-auto">
                   <X size={14} />
@@ -1203,7 +1016,7 @@ export default function SaleOrder() {
               </div>
             )}
             {errorMsg && (
-              <div className="px-4 py-3 rounded-lg bg-red-500/10 text-red-600 border border-red-500/20 flex items-center gap-2 text-sm">
+              <div className="px-4 py-3 bg-destructive/10 text-destructive border border-destructive/30 flex items-center gap-2 text-sm">
                 <AlertCircle size={15} /> {errorMsg}
                 <button onClick={() => setErrorMsg("")} className="ml-auto">
                   <X size={14} />
@@ -1215,7 +1028,6 @@ export default function SaleOrder() {
             <div className="flex flex-col lg:flex-row items-stretch gap-3">
               <SidePanel
                 title="Source — From"
-                accent="blue"
                 companyOptions={companyOptions}
                 companyId={fromCompanyId}
                 onCompanyChange={(v) => {
@@ -1232,28 +1044,14 @@ export default function SaleOrder() {
                 onGodownChange={setFromGodownId}
               />
 
-              <div className="hidden lg:flex items-center justify-center px-1">
-                <button
-                  onClick={handleSwap}
-                  title="Swap source and destination"
-                  className="p-2.5 rounded-full border border-border bg-card hover:bg-muted text-muted-foreground hover:text-foreground transition-colors shadow-sm"
-                >
-                  <ArrowLeftRight size={16} />
-                </button>
-              </div>
-              <div className="flex lg:hidden justify-center">
-                <button
-                  onClick={handleSwap}
-                  title="Swap source and destination"
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-card hover:bg-muted text-xs text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <ArrowLeftRight size={13} /> Swap
+              <div className="flex items-center justify-center">
+                <button onClick={handleSwap} title="Swap source and destination" className={`${KEY_LINE} h-8 px-3`}>
+                  <ArrowLeftRight size={12} /> <span className="lg:hidden">Swap</span>
                 </button>
               </div>
 
               <SidePanel
                 title="Destination — To"
-                accent="violet"
                 companyOptions={companyOptions}
                 companyId={toCompanyId}
                 onCompanyChange={(v) => {
@@ -1271,78 +1069,38 @@ export default function SaleOrder() {
             </div>
 
             {fromGodownId && toGodownId && fromGodownId === toGodownId && (
-              <p className="text-xs text-red-500 flex items-center gap-1">
-                <AlertCircle size={11} /> Source and destination godown must be
-                different.
+              <p className="text-xs text-destructive flex items-center gap-1">
+                <AlertCircle size={11} /> Source and destination godown must be different.
               </p>
             )}
 
             {/* ── Items Table ───────────────────────────────────────────────────── */}
             {fromGodownId && (
-              <div className="rounded-xl border border-border bg-card overflow-hidden">
-                <div className="px-5 py-3 border-b border-border flex items-center justify-between flex-wrap gap-2">
-                  <div>
-                    <p className="text-sm font-heading font-semibold text-foreground">
-                      Items &amp; Rate
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Search items available in the source godown, then set the
-                      sale rate
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    {isLoadingStock ? (
-                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                        <RefreshCw size={11} className="animate-spin" />
-                        Loading stock…
-                      </span>
-                    ) : fromStockData ? (
-                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                        <Package size={11} className="text-violet-600" />
-                        {availableItems.length} items in stock
-                      </span>
-                    ) : null}
-                    <button
-                      onClick={addItem}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg btn-module text-white text-xs font-medium transition-colors"
-                    >
-                      <Plus size={12} /> Add Item
-                    </button>
-                  </div>
-                </div>
-
+              <SheetBox
+                title="Items & Rate"
+                note={
+                  isLoadingStock ? (
+                    <span className="inline-flex items-center gap-1">
+                      <RefreshCw size={11} className="animate-spin" /> Loading stock…
+                    </span>
+                  ) : fromStockData ? (
+                    `${availableItems.length} items in stock`
+                  ) : undefined
+                }
+                flush
+                action={
+                  <button onClick={addItem} className={`${KEY_INK} h-8 px-3`}>
+                    <Plus size={12} /> Add Item
+                  </button>
+                }
+              >
                 <div className="p-4 space-y-2">
-                  <div className="grid grid-cols-12 gap-2 px-1 mb-1">
-                    {[
-                      "#",
-                      "Item",
-                      "Avail",
-                      "Qty",
-                      "UOM",
-                      "Rate",
-                      "Amount",
-                      "",
-                    ].map((h, i) => (
-                      <span
-                        key={i}
-                        className={`text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wider ${
-                          i === 0
-                            ? "col-span-1"
-                            : i === 1
-                              ? "col-span-3"
-                              : i === 2
-                                ? "col-span-1"
-                                : i === 3
-                                  ? "col-span-1"
-                                  : i === 4
-                                    ? "col-span-1"
-                                    : i === 5
-                                      ? "col-span-2"
-                                      : i === 6
-                                        ? "col-span-2"
-                                        : "col-span-1"
-                        }`}
-                      >
+                  <p className="text-xs text-muted-foreground mb-2">
+                    Search items available in the source godown, then set the sale rate
+                  </p>
+                  <div className="grid grid-cols-12 gap-2 px-3 mb-1">
+                    {ITEM_HEAD.map(([h, span], i) => (
+                      <span key={i} className={`${LBL} ${span}`}>
                         {h}
                       </span>
                     ))}
@@ -1361,79 +1119,62 @@ export default function SaleOrder() {
                   ))}
 
                   {missingRate && (
-                    <p className="text-[0.6875rem] text-amber-600 flex items-center gap-1 px-1">
-                      <AlertCircle size={11} /> Set a rate greater than 0 for
-                      every item before submitting.
+                    <p className="text-[0.6875rem] text-destructive flex items-center gap-1 px-1">
+                      <AlertCircle size={11} /> Set a rate greater than 0 for every item before submitting.
                     </p>
                   )}
                 </div>
 
-                <div className="px-5 py-4 border-t border-border space-y-3">
-                  <div className="flex items-center justify-end gap-2 text-sm">
-                    <span className="text-muted-foreground">
-                      Total Sale Value:
-                    </span>
-                    <span className="text-base font-bold text-foreground">
-                      {fmtAmt(totalAmount)}
-                    </span>
+                <div className="px-4 py-4 border-t border-foreground space-y-3">
+                  <div className="flex items-baseline justify-end gap-3">
+                    <span className={LBL}>Total Sale Value</span>
+                    <span className={`text-lg font-bold text-foreground ${HR_NUM}`}>{fmtAmt(totalAmount)}</span>
                   </div>
                   <div>
-                    <label className="text-xs font-medium text-muted-foreground block mb-1.5">
-                      Remarks
-                    </label>
+                    <label className={`${LBL} block mb-1.5`}>Remarks</label>
                     <textarea
                       value={remarks}
                       onChange={(e) => setRemarks(e.target.value)}
                       rows={2}
                       placeholder="Reason for sale, reference, etc."
-                      className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none resize-none focus:ring-2 focus:ring-violet-500/30"
+                      className="w-full px-3 py-2 border border-foreground/30 bg-card text-sm text-foreground placeholder:text-muted-foreground outline-none resize-none focus:border-foreground rounded-none"
                     />
                   </div>
-                  <div className="flex items-center justify-end gap-3">
-                    <button
-                      onClick={handleReset}
-                      className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors"
-                    >
+                  <div className="flex items-center justify-end gap-2">
+                    <button onClick={handleReset} className={`${KEY_LINE} h-9 px-4 flex-1 sm:flex-none`}>
                       Reset
                     </button>
                     <button
                       onClick={handleSubmit}
                       disabled={!canSubmit}
-                      className="flex items-center gap-2 px-6 py-2.5 rounded-lg btn-module text-white text-sm font-semibold disabled:opacity-50 transition-colors shadow-sm"
+                      className={`${KEY_INK} h-9 px-5 flex-1 sm:flex-none`}
                     >
                       {createMut.isPending ? (
                         <>
-                          <RefreshCw size={14} className="animate-spin" />{" "}
-                          Processing…
+                          <RefreshCw size={13} className="animate-spin" /> Processing…
                         </>
                       ) : (
                         <>
-                          <Send size={14} /> Create Sale Order
+                          <Send size={13} /> Create Sale Order
                         </>
                       )}
                     </button>
                   </div>
                 </div>
-              </div>
+              </SheetBox>
             )}
 
             {!fromGodownId && (
-              <div className="rounded-xl border border-dashed border-border bg-muted/20 py-20 text-center">
-                <ShoppingCart
-                  size={36}
-                  className="text-muted-foreground/30 mx-auto mb-3"
-                />
-                <p className="text-sm text-muted-foreground">
-                  Select a source company, project and godown to begin
-                </p>
-                <p className="text-xs text-muted-foreground/60 mt-1">
+              <div className="border border-dashed border-foreground/30 py-16 text-center">
+                <p className="text-sm text-foreground">Select a source company, project and godown to begin</p>
+                <p className="text-xs text-muted-foreground mt-1">
                   Then pick the destination side and add items with a rate
                 </p>
               </div>
             )}
           </div>
         )}
-      </SalesShell>
+      </SheetShell>
     </>
   );
 }
