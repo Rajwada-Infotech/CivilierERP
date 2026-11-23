@@ -32,6 +32,10 @@ const kb = (n: unknown) => { const b = Number(n) || 0; return b >= 1048576 ? `${
 const STEP_ICON = { done: CheckCircle2, active: Circle, locked: Lock } as const;
 const STEP_TONE: Record<string, string> = { done: "#10b981", active: CRM, locked: colors.mutedForeground };
 
+const BOOKING_TABS = [
+  { key: "overview", label: "Overview" }, { key: "payments", label: "Payments" }, { key: "papers", label: "Papers" }, { key: "after", label: "After-sales" },
+] as const;
+
 export default function BookingDetailScreen() {
   const { params } = useRoute<RouteProp<MainStackParamList, "CrmBooking">>();
   const card = useCardStyle();
@@ -205,6 +209,10 @@ export default function BookingDetailScreen() {
   const canCall = live && canDoAction("crm-welcome-calls", "create");
   const canTicket = live && canDoAction("crm-service-tickets", "create");
   const nextOpenId = nextOpenMilestone(milestones)?.Id;
+  // The milestone showing its keys: the one tapped, else the next one due (-1 = none open).
+  const [openMs, setOpenMs] = useState<number | null>(null);
+  const shownMs = openMs ?? nextOpenId;
+  const [tab, setTab] = useState<(typeof BOOKING_TABS)[number]["key"]>("overview");
   const receipts = receiptsQ.data ?? [];
   const invoices = invoicesQ.data ?? [];
   const docs = docsQ.data ?? [];
@@ -328,6 +336,20 @@ export default function BookingDetailScreen() {
             </Section>
           ) : null}
 
+          {/* The booking's parts, one at a time (the web booking page's tabs): what it is, its money, its papers, after-sales. */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 12 }}>
+            {BOOKING_TABS.map((t) => {
+              const on = tab === t.key;
+              return (
+                <Tap key={t.key} onPress={() => setTab(t.key)} accessibilityRole="tab" accessibilityState={{ selected: on }}
+                  style={{ paddingHorizontal: 16, paddingVertical: 9, borderRadius: 999, borderWidth: 1, borderColor: on ? CRM : colors.border, backgroundColor: on ? CRM : colors.card }}>
+                  <Text style={{ fontSize: 13, fontFamily: fonts.heading.semibold, color: on ? "#fff" : colors.foreground }}>{t.label}</Text>
+                </Tap>
+              );
+            })}
+          </ScrollView>
+          {tab === "overview" ? (
+            <>
           {moneyInfo ? (
             <Section title="Money">
               <Kv label="On account (available)" value={money(pb?.OnAccountAvailable)} />
@@ -358,12 +380,45 @@ export default function BookingDetailScreen() {
             </Section>
           ) : null}
 
+          {/* Buyer */}
+          {customer ? (
+            <Section title="Buyer">
+              <LinkRow
+                title={customer.CustomerNo || customer.CustomerName}
+                sub={joinDot(customer.Mobile, customer.Email)}
+                onPress={canAccessPage("crm-customer-360") ? () => open({ to: "customer", customerId: Number(customer.Id), title: customer.CustomerName }) : undefined}
+              />
+              <Kv label="PAN" value={customer.PanNo} />
+              <Kv label="Address" value={joinDot(customer.Address, customer.City, customer.State, customer.Pincode)} />
+              {customer.CoApplicantName ? <Kv label="Co-applicant" value={joinDot(customer.CoApplicantName, customer.CoApplicantRelation)} /> : null}
+            </Section>
+          ) : null}
+
+          {/* Unit and price */}
+          {b ? (
+            <Section title="Unit & Price">
+              <Kv label="Area" value={b.AreaSqFt ? `${b.AreaSqFt} sq ft` : null} />
+              <Kv label="Carpet area" value={b.CarpetAreaSqFt ? `${b.CarpetAreaSqFt} sq ft` : null} />
+              <Kv label="Rate" value={b.RatePerSqFt ? `${money(b.RatePerSqFt)} / sq ft` : null} />
+              <Kv label="Unit value" value={money(b.TotalValue)} />
+              {pb ? <Kv label="Parking" value={money(pb.ParkingTotal)} /> : null}
+              {pb ? <Kv label="Extra charges" value={money(pb.ExtraChargesTotal)} /> : null}
+              <Kv label="Booking amount" value={money(b.BookingAmount)} />
+            </Section>
+          ) : null}
+
+            </>
+          ) : null}
+          {tab === "payments" ? (
+            <>
           {/* Milestones */}
           <Section title={`Payment Milestones (${milestones.length})`}>
+            {canPay && milestones.length ? <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginBottom: 2 }}>Tap a milestone for its actions.</Text> : null}
             {milestones.length === 0 ? <Empty text="No milestones." /> : milestones.map((m) => {
               const status = m.IsOverdue ? "Overdue" : m.DemandStatus || m.Status;
               return (
-                <View key={m.Id} style={{ paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                <View key={m.Id} style={{ paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                  <Tap onPress={() => setOpenMs(shownMs === m.Id ? -1 : m.Id)} accessibilityRole="button" accessibilityLabel={`${m.MilestoneName}, actions`}>
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                     <Text numberOfLines={2} style={{ flex: 1, fontSize: 12.5, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{`${m.MilestoneNo}. ${m.MilestoneName}`}</Text>
                     {status ? <Pill label={status} /> : null}
@@ -376,12 +431,21 @@ export default function BookingDetailScreen() {
                       {money(m.AmountPaid)} / {money(m.AmountDue)}
                     </Text>
                   </View>
+                  <View style={{ height: 4, borderRadius: 2, backgroundColor: colors.border, overflow: "hidden", marginTop: 8 }}>
+                    <View style={{ width: `${Math.min(100, (Number(m.AmountPaid) / (Number(m.AmountDue) || 1)) * 100)}%`, height: 4, backgroundColor: m.Status === "Paid" ? "#10b981" : CRM }} />
+                  </View>
+                  </Tap>
                   {Number(m.PendingVerificationAmount) > 0 ? (
                     <Text style={{ fontSize: 10.5, fontFamily: fonts.body.regular, color: "#f59e0b", marginTop: 2 }}>{money(m.PendingVerificationAmount)} with Finance for approval</Text>
                   ) : null}
-                  {canPay && payQ.data && m.Status !== "Waived" && m.Status !== "Paid" && milestoneMissing(m) > 0 ? (
+                  {shownMs === m.Id && canPay && payQ.data && m.Status !== "Waived" && m.Status !== "Paid" && milestoneMissing(m) > 0 ? (
                     <View style={{ gap: 8, marginTop: 10 }}>
-                      <Text style={{ fontSize: 12, fontFamily: fonts.body.medium, color: colors.mutedForeground }}>Balance {money(milestoneMissing(m))}</Text>
+                      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                        <Text style={{ fontSize: 12, fontFamily: fonts.body.medium, color: colors.mutedForeground }}>Balance {money(milestoneMissing(m))}</Text>
+                        <Tap onPress={() => setWaiveFor(m)} accessibilityRole="button" style={{ paddingVertical: 4, paddingLeft: 12 }}>
+                          <Text style={{ fontSize: 12.5, fontFamily: fonts.heading.semibold, color: colors.mutedForeground, textDecorationLine: "underline" }}>Waive</Text>
+                        </Tap>
+                      </View>
                       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
                         <ActionKey half label="Pay" outline={m.Id !== nextOpenId} onPress={() => nav.navigate("CrmPayment", { bookingId: id, milestoneId: m.Id, title })} />
                         {m.DemandStatus === "Pending" ? (
@@ -394,7 +458,6 @@ export default function BookingDetailScreen() {
                         {applyTarget?.Id === m.Id && deposits.length > 0 ? (
                           <ActionKey half label="Apply on account" outline onPress={() => setApplyTo(m)} />
                         ) : null}
-                        <ActionKey half label="Waive" outline tone={colors.mutedForeground} onPress={() => setWaiveFor(m)} />
                       </View>
                     </View>
                   ) : null}
@@ -403,6 +466,22 @@ export default function BookingDetailScreen() {
             })}
           </Section>
 
+          {seesLoan && loanQ.data ? (
+            <Section title="Home Loan">
+              <Kv label="Status" value={!loan?.SanctionStatus || loan.SanctionStatus === "NotApplied" ? "Not applied" : loan.SanctionStatus} />
+              {loan?.BankName ? <Kv label="Bank" value={joinDot(loan.BankName, loan.BranchName)} /> : null}
+              {Number(loan?.LoanAmount) > 0 ? <Kv label="Loan amount" value={money(loan?.LoanAmount)} /> : null}
+              {loan?.SanctionDate ? <Kv label="Sanction date" value={fmtDate(loan.SanctionDate)} /> : null}
+              {Number(loan?.DisbursedAmount) > 0 ? <Kv label="Disbursed (home-loan receipts)" value={money(loan?.DisbursedAmount)} /> : null}
+              {live && canDoAction("crm-loan-details", "edit") ? (
+                <View style={{ flexDirection: "row", marginTop: 8 }}><ActionKey outline label={loan?.LoanId != null ? "Edit loan" : "Record loan"} onPress={openLoan} /></View>
+              ) : null}
+            </Section>
+          ) : null}
+            </>
+          ) : null}
+          {tab === "papers" ? (
+            <>
           {/* Papers */}
           {seesReceipts || seesInvoices || seesBooking ? (
             <Section title="Papers">
@@ -458,6 +537,33 @@ export default function BookingDetailScreen() {
             </Section>
           ) : null}
 
+            </>
+          ) : null}
+          {tab === "after" ? (
+            <>
+          {/* Welcome call and agreement */}
+          {bookingQ.data ? (
+            <Section title="Welcome Call & Agreement">
+              {bookingQ.data.welcomeCalls?.[0] ? (
+                <Kv label="Welcome call" value={joinDot(bookingQ.data.welcomeCalls[0].Outcome, fmtDate(bookingQ.data.welcomeCalls[0].CallDate))} />
+              ) : <Kv label="Welcome call" value="Not done yet" />}
+              {canAccessPage("crm-welcome-calls") ? (
+                <LinkRow icon={CheckCircle2} title="Welcome checklist" sub="Verify each fact confirmed on the call, then submit"
+                  onPress={() => nav.navigate("CrmWelcomeChecklist", { bookingId: id, title })} />
+              ) : null}
+              {bookingQ.data.agreement ? (
+                <>
+                  <Kv label="Agreement" value={joinDot(bookingQ.data.agreement.AgreementNo, bookingQ.data.agreement.Status)} />
+                  <Kv label="Agreement date" value={fmtDate(bookingQ.data.agreement.AgreementDate)} />
+                </>
+              ) : <Kv label="Agreement" value="Not drafted yet" />}
+            </Section>
+          ) : null}
+          {["crm-pre-possession", "crm-possession-notice", "crm-handover"].some((pg) => canAccessPage(pg)) && status === "Approved" ? (
+            <Section title="Possession">
+              <LinkRow icon={FileText} title="Possession & Handover" sub="Checklist, notice, handover and snags" onPress={() => nav.navigate("CrmPossession", { bookingId: id, title })} />
+            </Section>
+          ) : null}
           {/* Service tickets */}
           {seesTickets && (tickets.length || canTicket) ? (
             <Section title={`Service Tickets (${tickets.length})`}>
@@ -467,57 +573,6 @@ export default function BookingDetailScreen() {
               ))}
             </Section>
           ) : null}
-
-          {/* Buyer */}
-          {customer ? (
-            <Section title="Buyer">
-              <LinkRow
-                title={customer.CustomerNo || customer.CustomerName}
-                sub={joinDot(customer.Mobile, customer.Email)}
-                onPress={canAccessPage("crm-customer-360") ? () => open({ to: "customer", customerId: Number(customer.Id), title: customer.CustomerName }) : undefined}
-              />
-              <Kv label="PAN" value={customer.PanNo} />
-              <Kv label="Address" value={joinDot(customer.Address, customer.City, customer.State, customer.Pincode)} />
-              {customer.CoApplicantName ? <Kv label="Co-applicant" value={joinDot(customer.CoApplicantName, customer.CoApplicantRelation)} /> : null}
-            </Section>
-          ) : null}
-
-          {/* Unit and price */}
-          {b ? (
-            <Section title="Unit & Price">
-              <Kv label="Area" value={b.AreaSqFt ? `${b.AreaSqFt} sq ft` : null} />
-              <Kv label="Carpet area" value={b.CarpetAreaSqFt ? `${b.CarpetAreaSqFt} sq ft` : null} />
-              <Kv label="Rate" value={b.RatePerSqFt ? `${money(b.RatePerSqFt)} / sq ft` : null} />
-              <Kv label="Unit value" value={money(b.TotalValue)} />
-              {pb ? <Kv label="Parking" value={money(pb.ParkingTotal)} /> : null}
-              {pb ? <Kv label="Extra charges" value={money(pb.ExtraChargesTotal)} /> : null}
-              <Kv label="Booking amount" value={money(b.BookingAmount)} />
-            </Section>
-          ) : null}
-
-          {["crm-pre-possession", "crm-possession-notice", "crm-handover"].some((pg) => canAccessPage(pg)) && status === "Approved" ? (
-            <Section title="Possession">
-              <LinkRow icon={FileText} title="Possession & Handover" sub="Checklist, notice, handover and snags" onPress={() => nav.navigate("CrmPossession", { bookingId: id, title })} />
-            </Section>
-          ) : null}
-          {seesLoan && loanQ.data ? (
-            <Section title="Home Loan">
-              <Kv label="Status" value={!loan?.SanctionStatus || loan.SanctionStatus === "NotApplied" ? "Not applied" : loan.SanctionStatus} />
-              {loan?.BankName ? <Kv label="Bank" value={joinDot(loan.BankName, loan.BranchName)} /> : null}
-              {Number(loan?.LoanAmount) > 0 ? <Kv label="Loan amount" value={money(loan?.LoanAmount)} /> : null}
-              {loan?.SanctionDate ? <Kv label="Sanction date" value={fmtDate(loan.SanctionDate)} /> : null}
-              {Number(loan?.DisbursedAmount) > 0 ? <Kv label="Disbursed (home-loan receipts)" value={money(loan?.DisbursedAmount)} /> : null}
-              {live && canDoAction("crm-loan-details", "edit") ? (
-                <View style={{ flexDirection: "row", marginTop: 8 }}><ActionKey outline label={loan?.LoanId != null ? "Edit loan" : "Record loan"} onPress={openLoan} /></View>
-              ) : null}
-            </Section>
-          ) : null}
-          {canEditBooking && b && !b.IsPlotSale ? (
-            <Section title="Unit">
-              <LinkRow icon={FileText} title="Change unit" sub="Move this booking to another unit; it goes for approval" onPress={() => setChangeUnit(true)} />
-            </Section>
-          ) : null}
-          {changeUnit && b ? <ChangeUnitDialog booking={{ ...pb, ...b }} onClose={() => setChangeUnit(false)} /> : null}
 
           {/* Civilier Home */}
           {portal ? (
@@ -563,23 +618,14 @@ export default function BookingDetailScreen() {
             </Section>
           ) : null}
 
-          {/* Welcome call and agreement */}
-          {bookingQ.data ? (
-            <Section title="Welcome Call & Agreement">
-              {bookingQ.data.welcomeCalls?.[0] ? (
-                <Kv label="Welcome call" value={joinDot(bookingQ.data.welcomeCalls[0].Outcome, fmtDate(bookingQ.data.welcomeCalls[0].CallDate))} />
-              ) : <Kv label="Welcome call" value="Not done yet" />}
-              {canAccessPage("crm-welcome-calls") ? (
-                <LinkRow icon={CheckCircle2} title="Welcome checklist" sub="Verify each fact confirmed on the call, then submit"
-                  onPress={() => nav.navigate("CrmWelcomeChecklist", { bookingId: id, title })} />
-              ) : null}
-              {bookingQ.data.agreement ? (
-                <>
-                  <Kv label="Agreement" value={joinDot(bookingQ.data.agreement.AgreementNo, bookingQ.data.agreement.Status)} />
-                  <Kv label="Agreement date" value={fmtDate(bookingQ.data.agreement.AgreementDate)} />
-                </>
-              ) : <Kv label="Agreement" value="Not drafted yet" />}
+          {canEditBooking && b && !b.IsPlotSale ? (
+            <Section title="Unit">
+              <LinkRow icon={FileText} title="Change unit" sub="Move this booking to another unit; it goes for approval" onPress={() => setChangeUnit(true)} />
             </Section>
+          ) : null}
+          {changeUnit && b ? <ChangeUnitDialog booking={{ ...pb, ...b }} onClose={() => setChangeUnit(false)} /> : null}
+
+            </>
           ) : null}
         </>
       )}
