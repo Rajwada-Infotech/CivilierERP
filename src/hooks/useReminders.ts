@@ -12,7 +12,12 @@ export type ReminderType =
   | "material_request"
   | "pdc"
   | "followup"
-  | "loan_emi";
+  | "loan_emi"
+  | "legal_verify"
+  | "legal_approval"
+  | "legal_deed"
+  | "legal_search"
+  | "legal_postreg";
 
 // Which module owns each reminder type — drives the bell's "only this
 // module's reminders" scoping everywhere except the Home dashboard, which
@@ -27,6 +32,11 @@ export const REMINDER_TYPE_MODULE: Record<ReminderType, string> = {
   pdc: "finance",
   followup: "followup",
   loan_emi: "loan",
+  legal_verify: "legal",
+  legal_approval: "legal",
+  legal_deed: "legal",
+  legal_search: "legal",
+  legal_postreg: "legal",
 };
 
 export interface ReminderItem {
@@ -157,6 +167,14 @@ async function fetchMaterialRequestReminders(): Promise<ReminderItem[]> {
 // of the spec's due-soon/overdue split; classifyUrgency below re-derives the
 // bucket per row from ChequeDate so ordering (overdue > today > soon) stays
 // consistent with every other reminder source.
+// Legal pending work for this user (verification / approval queues, deed, deed-search and post-registration due dates).
+async function fetchLegalReminders(): Promise<ReminderItem[]> {
+  const res = await fetchWithAuth("/api/legal/reminders");
+  if (!res.ok) return [];
+  const rows = (await res.json()) as Omit<ReminderItem, "urgency">[];
+  return rows.map((r) => ({ ...r, urgency: classifyUrgency(r.dueDate) }));
+}
+
 async function fetchPdcReminders(): Promise<ReminderItem[]> {
   try {
     const res = await fetchWithAuth(
@@ -241,6 +259,7 @@ const REMINDER_PAGE_KEYS: Record<string, string[]> = {
   material_request: ["material-request"],
   pdc: ["reports"],
   followup: ["followup-dashboard"],
+  legal: ["legal-approvals", "legal-land-master", "legal-land-enquiry"],
 };
 
 function hasReminderAccess(
@@ -378,7 +397,7 @@ export async function fetchAllReminders(
   ]);
   const ifAllowed = (type: keyof typeof REMINDER_PAGE_KEYS, fetcher: () => Promise<ReminderItem[]>) =>
     hasReminderAccess(role, pagePermissions, type) ? fetcher().catch(() => [] as ReminderItem[]) : Promise.resolve([] as ReminderItem[]);
-  const [, emiItems, mrItems, pdcItems, followupItems, loanEmiItems] = await Promise.all([
+  const [, emiItems, mrItems, pdcItems, followupItems, loanEmiItems, legalItems] = await Promise.all([
     Promise.resolve().then(() => {
       process(poList, "purchase_order", "PurchaseOrderID", "PO", "/material/purchase-order");
       process(grnList, "grn", "GRNID", "GRN", "/material/grn");
@@ -390,7 +409,9 @@ export async function fetchAllReminders(
     ifAllowed("pdc", fetchPdcReminders),
     ifAllowed("followup", fetchFollowUpReminders),
     ifAllowed("loan_emi", fetchLoanEmiReminders),
+    ifAllowed("legal", fetchLegalReminders),
   ]);
+  items.push(...legalItems);
 
   items.push(...emiItems);
   items.push(...mrItems);
