@@ -575,7 +575,8 @@ export function ApplicationFormScreen() {
 
   const [customer, setCustomer] = useState<{ Id: number; Name: string } | null>(params?.customer ?? null);
   const [custQuery, setCustQuery] = useState("");
-  const custQ = useQuery({ queryKey: ["crm-customer-pick", custQuery], enabled: allowed && !editId,
+  const [picker, setPicker] = useState<null | "customer" | "company" | "project" | "block" | "floor" | "unit" | "plot" | "plan" | "parkType" | "slot" | "broker" | "coCustomer">(null);
+  const custQ = useQuery({ queryKey: ["crm-customer-pick", custQuery], enabled: allowed && (!editId || picker === "coCustomer"),
     queryFn: () => crmGet<{ rows: Row[] }>(`/api/crm/customers?pageSize=30&page=1${custQuery ? `&search=${encodeURIComponent(custQuery)}` : ""}`) });
 
   const [f, setF] = useState({ CompanyId: "", ProjectId: "", BlockId: "", FloorNo: "", UnitId: "", PlotIds: [] as string[], PaymentPlanId: "", RatePerSqFt: "", DateOfApply: new Date().toISOString().slice(0, 10),
@@ -651,7 +652,6 @@ export function ApplicationFormScreen() {
   if (quoteQ.data) lastQuote.current = quoteQ.data;
   const quote = quoteQ.data ?? lastQuote.current;
 
-  const [picker, setPicker] = useState<null | "customer" | "company" | "project" | "block" | "floor" | "unit" | "plot" | "plan" | "parkType" | "slot" | "broker">(null);
   // Add parking: type, then slot, the master's price unless changed (an unrated type must be priced) — POST /parking/standalone.
   const [parkType, setParkType] = useState<Row | null>(null);
   const [slotId, setSlotId] = useState("");
@@ -814,6 +814,7 @@ export function ApplicationFormScreen() {
     parkType: (freeParkingQ.data?.rates ?? []).map((r) => ({ key: r.ParkingType, label: r.ParkingType,
       sublabel: joinDot(r.NeedsRate ? "No master price" : money(r.Charge), r.HasSlots ? `${(r.AvailableSlots ?? []).length} available` : "No slots") })),
     slot: (parkType?.AvailableSlots ?? []).map((s: Row) => ({ key: String(s.Id), label: `Slot ${s.SlotNo}` })),
+    coCustomer: (custQ.data?.rows ?? []).filter((c) => c.Id !== customer?.Id).map((c) => ({ key: String(c.Id), label: c.CustomerName, sublabel: joinDot(c.CustomerNo, c.Mobile) })),
     broker: (brokersQ.data ?? []).map((b) => ({ key: String(b.LHeadId), label: b.LHeadName, sublabel: b.LHeadPhone ?? undefined })),
   };
   const choose = (k: string | null) => {
@@ -830,6 +831,14 @@ export function ApplicationFormScreen() {
     if (kind === "parkType") { const r = (freeParkingQ.data?.rates ?? []).find((x) => x.ParkingType === k) ?? null; setParkType(r); setSlotId(""); setParkRate(r?.Charge != null ? String(r.Charge) : ""); }
     if (kind === "slot") setSlotId(k ?? "");
     if (kind === "broker") set({ BrokerId: k ?? "" });
+    if (kind === "coCustomer") {
+      const c = (custQ.data?.rows ?? []).find((x) => String(x.Id) === k);
+      const t = (v: unknown) => (v == null ? "" : String(v));
+      setCo((x) => (!c ? { ...x, CustomerId: null } : { ...x, CustomerId: c.Id, Name: t(c.CustomerName), Mobile: t(c.Mobile), Email: t(c.Email), PanNo: t(c.PanNo), AadhaarNo: t(c.AadhaarNo),
+        Occupation: t(c.Occupation) || x?.Occupation, DateOfBirth: c.DateOfBirth ? String(c.DateOfBirth).slice(0, 10) : x?.DateOfBirth,
+        Address: t(c.CurrentAddress || c.PermanentAddress) || x?.Address, City: t(c.CurrentCity || c.PermanentCity) || x?.City,
+        State: t(c.CurrentState || c.PermanentState) || x?.State, Pincode: t(c.CurrentPincode || c.PermanentPincode) || x?.Pincode }));
+    }
   };
   const label = (kind: NonNullable<typeof picker>, key: string) => options[kind].find((o) => o.key === key)?.label ?? "";
 
@@ -1047,6 +1056,15 @@ export function ApplicationFormScreen() {
           ))}
           {co ? (
             <View style={{ marginTop: 10, gap: 4 }}>
+              {/* The web's two helpers: an existing customer filled in and linked (never duplicated; the server refuses the
+                  main applicant or someone already on it), and the applicant's address copied in. */}
+              <PickerRow label="Existing customer (optional)" value={co.CustomerId ? String(co.Name ?? "") : ""} placeholder="— Type the details below —" onPress={() => setPicker("coCustomer")} />
+              {existing.data?.CustomerAddress ? (
+                <Chips label="Address" options={["Own", "Same"] as const} value={co.Address === existing.data.CustomerAddress ? "Same" : "Own"}
+                  labelOf={(v) => (v === "Same" ? "Same as applicant's address" : "Own address")}
+                  onChange={(v) => setCo((x) => (v === "Same" ? { ...x, Address: existing.data?.CustomerAddress ?? "", City: existing.data?.CustomerCity ?? "", State: existing.data?.CustomerState ?? "", Pincode: existing.data?.CustomerPincode ?? "" }
+                    : { ...x, Address: "", City: "", State: "", Pincode: "" }))} />
+              ) : null}
               {CO_FIELDS.map(([k, lbl]) => k === "DateOfBirth"
                 ? <DateField key={k} label={lbl} value={String(co.DateOfBirth ?? "")} onChange={(v: string) => setCo((x) => ({ ...x, DateOfBirth: v }))} />
                 : <TextField key={k} label={lbl} required={k === "Name"} value={String(co[k] ?? "")} multiline={k === "Address" || k === "Notes"}
@@ -1104,12 +1122,12 @@ export function ApplicationFormScreen() {
           .then(() => { setCancelOpen(false); afterApp(); nav.goBack(); })}
         onClose={() => setCancelOpen(false)} />
       {error ? <Text style={{ color: colors.destructive, fontSize: 12.5, fontFamily: fonts.body.medium, marginBottom: 12 }}>{error}</Text> : null}
-      <OptionPickerModal visible={!!picker} title={picker === "plot" ? "Plots (tap to add or remove)" : picker ? ({ customer: "Customer", company: "Company", project: "Project", block: "Block / Tower", floor: "Floor", unit: "Unit", plan: "Payment Plan", parkType: "Parking type", slot: "Slot", broker: "Broker" } as Record<string, string>)[picker] : ""}
-        searchable clearable={picker === "block" || picker === "floor"}
+      <OptionPickerModal visible={!!picker} title={picker === "plot" ? "Plots (tap to add or remove)" : picker ? ({ customer: "Customer", company: "Company", project: "Project", block: "Block / Tower", floor: "Floor", unit: "Unit", plan: "Payment Plan", parkType: "Parking type", slot: "Slot", broker: "Broker", coCustomer: "Existing customer" } as Record<string, string>)[picker] : ""}
+        searchable clearable={picker === "block" || picker === "floor" || picker === "coCustomer"}
         loading={picker === "customer" ? custQ.isFetching : picker === "unit" ? unitsQ.isLoading : false}
-        query={picker === "customer" ? custQuery : undefined} onQueryChange={picker === "customer" ? setCustQuery : undefined}
+        query={picker === "customer" || picker === "coCustomer" ? custQuery : undefined} onQueryChange={picker === "customer" || picker === "coCustomer" ? setCustQuery : undefined}
         options={picker ? options[picker] : []}
-        selectedKey={picker === "customer" ? (customer ? String(customer.Id) : null) : picker === "company" ? f.CompanyId : picker === "project" ? f.ProjectId : picker === "block" ? f.BlockId : picker === "floor" ? f.FloorNo : picker === "unit" ? f.UnitId : picker === "plan" ? f.PaymentPlanId : picker === "parkType" ? parkType?.ParkingType ?? null : picker === "slot" ? slotId : picker === "broker" ? f.BrokerId : null}
+        selectedKey={picker === "customer" ? (customer ? String(customer.Id) : null) : picker === "company" ? f.CompanyId : picker === "project" ? f.ProjectId : picker === "block" ? f.BlockId : picker === "floor" ? f.FloorNo : picker === "unit" ? f.UnitId : picker === "plan" ? f.PaymentPlanId : picker === "parkType" ? parkType?.ParkingType ?? null : picker === "slot" ? slotId : picker === "broker" ? f.BrokerId : picker === "coCustomer" ? (co?.CustomerId ? String(co.CustomerId) : null) : null}
         onSelect={choose} onClose={() => setPicker(null)} />
     </FormScaffold>
   );

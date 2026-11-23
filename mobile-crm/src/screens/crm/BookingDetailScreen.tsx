@@ -4,7 +4,9 @@
 // service tickets, the buyer and the agreement. Each part comes from the route the web page uses and shows only to
 // staff with that page's right.
 import { useState } from "react";
-import { ActivityIndicator, RefreshControl, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Modal, RefreshControl, ScrollView, Text, View } from "react-native";
+import { RemarksField, TextField } from "@/components/form/Form";
+import { DateField } from "@/components/form/DateField";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as DocumentPicker from "expo-document-picker";
 import { fetchWithAuth } from "@/services/fetchWithAuth";
@@ -157,6 +159,23 @@ export default function BookingDetailScreen() {
   };
   // Change unit: the web booking page's menu item (staff who may edit bookings, not for a plot sale).
   const [changeUnit, setChangeUnit] = useState(false);
+  // Home loan, as the web's Loan Tracking page keeps it (crm-loan-details; PUT /bookings/:id/loan).
+  const seesLoan = canAccessPage("crm-loan-details");
+  const loanQ = useQuery({ queryKey: ["crm-loan-summary"], enabled: seesLoan, staleTime: 60_000,
+    queryFn: () => crmGet<Row[]>("/api/crm/loan-summary") });
+  const loan = (loanQ.data ?? []).find((x) => Number(x.BookingId) === id) ?? null;
+  const [loanForm, setLoanForm] = useState<Record<string, string> | null>(null);
+  const openLoan = () => setLoanForm({
+    BankName: loan?.BankName ?? "", BranchName: loan?.BranchName ?? "", LoanAmount: loan?.LoanAmount != null ? String(loan.LoanAmount) : "",
+    SanctionStatus: loan?.SanctionStatus || "NotApplied", SanctionDate: loan?.SanctionDate ? String(loan.SanctionDate).slice(0, 10) : "",
+    LoanAccountNo: loan?.LoanAccountNo ?? "", RmName: loan?.RmName ?? "", RmContact: loan?.RmContact ?? "", Notes: loan?.Notes ?? "" });
+  const saveLoan = async () => {
+    if (!loanForm) return;
+    if (["Sanctioned", "Disbursed"].includes(loanForm.SanctionStatus) && !(Number(loanForm.LoanAmount) > 0)) return toast.error("Enter the sanctioned amount");
+    if (["Applied", "Sanctioned", "Disbursed"].includes(loanForm.SanctionStatus) && !loanForm.BankName.trim()) return toast.error("Enter the bank");
+    try { await crmSend(`/api/crm/bookings/${id}/loan`, "PUT", loanForm); toast.success("Loan details saved"); setLoanForm(null); qc.invalidateQueries({ queryKey: ["crm-loan-summary"] }); }
+    catch (e) { toast.error((e as Error).message); }
+  };
   // Invoices: generate (the web's Generate invoice dialog) and void with a reason — the right the server checks.
   const canInvoice = live && (canDoAction("crm-bookings", "edit") || canDoAction("crm-invoices", "edit"));
   const [genInvoice, setGenInvoice] = useState(false);
@@ -483,6 +502,18 @@ export default function BookingDetailScreen() {
               <LinkRow icon={FileText} title="Possession & Handover" sub="Checklist, notice, handover and snags" onPress={() => nav.navigate("CrmPossession", { bookingId: id, title })} />
             </Section>
           ) : null}
+          {seesLoan && loanQ.data ? (
+            <Section title="Home Loan">
+              <Kv label="Status" value={!loan?.SanctionStatus || loan.SanctionStatus === "NotApplied" ? "Not applied" : loan.SanctionStatus} />
+              {loan?.BankName ? <Kv label="Bank" value={joinDot(loan.BankName, loan.BranchName)} /> : null}
+              {Number(loan?.LoanAmount) > 0 ? <Kv label="Loan amount" value={money(loan?.LoanAmount)} /> : null}
+              {loan?.SanctionDate ? <Kv label="Sanction date" value={fmtDate(loan.SanctionDate)} /> : null}
+              {Number(loan?.DisbursedAmount) > 0 ? <Kv label="Disbursed (home-loan receipts)" value={money(loan?.DisbursedAmount)} /> : null}
+              {live && canDoAction("crm-loan-details", "edit") ? (
+                <View style={{ flexDirection: "row", marginTop: 8 }}><ActionKey outline label={loan?.LoanId != null ? "Edit loan" : "Record loan"} onPress={openLoan} /></View>
+              ) : null}
+            </Section>
+          ) : null}
           {canEditBooking && b && !b.IsPlotSale ? (
             <Section title="Unit">
               <LinkRow icon={FileText} title="Change unit" sub="Move this booking to another unit; it goes for approval" onPress={() => setChangeUnit(true)} />
@@ -556,6 +587,30 @@ export default function BookingDetailScreen() {
       )}
       <ApplyOnAccountPrompt milestone={applyTo} deposits={deposits} busy={busyMs != null} onClose={() => setApplyTo(null)}
         onApply={(d, amount) => applyTo && msAction(applyTo, () => crmSend(`/api/crm/payments/on-account/${d.Id}/apply`, "PUT", { MilestoneId: applyTo.Id, Amount: amount }), () => `${money(amount)} applied from ${d.ReceiptNo}`)} />
+      {loanForm ? (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setLoanForm(null)}>
+          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", padding: 16 }}>
+            <View style={{ maxHeight: "90%", backgroundColor: colors.card, borderRadius: 18, borderWidth: 1, borderColor: colors.border }}>
+              <ScrollView contentContainerStyle={{ padding: 18, gap: 6 }} keyboardShouldPersistTaps="handled">
+                <Text style={{ fontSize: 16, fontFamily: fonts.heading.bold, color: colors.foreground }}>Loan details</Text>
+                <Chips label="Sanction status" options={["NotApplied", "Applied", "Sanctioned", "Disbursed", "Rejected"] as const}
+                  value={loanForm.SanctionStatus as "NotApplied"} onChange={(v) => setLoanForm((x) => x && { ...x, SanctionStatus: v })}
+                  labelOf={(v) => (v === "NotApplied" ? "Not applied" : v)} />
+                {([["BankName", "Bank"], ["BranchName", "Branch"], ["LoanAmount", "Sanctioned amount (₹)"], ["LoanAccountNo", "Loan account no."], ["RmName", "Bank RM"], ["RmContact", "RM contact"]] as const).map(([k, lbl]) => (
+                  <TextField key={k} label={lbl} value={loanForm[k]} keyboardType={k === "LoanAmount" || k === "RmContact" ? "numeric" : "default"}
+                    onChangeText={(v) => setLoanForm((x) => x && { ...x, [k]: v })} />
+                ))}
+                <DateField label="Sanction date" value={loanForm.SanctionDate} onChange={(v: string) => setLoanForm((x) => x && { ...x, SanctionDate: v })} />
+                <RemarksField label="Notes" value={loanForm.Notes} onChangeText={(v) => setLoanForm((x) => x && { ...x, Notes: v })} />
+                <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+                  <ActionKey label="Cancel" outline tone={colors.mutedForeground} onPress={() => setLoanForm(null)} />
+                  <ActionKey label="Save" onPress={saveLoan} />
+                </View>
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+      ) : null}
       {genInvoice ? <GenerateInvoiceDialog bookingId={id} onClose={() => setGenInvoice(false)} /> : null}
       <NotePrompt open={!!voidFor} danger title={`Void ${voidFor?.InvoiceNo ?? "invoice"}?`} hint="The invoice stays on record as Void; its milestone can then be invoiced again."
         placeholder="Reason for voiding (required)" submitLabel="Void invoice" busy={busyRc != null}
