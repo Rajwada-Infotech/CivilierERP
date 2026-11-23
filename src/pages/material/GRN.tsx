@@ -131,6 +131,7 @@ export default function GRN() {
       {/*  VIEW MODAL                                                        */}
       {/* ══════════════════════════════════════════════════════════════════ */}
       <GRNViewModal m={m} />
+      {m.amend.dialog}
 
       <GRNDebitNote m={m} />
 

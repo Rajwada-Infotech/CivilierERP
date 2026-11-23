@@ -8,6 +8,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { usePageRights } from "@/hooks/usePageRights";
+import { useAmendMode } from "@/components/amendment/useAmendMode";
 import { exportToCsv, parseCsv } from "@/lib/export";
 import { computeRemainingPOItems, hasRemainingItems, countRemainingItems, buildGRNLineItemsFromRemaining, type RemainingPOItem } from "../grnRemainingItems";
 import { createQualityDebitNote } from "@/api/qualityRejectionDebitNoteApi";
@@ -55,6 +56,19 @@ export function useGRN() {
   const importFileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  // Approved GRNs aren't edited: Amend opens the form and saving raises an amendment for approval instead.
+  const amend = useAmendMode("grn", "GRN", {
+    onRaised: () => {
+      setFormData(buildEmptyForm());
+      setEditingId(null);
+      setShowForm(false);
+      setErrors({});
+    },
+  });
+  useEffect(() => {
+    if (editingId == null) amend.stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingId]);
   const [showForm, setShowForm] = useState(false);
   const [viewingGrn, setViewingGrn] = useState<any | null>(null);
   const [viewModalTab, setViewModalTab] = useState<"details" | "posting">(
@@ -781,7 +795,7 @@ export function useGRN() {
     return Object.keys(errs).length === 0;
   };
 
-  const onSubmit = () => {
+  const onSubmit = async () => {
     if (!validate()) {
       toast.error("Please fix the errors");
       return;
@@ -817,6 +831,7 @@ export function useGRN() {
       projectId: formData.projectId ? Number(formData.projectId) : null,
       godownId: formData.godownId ? Number(formData.godownId) : null,
     };
+    if (editingId && (await amend.intercept(editingId, payload))) return;
     if (editingId) updateMutation.mutate(payload);
     else createMutation.mutate(payload);
   };
@@ -988,7 +1003,13 @@ export function useGRN() {
   // Opened from the Material dashboard: back to that list once the record is closed.
   useReturnAfterView(!!viewingGrn || showForm);
 
+  bridge.onAmend = async (grn: any) => {
+    await bridge.onEdit(grn);
+    amend.start(grn.GRNID);
+  };
+
   return {
+    amend,
     rights,
     today,
     navigate,

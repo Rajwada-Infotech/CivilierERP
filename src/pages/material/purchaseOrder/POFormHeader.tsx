@@ -4,7 +4,9 @@ import type { POState } from "./usePurchaseOrder";
 
 // The form's title bar: back, create / edit / view, the PO number.
 export function POFormHeader({ m }: { m: POState }) {
-  const { rights, viewMode, editingId, form, handlePrint, listData, goToList, goToEdit, isReadOnly } = m;
+  const { rights, viewMode, editingId, form, handlePrint, listData, goToList, goToEdit, goToAmend, isReadOnly } = m;
+  // Draft / Pending / Rejected are edited; an approved PO changes only through Amend.
+  const editable = ["Draft", "Pending", "Rejected"].includes(form.status || "Draft");
   return (
     <div className="bg-card flex flex-wrap items-center justify-between gap-3 px-4 py-3" style={{ border: RULE }}>
       <div className="flex items-center gap-3 min-w-0">
@@ -31,15 +33,15 @@ export function POFormHeader({ m }: { m: POState }) {
               <Printer size={12} /> Print
             </button>
           )}
-          {rights.canEdit && form.status !== "Short Closed" && (
+          {rights.canEdit && (editable || form.status === "Approved") && (
             <button
               onClick={() => {
                 const item = listData.find((r) => r._id === editingId);
-                if (item) goToEdit(item);
+                if (item) void (editable ? goToEdit(item) : goToAmend(item));
               }}
               className={`${KEY_INK} h-8 px-3`}
             >
-              <FilePenLine size={12} /> Edit
+              <FilePenLine size={12} /> {editable ? "Edit" : "Amend"}
             </button>
           )}
         </div>

@@ -1366,7 +1366,9 @@ router.get("/source-options/:kind", authenticateToken, requirePageRight("materia
 });
 
 // ── PUT /:id ───────────────────────────────────────────────────────────────────
-router.put("/:id", authenticateToken, requirePageRight("material-request", "edit"), async (req, res) => {
+// No route-level authenticateToken: /api is already behind it (server.js), and an approved amendment applies its
+// change by running this route in-process (services/docAmendment.js), where there is no bearer token.
+router.put("/:id", requirePageRight("material-request", "edit"), async (req, res) => {
   const user = requireUser(req, res);
   if (!user) return;
 
@@ -1420,9 +1422,12 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
         error: `Cannot edit: this Material Request is ${currentMRStatus.toLowerCase()} — it has already been ordered on a Purchase Order. Delete that Purchase Order first, then edit the request.`,
       });
 
-    if (!["Draft", "Pending", "Approved", "Rejected"].includes(currentMRStatus))
+    // Once approved it changes only through Amend (an approved amendment request), for every role.
+    if (currentMRStatus === "Approved")
+      return res.status(409).json({ error: "This Material Request is approved, so it can't be edited. Use Amend to change it." });
+    if (!["Draft", "Pending", "Rejected"].includes(currentMRStatus))
       return res.status(409).json({
-        error: `Cannot edit a Material Request with status "${currentMRStatus}". Only Draft, Pending, Approved, or Rejected requests can be edited.`,
+        error: `Cannot edit a Material Request with status "${currentMRStatus}". Only Draft, Pending or Rejected requests can be edited.`,
       });
     const wasApproved = currentMRStatus === "Approved";
     const wasRejected = currentMRStatus === "Rejected";

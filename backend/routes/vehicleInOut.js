@@ -974,6 +974,10 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
   try {
     const pool = getPool();
     const beforeSnapshot = await snapshotRow(pool, "dbo.VehicleInOut", "VehicleInOutID", id);
+    // Only a Draft, Pending or Rejected entry is edited. Once approved it changes only through Amend (an approved
+    // amendment request, services/docAmendment.js), for every role.
+    if (beforeSnapshot?.Status && !["Draft", "Pending", "Rejected"].includes(beforeSnapshot.Status))
+      return res.status(409).json({ error: `This Vehicle In/Out entry is ${beforeSnapshot.Status}, so it can't be edited. Use Amend to change it.` });
     const wasApproved = beforeSnapshot?.Status === "Approved";
     const wasRejected = beforeSnapshot?.Status === "Rejected";
 

@@ -2,9 +2,8 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
-const { transition, guardEditAnyStage, restartApprovalCycle, getRecordStatus } = require("../services/approvalService");
+const { transition, restartApprovalCycle, getRecordStatus } = require("../services/approvalService");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
-const { resolveAllowPostApproval } = require("../middleware/permissions");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { validateBody } = require("../middleware/validateRequest");
@@ -1082,7 +1081,6 @@ async function createGRNInternal(pool, body, userEmail) {
       // left over from toggling the form back to Gate mode.
       directEntryReason = null,
       grnItems,
-      status,
       remarks,
       docTypeId: clientDocTypeId,
       finYear,
@@ -1237,7 +1235,9 @@ async function createGRNInternal(pool, body, userEmail) {
           sql.NVarChar(sql.MAX),
           JSON.stringify(grnItems || []),
         )
-        .input("Status", sql.NVarChar(50), status || "Draft")
+        // Always Draft: the auto-submit below makes it Pending. A status sent by the client is never trusted —
+        // only the approval engine (transition()) approves a GRN and posts its stock.
+        .input("Status", sql.NVarChar(50), "Draft")
         .input("Remarks", sql.NVarChar(sql.MAX), remarks || null)
         .input("DocTypeId", sql.Int, resolvedDocTypeId || null)
         .input("DocNo", sql.NVarChar(100), finalDocNo)
@@ -1413,12 +1413,10 @@ router.put(
     let beforeSnapshot = null;
     try {
       const currentStatus = await getRecordStatus("goods-receipt", req.params.id);
-      const allowPostApproval = await resolveAllowPostApproval(
-        req,
-        "grn-master",
-      );
-      // Pending is editable and stays Pending; Approved (with the post-approval right) goes back for approval.
-      await guardEditAnyStage("goods-receipt", req.params.id, { allowPostApproval });
+      // Only a Draft, Pending or Rejected GRN is edited. Once approved it changes only through Amend (an approved
+      // amendment request, services/docAmendment.js, which re-posts its stock and ledger entry), for every role.
+      if (currentStatus && !["Draft", "Pending", "Rejected"].includes(currentStatus))
+        return res.status(409).json({ error: `This GRN is ${currentStatus}, so it can't be edited. Use Amend to change it.` });
 
       // Chain guard: an Expense Booking already raised against this GRN
       // (directly, or as one of a multi-GRN combined invoice) must be
@@ -1464,7 +1462,15 @@ router.put(
     // Status='Approved' GRNs). Mirrors journalVoucher.js's wasApproved
     // handling.
     // The form always sends "Draft", so a Pending GRN is held at Pending too.
-    const effectiveStatus = wasApproved || wasPending ? "Pending" : status || "Draft";
+    // A save can only leave the GRN Draft, Pending or Rejected (Rejected is re-submitted below). Approved is reached
+    // only through transition() — or an approved amendment, which sets it itself — never from a status in the body.
+    const effectiveStatus = wasApproved || wasPending
+      ? "Pending"
+      : wasRejected
+        ? "Rejected"
+        : status === "Pending"
+          ? "Pending"
+          : "Draft";
 
     // Reject future dates
     const todayStr = new Date().toISOString().slice(0, 10);

@@ -45,9 +45,11 @@ export function VIOFormActions({ m }: { m: VIOState }) {
             )}
             {createMut.isPending || updateMut.isPending
               ? "Saving…"
-              : editingId
-                ? "Update"
-                : "Save Entry"}
+              : m.amend.amending
+                ? "Review amendment"
+                : editingId
+                  ? "Update"
+                  : "Save Entry"}
           </button>
         </div>
       </div>
