@@ -155,7 +155,11 @@ export default function LandEnquiryPage() {
               <button onClick={() => setPlotsId(plotsId === id ? null : id)} className={`${small} ${plotsId === id ? "bg-foreground text-card" : ""}`}
                 title="RS and LR records (Khatian / Dag) of this enquiry">RS / LR{raw.RsDagNo || raw.LrDagNo ? "" : " · add"}</button>
             );
-            const portal = <>{plots}<PortalFetchButtons title={no} values={{
+            // History: every status change (with its reason), edit and search of this enquiry — kept even when rejected.
+            const history = <button onClick={() => navigate(`/legal/versions?enquiry=${id}`)} className={small} title="Everything that happened to this enquiry: status changes with reasons, edits, deed search">History</button>;
+            // An earlier enquiry for the same plot (Mouza + Dag) was rejected — in any project.
+            const seen = raw.RejectedBefore ? <span className={`${small} border-rose-400 bg-rose-500/10 text-rose-700`} title="An earlier enquiry for the same Mouza and Dag was rejected — open its History for the reason">Rejected before: {String(raw.RejectedBefore)}</span> : null;
+            const portal = <>{seen}{history}{plots}<PortalFetchButtons title={no} values={{
               district: String(raw.DistrictId__label ?? ""), mouza: String(raw.MouzaId__label ?? "").replace(/\s*\(J\.L\..*\)$/, ""),
               jlNo: raw.JLNo as string, location: raw.LandLocation as string, lat: raw.GpsLatitude as number, lng: raw.GpsLongitude as number, enquiryNo: no,
             }} /></>;

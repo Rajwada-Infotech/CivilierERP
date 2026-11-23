@@ -32,6 +32,41 @@
 // A `label` is evaluated with the master's table aliased as r.
 // Decimal fields take `min`, `maxValue` and `signed` (GPS coordinates).
 
+
+/**
+ * The same land entered twice: a plot is the same land when its Mouza and RS Dag (or LR Dag) match — whatever the project.
+ * Looks in every land (its main Dag and its RS / LR records) and every open enquiry (not rejected, not converted), in all
+ * projects, and returns a message naming the existing one and its project — or null. `self` leaves out the record being
+ * saved: { enquiryId } and/or { landId }. Dag fields may hold a list ("433, 434").
+ */
+async function dagClash(pool, mouzaId, dags, self = {}) {
+  if (!mouzaId) return null;
+  for (const [kind, raw] of dags) {
+    for (const dag of String(raw || "").split(/[,;/]/).map((x) => x.trim()).filter(Boolean)) {
+      const col = kind === "RS" ? "RsDagNo" : "LrDagNo";
+      const rec = kind === "RS" ? "Rs" : "Lr";
+      const has = (c) => `(',' + REPLACE(ISNULL(${c}, N''), N' ', N'') + ',') LIKE N'%,' + @D + N',%'`;
+      const r = await pool.request().input("M", mouzaId).input("D", dag.replace(/\s/g, "")).input("E", self.enquiryId || 0).input("L", self.landId || 0).query(`
+        SELECT TOP 1 * FROM (
+          SELECT 1 AS o, l.LandCode AS Ref, N'land' AS Kind, l.WorkflowStatus AS St, p.name AS Project
+          FROM dbo.LegalLand l LEFT JOIN dbo.enterprise p ON p.id = l.ProjectId
+          WHERE l.IsActive = 1 AND l.LandId <> @L AND (@E = 0 OR ISNULL(l.EnquiryId, 0) <> @E)
+            AND ((l.MouzaId = @M AND ${has("l." + col)})
+              OR EXISTS (SELECT 1 FROM dbo.LegalLand${rec}Record x WHERE x.LandId = l.LandId AND x.IsActive = 1 AND x.MouzaId = @M AND ${has("x." + col)}))
+          UNION ALL
+          SELECT 2, e.EnquiryNo, N'enquiry', e.EnquiryStatus, p.name
+          FROM dbo.LegalLandEnquiry e LEFT JOIN dbo.enterprise p ON p.id = e.ProjectId
+          WHERE e.IsActive = 1 AND e.LandId IS NULL AND e.EnquiryStatus <> N'Rejected' AND e.EnquiryId <> @E
+            AND ((e.MouzaId = @M AND ${has("e." + col)})
+              OR EXISTS (SELECT 1 FROM dbo.LegalEnquiry${rec}Record x WHERE x.EnquiryId = e.EnquiryId AND x.IsActive = 1 AND x.MouzaId = @M AND ${has("x." + col)}))
+        ) z ORDER BY o`);
+      const c = r.recordset[0];
+      if (c) return `${kind} Dag ${dag} in this Mouza is already ${c.Kind} ${c.Ref}${c.Project ? ` (project ${c.Project})` : " (no project)"}${c.St ? ` · ${c.St}` : ""} — the same land cannot be entered twice; open that one instead`;
+    }
+  }
+  return null;
+}
+
 const LAND_CLASSES = ["Sali", "Suna", "Danga", "Bastu", "Doba", "Pukur", "Bagan", "Khamar", "Karkhana", "Commercial", "Others"];
 const ACTIVE = { name: "IsActive", label: "Status", type: "bit", default: true };
 const PAN = { name: "Pan", label: "PAN", type: "text", max: 10, upper: true, pattern: "^[A-Z]{5}[0-9]{4}[A-Z]$", patternMsg: "PAN must look like ABCDE1234F" };
@@ -254,16 +289,8 @@ const MASTERS = {
       { name: "AmendmentOpen", label: "Amendment open", sql: "(SELECT COUNT(*) FROM dbo.LegalLandAmendment a WHERE a.LandId = t.LandId AND a.Status = N'Open')" },
     ],
     // The same Mouza and Dag number twice is almost always the same land entered twice.
-    check: async (pool, values, id) => {
-      const dags = [["RsDagNo", "RS Dag"], ["LrDagNo", "LR Dag"]].filter(([f]) => values[f]);
-      if (!values.MouzaId || !dags.length) return null;
-      for (const [f, label] of dags) {
-        const r = await pool.request().input("M", values.MouzaId).input("D", String(values[f])).input("Id", id || 0)
-          .query(`SELECT TOP 1 LandCode FROM dbo.LegalLand WHERE MouzaId = @M AND ${f} = @D AND LandId <> @Id AND IsActive = 1`);
-        if (r.recordset.length) return `${r.recordset[0].LandCode} already has this Mouza and ${label} ${values[f]} — open that land instead of adding it again`;
-      }
-      return null;
-    },
+    // The same Mouza and Dag is the same land — in any project, as a land or an open enquiry.
+    check: async (pool, values, id) => dagClash(pool, values.MouzaId, [["RS", values.RsDagNo], ["LR", values.LrDagNo]], { landId: id || 0, enquiryId: values.EnquiryId || 0 }),
     fields: [
       { name: "LandCode", label: "Land ID", type: "text", max: 30, auto: "LND" },
       { name: "LandName", label: "Land title / name", type: "text", required: true, max: 200 },
@@ -360,6 +387,8 @@ const MASTERS = {
     noDelete: true, superAdminDelete: true,
     extras: [
       { name: "LandCode", label: "Land conversion", sql: "(SELECT l.LandCode FROM dbo.LegalLand l WHERE l.LandId = t.LandId)" },
+      // Earlier rejected enquiries for the same plot (Mouza + RS or LR Dag), in any project.
+      { name: "RejectedBefore", label: "Rejected before", sql: "(SELECT STRING_AGG(r.EnquiryNo, N', ') FROM dbo.LegalLandEnquiry r WHERE r.EnquiryId <> t.EnquiryId AND r.EnquiryStatus = N'Rejected' AND r.MouzaId = t.MouzaId AND ((t.RsDagNo IS NOT NULL AND r.RsDagNo = t.RsDagNo) OR (t.LrDagNo IS NOT NULL AND r.LrDagNo = t.LrDagNo)))" },
       // Deed Registry Search: offices still open (the enquiry's actions open once every office's search is complete).
       { name: "OfficesPending", label: "Deed search offices open", sql: "(SELECT COUNT(*) FROM dbo.LegalEnquiryOfficeSearch x WHERE x.EnquiryId = t.EnquiryId AND x.Status = N'Pending')" },
       { name: "OfficesTotal", label: "Deed search offices", sql: "(SELECT COUNT(*) FROM dbo.LegalEnquiryOfficeSearch x WHERE x.EnquiryId = t.EnquiryId)" },
@@ -372,9 +401,15 @@ const MASTERS = {
     ],
     // Deed Registry Search timelines start here: one per office type (ADSR, DSR, RA Calcutta, BLRO), due = enquiry date
     // + that office's time limit.
-    afterWrite: async (pool, _req, row) => {
+    afterWrite: async (pool, req, row, before) => {
       await require("./enquirySearch").ensureOfficeTimelines(pool, row.EnquiryId);
+      // A new enquiry: the legal team (verifiers) hears of it.
+      if (!before) await require("../../services/legalNotify").notify(pool, { roles: ["Verifier"], except: req?.user?.userId, type: "legal_enquiry_new",
+        title: `New land enquiry: ${row.EnquiryNo ?? ""}`, body: `${row.LandLocation ?? ""} — deed registry search starts now.`.slice(0, 300), refId: row.EnquiryId, refType: "legal_enquiry" });
     },
+    // The same plot raised twice (in any project): blocked while the other is a land or an open enquiry. A rejected
+    // enquiry for the plot does not block a new one; it shows as "Rejected before" on the list.
+    check: async (pool, values, id) => dagClash(pool, values.MouzaId, [["RS", values.RsDagNo], ["LR", values.LrDagNo]], { enquiryId: id || 0 }),
     guard: async (pool, id, values) => {
       const r = await pool.request().input("Id", id).query("SELECT EnquiryStatus, (SELECT LandCode FROM dbo.LegalLand l WHERE l.LandId = e.LandId) AS LandCode FROM dbo.LegalLandEnquiry e WHERE EnquiryId = @Id");
       const row = r.recordset[0];
@@ -426,7 +461,7 @@ const MASTERS = {
     desc: "Revisional Survey Khatian / Dag of this enquiry land.",
     label: "'RS Kh ' + RsKhatianNo + ' / Dag ' + RsDagNo", orderBy: "RsKhatianNo, RsDagNo",
     unique: [["EnquiryId", "RsKhatianNo", "RsDagNo"], "This RS Khatian and Dag are already on this enquiry"],
-    check: enquiryOpen, afterWrite: syncEnquiryPlots, afterDelete: syncEnquiryPlots,
+    check: async (pool, values, id) => (await enquiryOpen(pool, values, id)) || dagClash(pool, values.MouzaId, [["RS", values.RsDagNo]], { enquiryId: values.EnquiryId }), afterWrite: syncEnquiryPlots, afterDelete: syncEnquiryPlots,
     fields: [
       { name: "EnquiryId", label: "Enquiry", type: "ref", ref: "land-enquiry", required: true },
       { name: "MouzaId", label: "Mouza", type: "ref", ref: "mouza" },
@@ -445,7 +480,7 @@ const MASTERS = {
     desc: "Land Reforms Khatian / Dag (RoR) of this enquiry land.",
     label: "'LR Kh ' + LrKhatianNo + ' / Dag ' + LrDagNo", orderBy: "LrKhatianNo, LrDagNo",
     unique: [["EnquiryId", "LrKhatianNo", "LrDagNo"], "This LR Khatian and Dag are already on this enquiry"],
-    check: enquiryOpen, afterWrite: syncEnquiryPlots, afterDelete: syncEnquiryPlots,
+    check: async (pool, values, id) => (await enquiryOpen(pool, values, id)) || dagClash(pool, values.MouzaId, [["LR", values.LrDagNo]], { enquiryId: values.EnquiryId }), afterWrite: syncEnquiryPlots, afterDelete: syncEnquiryPlots,
     fields: [
       { name: "EnquiryId", label: "Enquiry", type: "ref", ref: "land-enquiry", required: true },
       { name: "MouzaId", label: "Mouza", type: "ref", ref: "mouza" },
@@ -462,6 +497,8 @@ const MASTERS = {
   },
   // One land property's RS and LR records and its parties (opened from the property's page).
   "land-rs-record": {
+    // The same Mouza + Dag on another land or an open enquiry (any project) is the same land.
+    check: async (pool, values) => dagClash(pool, values.MouzaId, [["RS", values.RsDagNo]], { landId: values.LandId, enquiryId: (await pool.request().input("L", values.LandId || 0).query("SELECT EnquiryId FROM dbo.LegalLand WHERE LandId = @L")).recordset[0]?.EnquiryId || 0 }),
     title: "RS Record", group: "Land Management", pageKey: "legal-land-master", table: "LegalLandRsRecord", pk: "RsRecordId", parent: "LandId", review: REVIEW,
     afterWrite: async (pool, _req, row) => {
       await pool.request().input("Id", row.RsRecordId).query(`
@@ -500,6 +537,8 @@ const MASTERS = {
     ],
   },
   "land-lr-record": {
+    // The same Mouza + Dag on another land or an open enquiry (any project) is the same land.
+    check: async (pool, values) => dagClash(pool, values.MouzaId, [["LR", values.LrDagNo]], { landId: values.LandId, enquiryId: (await pool.request().input("L", values.LandId || 0).query("SELECT EnquiryId FROM dbo.LegalLand WHERE LandId = @L")).recordset[0]?.EnquiryId || 0 }),
     title: "LR Record of Rights", group: "Land Management", pageKey: "legal-land-master", table: "LegalLandLrRecord", pk: "LrRecordId", parent: "LandId", review: REVIEW,
     afterWrite: async (pool, _req, row) => {
       await pool.request().input("Id", row.LrRecordId).query(`
@@ -1857,4 +1896,4 @@ const EXTERNAL_REFS = {
   company: { sql: "SELECT id AS value, name AS label FROM dbo.enterprise WHERE business_type = 'C' AND (discontinue IS NULL OR discontinue = 0) ORDER BY name", exists: "SELECT 1 FROM dbo.enterprise WHERE id = @v AND business_type = 'C'" },
 };
 
-module.exports = { MASTERS, EXTERNAL_REFS, DUE_DILIGENCE_CHECKS, VERIFICATION_CHECKS, FINAL_CHECKS };
+module.exports = { MASTERS, EXTERNAL_REFS, DUE_DILIGENCE_CHECKS, VERIFICATION_CHECKS, FINAL_CHECKS, dagClash };

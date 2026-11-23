@@ -499,7 +499,7 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
         toast.success(added.message);
         if (onCreated && added.id) onCreated(Number(added.id));
       }
-      if (event.action === "update") toast.success((await updateLegalRow(entry.key, Number(event.id), { ...payload(event.record), ...fixed })).message);
+      if (event.action === "update") toast.success((await updateLegalRow(entry.key, Number(event.id), { ...payload(event.record), ...fixed, __updatedAt: rawById.get(String(event.id))?.UpdatedAt ?? undefined })).message);
       if (event.action === "delete") toast.success((await deleteLegalRow(entry.key, Number(event.id))).message);
       onSaved?.();
     } catch (err) {

@@ -15,9 +15,17 @@ const apiRateLimit = require("../../middleware/apiRateLimit");
 const { pageable } = require("./paging");
 const router = express.Router();
 router.use(apiRateLimit);
+// Project access (User / Role Project Access): a restricted user reaches only lands / enquiries of their projects.
+const projectGuard = require("./projectGuard");
+router.use(async (req, _res, next) => { try { req.legalScope = await projectGuard.getProjectScope(req.user); } catch { /* unrestricted */ } next(); });
+router.param("enquiryId", projectGuard.landParam("enquiry"));
 const PAGE = "legal-land-enquiry";
 const FIRST_YEAR = 1956;
-const RESULTS = ["Found", "Not Found"];
+// A year's result for one office. No row = Pending (not searched). "Under Review" is not final: an office cannot be
+// completed while any year is under review or not searched.
+const RESULTS = ["Found", "Not Found", "Not Applicable", "Under Review"];
+const FINAL = ["Found", "Not Found", "Not Applicable"];
+const EARLIEST = 1800;
 
 const idOf = (v) => (/^\d+$/.test(String(v ?? "")) ? Number(v) : null);
 const txt = (v, n) => { const s = String(v ?? "").trim(); return s ? s.slice(0, n) : null; };
@@ -283,7 +291,7 @@ router.post("/office/:id/year", requirePageRight(PAGE, "edit"), async (req, res)
       .query(`INSERT INTO dbo.LegalEnquiryDeedSearch (EnquiryId, OfficeType, OfficeId, CalendarYear, Status, SlaDays, DueDate, DeedNo, DeedDate, Parties, Details, SiteName,
           RequestedBy, CompletedBy, CompletedAt) VALUES (@e, @t, @oi, @y, @st, @sd, @due, @dn, @dd, @pa, @de, @si, @u, @u, SYSUTCDATETIME())`);
     await writeAudit(pool, req, { action: "Deed search recorded", entityType: "Land Enquiry", entityId: o.EnquiryId, newValue: { office: o.OfficeType, year, result, deedNo } }).catch(() => {});
-    res.status(201).json({ message: result === "Found" ? `Deed ${deedNo} (${year}) stored on the enquiry` : `${o.OfficeType} ${year}: no deed found` });
+    res.status(201).json({ message: result === "Found" ? `Deed ${deedNo} (${year}) stored on the enquiry` : `${o.OfficeType} ${year}: ${result.toLowerCase()}` });
   } catch (err) {
     console.error("[legal-enquiry-search] year:", err.message);
     res.status(500).json({ error: "Could not save the result" });
@@ -341,22 +349,44 @@ router.post("/office/:id/range", requirePageRight(PAGE, "edit"), async (req, res
     if (!o) return res.status(404).json({ error: "Office search not found" });
     const first = o.FromYear || FIRST_YEAR;
     const from = idOf(req.body?.from), to = idOf(req.body?.to);
+    const st = ["Not Found", "Not Applicable", "Under Review"].includes(req.body?.status) ? req.body.status : "Not Found";
     if (!from || !to || from > to || from < first || to > thisYear()) return res.status(400).json({ error: `Choose years between ${first} and ${thisYear()}` });
     const u = (req.user?.userId ?? req.user?.id ?? null);
     const r = await pool.request().input("e", sql.Int, o.EnquiryId).input("t", sql.NVarChar(60), o.OfficeType).input("oi", sql.Int, o.OfficeId)
-      .input("f", sql.Int, from).input("to", sql.Int, to).input("sd", sql.Int, o.SlaDays).input("due", sql.Date, o.Due)
+      .input("f", sql.Int, from).input("to", sql.Int, to).input("st", sql.NVarChar(20), st).input("sd", sql.Int, o.SlaDays).input("due", sql.Date, o.Due)
       .input("de", sql.NVarChar(2000), txt(req.body?.details, 2000)).input("si", sql.NVarChar(200), txt(req.body?.siteName, 200)).input("u", sql.Int, u)
       .query(`WITH y AS (SELECT @f AS Y UNION ALL SELECT Y + 1 FROM y WHERE Y < @to)
         INSERT INTO dbo.LegalEnquiryDeedSearch (EnquiryId, OfficeType, OfficeId, CalendarYear, Status, SlaDays, DueDate, Details, SiteName, RequestedBy, CompletedBy, CompletedAt)
-        SELECT @e, @t, @oi, y.Y, N'Not Found', @sd, @due, @de, @si, @u, @u, SYSUTCDATETIME() FROM y
+        SELECT @e, @t, @oi, y.Y, @st, @sd, @due, @de, @si, @u, @u, SYSUTCDATETIME() FROM y
         WHERE NOT EXISTS (SELECT 1 FROM dbo.LegalEnquiryDeedSearch x WHERE x.EnquiryId = @e AND x.OfficeType = @t AND x.CalendarYear = y.Y)
         OPTION (MAXRECURSION 400)`);
     const n = r.rowsAffected[0] || 0;
-    await writeAudit(pool, req, { action: "Deed search range recorded", entityType: "Land Enquiry", entityId: o.EnquiryId, newValue: { office: o.OfficeType, from, to, years: n } }).catch(() => {});
-    res.status(201).json({ message: n ? `${o.OfficeType}: ${n} year${n > 1 ? "s" : ""} (${from}–${to}) recorded as not found` : "Every year in that range is already recorded" });
+    await writeAudit(pool, req, { action: "Deed search range recorded", entityType: "Land Enquiry", entityId: o.EnquiryId, newValue: { office: o.OfficeType, from, to, years: n, status: st } }).catch(() => {});
+    res.status(201).json({ message: n ? `${o.OfficeType}: ${n} year${n > 1 ? "s" : ""} (${from}–${to}) recorded as ${st.toLowerCase()}` : "Every year in that range is already recorded" });
   } catch (err) {
     console.error("[legal-enquiry-search] range:", err.message);
     res.status(500).json({ error: "Could not save the range" });
+  }
+});
+
+// PUT /office/:id/from-year { fromYear, reason } — records before the usual start year are needed: the office's search starts
+// earlier (down to 1800). Those years must then be searched too before the office can be completed.
+router.put("/office/:id/from-year", requirePageRight(PAGE, "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const o = await officeRow(pool, idOf(req.params.id));
+    if (!o) return res.status(404).json({ error: "Office search not found" });
+    if (o.Status === "Completed") return res.status(409).json({ error: "Reopen the search first" });
+    const y = idOf(req.body?.fromYear);
+    const reason = txt(req.body?.reason, 500);
+    if (!y || y < EARLIEST || y > thisYear()) return res.status(400).json({ error: `Choose a year from ${EARLIEST} to ${thisYear()}` });
+    if (!reason) return res.status(400).json({ error: "Give the reason (why earlier records are needed)" });
+    await pool.request().input("o", sql.Int, o.OfficeSearchId).input("y", sql.Int, y).query("UPDATE dbo.LegalEnquiryOfficeSearch SET FromYear = @y WHERE OfficeSearchId = @o");
+    await writeAudit(pool, req, { action: "Office search start year changed", entityType: "Land Enquiry", entityId: o.EnquiryId, oldValue: { fromYear: o.FromYear }, newValue: { office: o.OfficeType, fromYear: y }, remarks: reason }).catch(() => {});
+    res.json({ message: `${o.OfficeType}: search now covers ${y}–${thisYear()}` });
+  } catch (err) {
+    console.error("[legal-enquiry-search] from-year:", err.message);
+    res.status(500).json({ error: "Could not change the start year" });
   }
 });
 
@@ -366,10 +396,16 @@ router.post("/office/:id/complete", requirePageRight(PAGE, "edit"), async (req, 
     const pool = getPool();
     const o = await officeRow(pool, idOf(req.params.id));
     if (!o) return res.status(404).json({ error: "Office search not found" });
-    const n = (await pool.request().input("e", sql.Int, o.EnquiryId).input("t", sql.NVarChar(60), o.OfficeType)
-      .query("SELECT COUNT(*) AS n FROM dbo.LegalEnquiryDeedSearch WHERE EnquiryId = @e AND OfficeType = @t")).recordset[0].n;
+    // Every year from the office's start year to this year needs a final result (Found / Not Found / Not Applicable).
+    const first = o.FromYear || FIRST_YEAR, last = thisYear();
+    const c = (await pool.request().input("e", sql.Int, o.EnquiryId).input("t", sql.NVarChar(60), o.OfficeType).input("f", sql.Int, first).input("l", sql.Int, last).query(`
+      SELECT SUM(CASE WHEN Status IN (N'Found', N'Not Found', N'Not Applicable') THEN 1 ELSE 0 END) AS fin,
+             SUM(CASE WHEN Status IN (N'Under Review', N'Requested') THEN 1 ELSE 0 END) AS rev
+      FROM dbo.LegalEnquiryDeedSearch WHERE EnquiryId = @e AND OfficeType = @t AND CalendarYear BETWEEN @f AND @l`)).recordset[0];
+    const need = last - first + 1, fin = Number(c.fin || 0), rev = Number(c.rev || 0);
+    if (rev) return res.status(409).json({ error: `${rev} year${rev > 1 ? "s are" : " is"} still under review — record the final result first` });
+    if (fin < need) return res.status(409).json({ error: `${need - fin} of ${need} years (${first}–${last}) are not searched yet — every year needs Found, Not Found or Not Applicable` });
     const remarks = txt(req.body?.remarks, 1000);
-    if (!n && !remarks) return res.status(400).json({ error: "Record at least one year's result, or write remarks on what was searched" });
     await pool.request().input("o", sql.Int, o.OfficeSearchId).input("r", sql.NVarChar(1000), remarks).input("u", sql.Int, (req.user?.userId ?? req.user?.id ?? null))
       .query("UPDATE dbo.LegalEnquiryOfficeSearch SET Status = N'Completed', Remarks = @r, CompletedBy = @u, CompletedAt = SYSUTCDATETIME() WHERE OfficeSearchId = @o");
     await writeAudit(pool, req, { action: "Office search completed", entityType: "Land Enquiry", entityId: o.EnquiryId, newValue: { office: o.OfficeType, remarks } }).catch(() => {});
@@ -384,9 +420,13 @@ router.post("/office/:id/reopen", requirePageRight(PAGE, "edit"), async (req, re
     const pool = getPool();
     const o = await officeRow(pool, idOf(req.params.id));
     if (!o) return res.status(404).json({ error: "Office search not found" });
-    await pool.request().input("o", sql.Int, o.OfficeSearchId)
-      .query("UPDATE dbo.LegalEnquiryOfficeSearch SET Status = N'Pending', CompletedBy = NULL, CompletedAt = NULL, AlertOn = NULL WHERE OfficeSearchId = @o");
-    await writeAudit(pool, req, { action: "Office search reopened", entityType: "Land Enquiry", entityId: o.EnquiryId, newValue: { office: o.OfficeType } }).catch(() => {});
+    const reason = txt(req.body?.reason, 500);
+    if (!reason) return res.status(400).json({ error: "Give the reason for reopening" });
+    const conv = (await pool.request().input("e", sql.Int, o.EnquiryId).query("SELECT LandId FROM dbo.LegalLandEnquiry WHERE EnquiryId = @e")).recordset[0];
+    if (conv?.LandId) return res.status(409).json({ error: "This enquiry is already converted to a land — its search cannot be reopened" });
+    await pool.request().input("o", sql.Int, o.OfficeSearchId).input("r", sql.NVarChar(1000), `Reopened: ${reason}`)
+      .query("UPDATE dbo.LegalEnquiryOfficeSearch SET Status = N'Pending', CompletedBy = NULL, CompletedAt = NULL, AlertOn = NULL, Remarks = @r WHERE OfficeSearchId = @o");
+    await writeAudit(pool, req, { action: "Office search reopened", entityType: "Land Enquiry", entityId: o.EnquiryId, newValue: { office: o.OfficeType }, remarks: reason }).catch(() => {});
     res.json({ message: `${o.OfficeType} search reopened` });
   } catch (err) {
     console.error("[legal-enquiry-search] reopen:", err.message);

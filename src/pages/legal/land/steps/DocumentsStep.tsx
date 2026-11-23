@@ -82,6 +82,8 @@ const AddDocument: React.FC<{
     title: preset?.docTypeName ?? "", documentNo: "", documentDate: "", issuingAuthority: "", remarks: "",
     registrationDate: "", relatedOwner: "", relatedLegalRecordId: link?.kind === "legal" ? String(link.id) : "", relatedMortgageId: link?.kind === "loan" ? String(link.id) : "", description: "" });
   const [file, setFile] = useState<{ id: number; fileName: string } | null>(null);
+  // A document can belong to more sections than its main one (e.g. a sale deed: Ownership and Registration).
+  const [also, setAlso] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const up = useUpload();
   const save = async () => {
@@ -89,7 +91,7 @@ const AddDocument: React.FC<{
     setSaving(true);
     try {
       toast.success((await addLandDocument(landId, {
-        ...f, docTypeId: Number(f.docTypeId), fileId: file.id,
+        ...f, docTypeId: Number(f.docTypeId), fileId: file.id, alsoSections: also.filter((x) => x !== f.relatedSection),
         relatedLegalRecordId: f.relatedLegalRecordId ? Number(f.relatedLegalRecordId) : null,
         relatedMortgageId: f.relatedMortgageId ? Number(f.relatedMortgageId) : null,
       })).message);
@@ -115,6 +117,15 @@ const AddDocument: React.FC<{
         <label className="text-xs text-muted-foreground">Related section *
           <select className={`${input} mt-1`} value={f.relatedSection} onChange={set("relatedSection")}>{sections.map((s) => <option key={s}>{s}</option>)}</select>
         </label>
+        <div className="text-xs text-muted-foreground sm:col-span-3">Also belongs to
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+            {sections.filter((s) => s !== f.relatedSection).map((s) => (
+              <label key={s} className="flex items-center gap-1 text-foreground">
+                <input type="checkbox" checked={also.includes(s)} onChange={(e) => setAlso(e.target.checked ? [...also, s] : also.filter((x) => x !== s))} /> {s}
+              </label>
+            ))}
+          </div>
+        </div>
         <label className="text-xs text-muted-foreground">Title *<input className={`${input} mt-1`} value={f.title} onChange={set("title")} /></label>
         <label className="text-xs text-muted-foreground">Document number<input className={`${input} mt-1`} value={f.documentNo} onChange={set("documentNo")} /></label>
         <label className="text-xs text-muted-foreground">Document date<input type="date" className={`${input} mt-1`} value={f.documentDate} onChange={set("documentDate")} /></label>
@@ -254,7 +265,7 @@ export const DocumentsStep: React.FC<{ landId: number; onSaved: () => void }> = 
                         <div className="font-medium text-foreground">{d.Title}</div>
                         <div className="text-xs text-muted-foreground">{d.DocumentCode}{d.DocumentNo ? ` · No. ${d.DocumentNo}` : ""}{d.DocumentDate ? ` · ${fmt(d.DocumentDate)}` : ""}</div>
                       </td>
-                      <td className="py-2 pr-3">{d.DocTypeName}<div className="text-xs text-muted-foreground">{d.RelatedSection}{d.RelatedOwner ? ` · ${d.RelatedOwner}` : ""}{d.RelatedLegalRecord ? ` · ${d.RelatedLegalRecord}` : ""}{d.RelatedMortgage ? ` · ${d.RelatedMortgage}` : ""}</div></td>
+                      <td className="py-2 pr-3">{d.DocTypeName}<div className="text-xs text-muted-foreground">{(d as { Sections?: string }).Sections || d.RelatedSection}{d.RelatedOwner ? ` · ${d.RelatedOwner}` : ""}{d.RelatedLegalRecord ? ` · ${d.RelatedLegalRecord}` : ""}{d.RelatedMortgage ? ` · ${d.RelatedMortgage}` : ""}</div></td>
                       <td className="py-2 pr-3"><div className="flex items-center gap-1.5"><span className="font-mono text-xs text-muted-foreground">v{d.CurrentVersionNo}</span><LegalFileLink id={d.FileId} name={d.FileName} /></div></td>
                       <td className="py-2 pr-3 whitespace-nowrap text-xs text-muted-foreground">{fmt(d.UploadedAt)}<div>{d.UploadedByName ?? ""}</div>
                         {d.ExpiresOn && <div className={d.ExpiresOn < new Date().toISOString().slice(0, 10) ? "font-semibold text-destructive" : ""}>{d.ExpiresOn < new Date().toISOString().slice(0, 10) ? "Expired" : "Valid till"} {fmt(d.ExpiresOn)}</div>}</td>

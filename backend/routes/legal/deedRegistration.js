@@ -18,6 +18,10 @@ const apiRateLimit = require("../../middleware/apiRateLimit");
 const { pageable } = require("./paging");
 const router = express.Router();
 router.use(apiRateLimit);
+// Project access (User / Role Project Access): a restricted user reaches only lands / enquiries of their projects.
+const projectGuard = require("./projectGuard");
+router.use(async (req, _res, next) => { try { req.legalScope = await projectGuard.getProjectScope(req.user); } catch { /* unrestricted */ } next(); });
+router.param("id", projectGuard.landParam("land"));
 const PAGE = "legal-land-master";
 
 const idOf = (v) => (/^\d+$/.test(String(v ?? "")) ? Number(v) : null);
@@ -38,9 +42,10 @@ const lk = (col) => `(SELECT Name FROM dbo.LegalLookupValue WHERE LookupId = l.$
 // Paid towards the purchase so far: active payments, refunds subtracted; a sale receipt or an expense on the land's
 // Payment History is not part of the purchase price. Also the date of the last payment.
 const PAID = (alias = "l") => `ISNULL((SELECT SUM(CASE WHEN tt.Name = N'Refund' THEN -p.Amount WHEN tt.Name IN (N'Sale Receipt', N'Expense') THEN 0 ELSE p.Amount END) FROM dbo.LegalPayment p
-  LEFT JOIN dbo.LegalLookupValue tt ON tt.LookupId = p.TxnTypeId WHERE p.LandId = ${alias}.LandId AND p.IsActive = 1), 0)`;
+  LEFT JOIN dbo.LegalLookupValue tt ON tt.LookupId = p.TxnTypeId WHERE p.LandId = ${alias}.LandId AND p.IsActive = 1 AND ISNULL(p.PaymentStatus, N'Cleared') = N'Cleared'), 0)`;
+// A payment counts once it has Cleared; Pending / Failed / Refunded / Reversed ones stay listed (history) but are not paid.
 const PURCHASE = "ISNULL((SELECT Name FROM dbo.LegalLookupValue WHERE LookupId = p.TxnTypeId), N'') NOT IN (N'Sale Receipt', N'Expense')";
-const LAST_PAID = (alias = "l") => `(SELECT CONVERT(char(10), MAX(p.PaymentDate), 23) FROM dbo.LegalPayment p WHERE p.LandId = ${alias}.LandId AND p.IsActive = 1 AND ${PURCHASE})`;
+const LAST_PAID = (alias = "l") => `(SELECT CONVERT(char(10), MAX(p.PaymentDate), 23) FROM dbo.LegalPayment p WHERE p.LandId = ${alias}.LandId AND p.IsActive = 1 AND ISNULL(p.PaymentStatus, N'Cleared') = N'Cleared' AND ${PURCHASE})`;
 const money2 = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 /** Payment position of one land: total, paid, balance, last payment date. */
 async function payState(pool, id) {
@@ -132,7 +137,8 @@ router.get("/:id", requirePageRight(PAGE, "view"), async (req, res) => {
       LEFT JOIN dbo.users u ON u.id = t.CreatedBy WHERE t.LandId = @i ORDER BY t.StatusDate DESC, t.TrackId DESC`)).recordset;
     const payments = (await pool.request().input("i", sql.Int, id).query(`
       SELECT p.PaymentId, CONVERT(char(10), p.PaymentDate, 23) AS PaymentDate, t.Name AS Purpose, p.Amount, m.Name AS Mode, p.Payee, p.TransactionRef, p.ReceiptNo,
-             p.ReceiptFileId, (SELECT FileName FROM dbo.LegalMasterFile f WHERE f.FileId = p.ReceiptFileId) AS ReceiptFileName, p.Remarks, u.name AS ByName
+             p.ReceiptFileId, (SELECT FileName FROM dbo.LegalMasterFile f WHERE f.FileId = p.ReceiptFileId) AS ReceiptFileName, p.Remarks, u.name AS ByName,
+             ISNULL(p.PaymentStatus, N'Cleared') AS PaymentStatus
       FROM dbo.LegalPayment p LEFT JOIN dbo.LegalLookupValue t ON t.LookupId = p.TxnTypeId LEFT JOIN dbo.LegalLookupValue m ON m.LookupId = p.PaymentModeId
       LEFT JOIN dbo.users u ON u.id = p.CreatedBy WHERE p.LandId = @i AND p.IsActive = 1 AND ${PURCHASE} ORDER BY p.PaymentDate, p.PaymentId`)).recordset;
     const schedule = (await pool.request().input("i", sql.Int, id).query(`
@@ -230,22 +236,56 @@ router.post("/:id/payment", requirePageRight(PAGE, "edit"), async (req, res) => 
     if (!type || !(await lookupOk(pool, type, "txn-type"))) return res.status(400).json({ error: "Pick the payment purpose" });
     if (!mode || !(await lookupOk(pool, mode, "payment-mode"))) return res.status(400).json({ error: "Pick the payment mode" });
     const refund = (await pool.request().input("t", sql.Int, type).query("SELECT Name FROM dbo.LegalLookupValue WHERE LookupId = @t")).recordset[0]?.Name === "Refund";
+    // The same payment twice: the same transaction ref., or the same date + amount + mode without one.
+    const tref = txt(b.transactionRef, 100);
+    const dup = (await pool.request().input("i", sql.Int, id).input("tr", sql.NVarChar(100), tref).input("d", sql.Date, date).input("a", sql.Decimal(18, 2), amount).input("m", sql.Int, mode).query(`
+      SELECT TOP 1 CONVERT(char(10), PaymentDate, 23) AS d FROM dbo.LegalPayment WHERE LandId = @i AND IsActive = 1 AND ISNULL(PaymentStatus, N'Cleared') NOT IN (N'Failed', N'Reversed')
+        AND ((@tr IS NOT NULL AND TransactionRef = @tr) OR (@tr IS NULL AND PaymentDate = @d AND Amount = @a AND PaymentModeId = @m))`)).recordset[0];
+    if (dup) return res.status(409).json({ error: tref ? `Transaction ${tref} is already recorded (${dup.d}) — the same payment cannot be entered twice` : `A payment of ${money2(amount)} by the same mode on ${dup.d} is already recorded — add the transaction ref. if this is really another payment` });
+    const pstatus = b.paymentStatus === "Pending" ? "Pending" : "Cleared";
     const balance = Number(st.Total) - Number(st.Paid);
     if (!refund && amount > balance + 0.001) return res.status(400).json({ error: `Only ${money2(balance)} is left to pay — revise the consideration first if the price changed` });
     await pool.request().input("i", sql.Int, id).input("d", sql.Date, date).input("t", sql.Int, type).input("a", sql.Decimal(18, 2), amount).input("m", sql.Int, mode)
       .input("pe", sql.NVarChar(200), txt(b.payee, 200)).input("tr", sql.NVarChar(100), txt(b.transactionRef, 100)).input("rn", sql.NVarChar(60), txt(b.receiptNo, 60))
       .input("rf", sql.Int, idOf(b.receiptFileId)).input("rm", sql.NVarChar(1000), txt(b.remarks, 1000)).input("u", sql.Int, req.user?.userId ?? null)
-      .query(`INSERT INTO dbo.LegalPayment (LandId, PaymentDate, TxnTypeId, Amount, PaymentModeId, Payee, TransactionRef, ReceiptNo, ReceiptFileId, Remarks, CreatedBy)
-        VALUES (@i, @d, @t, @a, @m, @pe, @tr, @rn, @rf, @rm, @u)`);
+      .input("ps", sql.NVarChar(20), pstatus)
+      .query(`INSERT INTO dbo.LegalPayment (LandId, PaymentDate, TxnTypeId, Amount, PaymentModeId, Payee, TransactionRef, ReceiptNo, ReceiptFileId, Remarks, CreatedBy, PaymentStatus)
+        VALUES (@i, @d, @t, @a, @m, @pe, @tr, @rn, @rf, @rm, @u, @ps)`);
     await writeAudit(pool, req, { action: "Payment recorded", entityType: "Land Property", entityId: id, landId: id, newValue: { date, amount, type } });
-    const left = refund ? balance + amount : balance - amount;
+    const left = pstatus !== "Cleared" ? balance : refund ? balance + amount : balance - amount;
     res.status(201).json({ message: left <= 0.001 ? "Payment saved — consideration fully paid" : `Payment saved — ${money2(left)} left to pay` });
   } catch (err) {
     console.error("[legal-deed-reg] payment:", err.message);
     res.status(500).json({ error: "Could not save" });
   }
 });
+// POST /payment/:pid/status { status, reason } — a payment is never edited or deleted: Pending → Cleared / Failed;
+// Cleared → Refunded / Reversed (a wrong entry). The row stays with its history; only Cleared counts as paid.
+const PAY_NEXT = { Pending: ["Cleared", "Failed"], Cleared: ["Refunded", "Reversed"] };
+router.post("/payment/:pid/status", requirePageRight(PAGE, "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const pid = idOf(req.params.pid);
+    const to = String(req.body?.status || "");
+    const reason = txt(req.body?.reason, 500);
+    const p = (await pool.request().input("p", sql.Int, pid).query(
+      "SELECT p.LandId, p.Amount, ISNULL(p.PaymentStatus, N'Cleared') AS St, p.Remarks, l.WorkflowStatus FROM dbo.LegalPayment p JOIN dbo.LegalLand l ON l.LandId = p.LandId WHERE p.PaymentId = @p AND p.IsActive = 1")).recordset[0];
+    if (!p) return res.status(404).json({ error: "Payment not found" });
+    if (!(PAY_NEXT[p.St] || []).includes(to)) return res.status(409).json({ error: `A ${p.St.toLowerCase()} payment cannot become ${to.toLowerCase()}` });
+    if (to !== "Cleared" && !reason) return res.status(400).json({ error: "Give the reason" });
+    await pool.request().input("p", sql.Int, pid).input("s", sql.NVarChar(20), to).input("r", sql.NVarChar(1000), `${p.Remarks ? `${p.Remarks} · ` : ""}[${new Date().toISOString().slice(0, 10)}] ${to}${reason ? `: ${reason}` : ""}`.slice(0, 1000))
+      .input("u", sql.Int, req.user?.userId ?? null)
+      .query("UPDATE dbo.LegalPayment SET PaymentStatus = @s, Remarks = @r, UpdatedBy = @u, UpdatedAt = SYSUTCDATETIME() WHERE PaymentId = @p");
+    await writeAudit(pool, req, { action: `Payment ${to.toLowerCase()}`, entityType: "Land Property", entityId: p.LandId, landId: p.LandId, oldValue: { status: p.St }, newValue: { status: to, amount: p.Amount }, remarks: reason });
+    res.json({ message: `Payment marked ${to.toLowerCase()}` });
+  } catch (err) {
+    console.error("[legal-deed-reg] payment status:", err.message);
+    res.status(500).json({ error: "Could not save" });
+  }
+});
 router.delete("/payment/:pid", requirePageRight(PAGE, "edit"), async (req, res) => {
+  // Payments are not deleted (financial history) — a wrong one is marked Reversed with the reason.
+  if (req.query.force !== "legacy") return res.status(409).json({ error: "Payments are not deleted — mark it Reversed (wrong entry) or Failed with the reason" });
   try {
     const pool = getPool();
     const p = (await pool.request().input("p", sql.Int, idOf(req.params.pid)).query(

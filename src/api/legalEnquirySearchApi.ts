@@ -27,10 +27,11 @@ export interface OfficeSearch {
   EnquiryNo?: string; ProjectId?: number | null; ProjectName?: string | null;
 }
 export interface YearResult {
-  SearchId: number; OfficeType: string; CalendarYear: number; Status: "Found" | "Not Found" | "Requested"; DeedNo: string | null; DeedDate: string | null;
+  SearchId: number; OfficeType: string; CalendarYear: number; Status: "Found" | "Not Found" | "Not Applicable" | "Under Review" | "Requested"; DeedNo: string | null; DeedDate: string | null;
   Parties: string | null; Details: string | null; SiteName: string | null; RecordedAt: string; RecordedByName: string | null;
 }
-export interface YearBody { calendarYear?: number; result: "Found" | "Not Found"; deedNo?: string; deedDate?: string; parties?: string; details?: string; siteName?: string }
+export type YearStatus = "Found" | "Not Found" | "Not Applicable" | "Under Review";
+export interface YearBody { calendarYear?: number; result: YearStatus; deedNo?: string; deedDate?: string; parties?: string; details?: string; siteName?: string }
 
 export const getSearchOptions = async () => handle<SearchOptions>(await fetchWithAuth(`${BASE}/options`));
 export const findEnquiries = async (projectId: number | "all" | "none", q: string, tab: SearchTab = "all") =>
@@ -46,8 +47,10 @@ export const addYearResult = async (id: number, body: YearBody) => handle<{ mess
 export const editYearResult = async (searchId: number, body: YearBody) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/item/${searchId}`, send("PUT", body)));
 export const deleteYearResult = async (searchId: number) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/item/${searchId}`, send("DELETE")));
 export const completeOffice = async (id: number, remarks: string) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/office/${id}/complete`, send("POST", { remarks })));
-export const reopenOffice = async (id: number) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/office/${id}/reopen`, send("POST", {})));
-export const addYearRange = async (id: number, body: { from: number; to: number; siteName?: string; details?: string }) =>
+export const reopenOffice = async (id: number, reason: string) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/office/${id}/reopen`, send("POST", { reason })));
+/** Search earlier years too (records before the usual start year are needed). */
+export const setOfficeFromYear = async (id: number, fromYear: number, reason: string) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/office/${id}/from-year`, send("PUT", { fromYear, reason })));
+export const addYearRange = async (id: number, body: { from: number; to: number; siteName?: string; details?: string; status?: "Not Found" | "Not Applicable" | "Under Review" }) =>
   handle<{ message: string }>(await fetchWithAuth(`${BASE}/office/${id}/range`, send("POST", body)));
 export const addOffice = async (body: { officeName: string; officeTypeId: number; enquiryId: number }) =>
   handle<{ OfficeId: number; OfficeName: string; OfficeType: string; message: string }>(await fetchWithAuth(`${BASE}/offices`, send("POST", body)));

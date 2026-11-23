@@ -16,7 +16,7 @@ import { getLegalLookup, uploadLegalFile } from "@/api/legalMastersApi";
 import { deedRegistrationAction } from "@/api/legalLandApi";
 import {
   getDeedRegList, getDeedRegLand, saveConsideration, addStampQuery, deleteStampQuery, saveFinalRegistration, addDeedTracking, inr,
-  addPayment, deletePayment, addInstalment, deleteInstalment, getInstalmentTemplates, applyInstalmentTemplate,
+  addPayment, deletePayment, setPaymentStatus, addInstalment, deleteInstalment, getInstalmentTemplates, applyInstalmentTemplate,
   type DeedRegRow, type DeedRegLand, type StampQuery, type TrackRow, type PaymentRow, type ScheduleRow, type RevisionRow, type ValuationRow,
 } from "@/api/legalDeedRegApi";
 
@@ -545,13 +545,26 @@ function Payments({ l, payments, schedule, editable, onSaved }: { l: DeedRegLand
                     </span>
                   </span>
                   <span className={`text-sm font-bold tabular-nums ${r.Purpose === "Refund" ? "text-rose-600" : ""}`}>{r.Purpose === "Refund" ? "−" : ""}{inr(r.Amount)}</span>
-                  {editable && <button className={`${small} text-rose-600`} onClick={() => remove("Remove this payment?", () => deletePayment(r.PaymentId))}>Delete</button>}
+                  {(() => {
+                    const ps = (r as { PaymentStatus?: string }).PaymentStatus ?? "Cleared";
+                    const tone = ps === "Cleared" ? "border-emerald-600 text-emerald-700" : ps === "Pending" ? "border-amber-500 text-amber-700" : "border-destructive text-destructive";
+                    const mark = async (to: string) => {
+                      const reason = to === "Cleared" ? "" : await askLegal({ title: `Mark this payment ${to.toLowerCase()}?`, message: "The payment stays in the history; only cleared payments count as paid.", input: { label: "Reason", required: true }, confirmText: to });
+                      if (reason === null) return;
+                      run(() => setPaymentStatus(r.PaymentId, to, reason || undefined));
+                    };
+                    return <>
+                      <span className={`border px-1.5 py-0.5 text-[0.625rem] font-semibold uppercase ${tone}`}>{ps}</span>
+                      {editable && ps === "Pending" && <><button className={small} onClick={() => mark("Cleared")}>Cleared</button><button className={`${small} text-rose-600`} onClick={() => mark("Failed")}>Failed</button></>}
+                      {editable && ps === "Cleared" && <><button className={small} onClick={() => mark("Refunded")}>Refunded</button><button className={`${small} text-rose-600`} onClick={() => mark("Reversed")} title="A wrong entry — reversed, kept in the history">Reverse</button></>}
+                    </>;
+                  })()}
                 </li>
               ))}
               <li className="flex justify-between px-3 py-2.5 text-sm font-bold"><span>Total paid</span><span className="tabular-nums">{inr(paid)}</span></li>
             </ol>
           ) : <p className="text-sm text-muted-foreground">No payment recorded yet.</p>}
-          <p className="text-[0.6875rem] text-muted-foreground">This is the only place this purchase is paid. A payment cannot be dated in the future or be more than what is still to pay.</p>
+          <p className="text-[0.6875rem] text-muted-foreground">This is the only place this purchase is paid. A payment cannot be dated in the future or be more than what is still to pay, and the same transaction cannot be entered twice. Payments are never deleted: a wrong one is reversed, a bounced one marked failed — only cleared payments count.</p>
         </div>
       )}
     </div>

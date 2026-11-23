@@ -9,9 +9,12 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { LegalShell } from "@/components/legal/LegalShell";
 import { LegalFileLink } from "@/components/legal/LegalDocumentPreview";
 import { usePageRights } from "@/hooks/usePageRights";
-import { getPostRegistration, updatePostRegTask, type PostRegTask } from "@/api/legalLandApi";
+import { addPostRegTask, getPostRegistration, updatePostRegTask, type PostRegTask } from "@/api/legalLandApi";
+import { getLegalLookup } from "@/api/legalMastersApi";
+import { useQuery as useQ } from "@tanstack/react-query";
 import { uploadLegalFile } from "@/api/legalMastersApi";
 import { LandClearancePanel } from "@/components/legal/LandClearancePanel";
+import { askLegal } from "@/components/legal/LegalAsk";
 
 const fmt = (d: string | null) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—");
 const today = new Date().toISOString().slice(0, 10);
@@ -23,9 +26,10 @@ const input = "w-full border border-border bg-background px-1.5 py-1 text-xs";
 
 /** One task row: status, reference no., due date, remarks and a copy; saved on its own. */
 function TaskRow({ t, statuses, canEdit, onSaved }: { t: PostRegTask; statuses: string[]; canEdit: boolean; onSaved: () => void }) {
-  const [f, setF] = useState({ status: t.Status, refNo: t.RefNo ?? "", dueDate: t.DueDate ?? "", remarks: t.Remarks ?? "", fileId: null as number | null, fileName: "" });
+  const users = useQ({ queryKey: ["legal-lookup", "user"], queryFn: () => getLegalLookup("user"), staleTime: 600_000 });
+  const [f, setF] = useState({ status: t.Status, refNo: t.RefNo ?? "", dueDate: t.DueDate ?? "", remarks: t.Remarks ?? "", fileId: null as number | null, fileName: "", assignedUserId: t.AssignedUserId ? String(t.AssignedUserId) : "" });
   const [busy, setBusy] = useState(false);
-  const dirty = f.status !== t.Status || f.refNo !== (t.RefNo ?? "") || f.dueDate !== (t.DueDate ?? "") || f.remarks !== (t.Remarks ?? "") || !!f.fileId;
+  const dirty = f.status !== t.Status || f.refNo !== (t.RefNo ?? "") || f.dueDate !== (t.DueDate ?? "") || f.remarks !== (t.Remarks ?? "") || !!f.fileId || f.assignedUserId !== (t.AssignedUserId ? String(t.AssignedUserId) : "");
   const late = t.Status !== "Completed" && t.DueDate && t.DueDate < today;
   const attach = () => {
     const el = document.createElement("input");
@@ -39,11 +43,18 @@ function TaskRow({ t, statuses, canEdit, onSaved }: { t: PostRegTask; statuses: 
   };
   const save = async () => {
     setBusy(true);
-    try { toast.success((await updatePostRegTask(t.TaskId, f)).message); onSaved(); } catch (e) { toast.error(e instanceof Error ? e.message : "Could not save"); } finally { setBusy(false); }
+    try { toast.success((await updatePostRegTask(t.TaskId, { ...f, assignedUserId: f.assignedUserId ? Number(f.assignedUserId) : null })).message); onSaved(); } catch (e) { toast.error(e instanceof Error ? e.message : "Could not save"); } finally { setBusy(false); }
   };
   return (
     <tr className={`border-t border-border/60 align-top ${late ? "bg-destructive/5" : ""}`}>
-      <td className="px-2 py-1.5 text-xs font-semibold">{t.TaskNo}. {t.Task}</td>
+      <td className="px-2 py-1.5 text-xs font-semibold">{t.TaskNo}. {t.Task}
+        {canEdit ? (
+          <select className={`${input} mt-1 font-normal`} value={f.assignedUserId} onChange={(e) => setF({ ...f, assignedUserId: e.target.value })} title="Assigned to">
+            <option value="">Assign to…</option>{(users.data ?? []).map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
+          </select>
+        ) : t.AssignedName ? <span className="block font-normal text-muted-foreground">Assigned: {t.AssignedName}</span> : null}
+        {t.CompletedAt && <span className="block font-normal text-emerald-700">Completed {fmt(t.CompletedAt)}{t.CompletedByName ? ` · ${t.CompletedByName}` : ""}</span>}
+      </td>
       <td className="px-2 py-1.5">
         {canEdit ? <select className={`${input} ${TONE[f.status] ?? ""}`} value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })}>{statuses.map((s) => <option key={s}>{s}</option>)}</select>
           : <span className={`text-xs font-semibold ${TONE[t.Status] ?? ""}`}>{t.Status}</span>}
@@ -95,6 +106,13 @@ export default function LandPostRegistrationPage() {
                       Registered {fmt(l.RegCompletedAt)}
                       {l.RegDeedFileId ? <LegalFileLink id={l.RegDeedFileId} name={l.RegDeedFileName ?? "Registered deed"} /> : null}
                       <b className={done === l.tasks.length ? "text-emerald-600" : "text-amber-600"}>{done} / {l.tasks.length} done</b>
+                      {canEdit && <button className="border border-foreground px-2 py-0.5 font-semibold" onClick={async () => {
+                        const task = await askLegal({ title: `New task · ${l.LandCode}`, message: "Repeat work: yearly land tax, a new survey, the next mutation step…", input: { label: "Task (e.g. Land tax 2027-28)", required: true }, confirmText: "Next" });
+                        if (!task) return;
+                        const due = await askLegal({ title: "Due date", input: { label: "Due date (YYYY-MM-DD, optional)" }, confirmText: "Add task" });
+                        if (due === null) return;
+                        try { toast.success((await addPostRegTask(l.LandId, { task, dueDate: due || undefined })).message); refresh(); } catch (e) { toast.error((e as Error).message); }
+                      }}>+ New task</button>}
                     </span>
                   </header>
                   <div className="overflow-x-auto">
