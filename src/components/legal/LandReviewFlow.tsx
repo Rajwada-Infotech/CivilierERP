@@ -26,18 +26,18 @@ function FieldCell({ f, old, diff, fk, decisions, remarks, onDecide }: { f: Entr
   const empty = f.v == null;
   return (
     <div className={`relative border-l-2 px-1.5 py-1 ${d === "bad" ? "outline outline-2 -outline-offset-2 outline-destructive" : d === "ok" ? "outline outline-1 -outline-offset-1 outline-emerald-600" : d === "na" ? "opacity-60" : ""} ${changed ? "border-amber-500 bg-amber-500/10" : empty ? (f.req ? "border-destructive bg-destructive/5" : "border-border bg-muted/40") : "border-sky-500 bg-sky-500/5"}`}>
-      <dt className="flex items-start justify-between gap-1 text-[0.625rem] uppercase tracking-[0.08em] text-muted-foreground">
+      <dt className="flex flex-wrap items-start justify-between gap-1 text-[0.625rem] uppercase tracking-[0.08em] text-muted-foreground">
         <span>{f.l}{f.req && <span className="text-destructive"> *</span>}</span>
         {f.info ? (
           <span className="shrink-0 text-[0.5625rem] normal-case text-muted-foreground" title="Not entered data — nothing to verify">info</span>
         ) : fk && onDecide ? (
           <span className="flex shrink-0 gap-0.5 normal-case">
             <button type="button" title="Correct" onClick={() => onDecide(fk, d === "ok" ? null : "ok")}
-              className={`h-5 w-5 border text-[0.6875rem] font-bold leading-none ${d === "ok" ? "border-emerald-600 bg-emerald-600 text-white" : "border-emerald-600/50 text-emerald-700 hover:bg-emerald-600/10"}`}>✓</button>
+              className={`h-8 w-8 border text-sm font-bold leading-none sm:h-5 sm:w-5 sm:text-[0.6875rem] ${d === "ok" ? "border-emerald-600 bg-emerald-600 text-white" : "border-emerald-600/50 text-emerald-700 hover:bg-emerald-600/10"}`}>✓</button>
             <button type="button" title="Wrong" onClick={() => onDecide(fk, d === "bad" ? null : "bad")}
-              className={`h-5 w-5 border text-[0.6875rem] font-bold leading-none ${d === "bad" ? "border-destructive bg-destructive text-white" : "border-destructive/50 text-destructive hover:bg-destructive/10"}`}>✗</button>
+              className={`h-8 w-8 border text-sm font-bold leading-none sm:h-5 sm:w-5 sm:text-[0.6875rem] ${d === "bad" ? "border-destructive bg-destructive text-white" : "border-destructive/50 text-destructive hover:bg-destructive/10"}`}>✗</button>
             <button type="button" title="Not needed / not required" onClick={() => onDecide(fk, d === "na" ? null : "na")}
-              className={`h-5 border px-1 text-[0.5625rem] font-bold leading-none ${d === "na" ? "border-foreground bg-foreground text-background" : "border-foreground/30 text-muted-foreground hover:bg-muted"}`}>N/A</button>
+              className={`h-8 border px-1.5 text-xs font-bold leading-none sm:h-5 sm:px-1 sm:text-[0.5625rem] ${d === "na" ? "border-foreground bg-foreground text-background" : "border-foreground/30 text-muted-foreground hover:bg-muted"}`}>N/A</button>
           </span>
         ) : d ? <span className={`text-xs font-bold ${d === "ok" ? "text-emerald-700" : d === "bad" ? "text-destructive" : "text-muted-foreground"}`}>{d === "ok" ? "✓" : d === "bad" ? "✗" : "N/A"}</span> : null}
       </dt>
@@ -63,7 +63,7 @@ export function RecordCard({ r, prev, diff, tag, decisions, remarks, onDecide, o
         {onEdit && <button onClick={onEdit} className="ml-auto h-7 border border-foreground/50 px-2.5 text-[0.6875rem] font-semibold uppercase tracking-[0.06em] hover:border-foreground hover:bg-foreground hover:text-background">Edit</button>}
         <span className={`${onEdit ? "" : "ml-auto "}text-muted-foreground`}>{filled} / {r.fields.length} filled{reqMissing ? <b className="ml-1.5 text-destructive">· {reqMissing} required missing</b> : null}</span>
       </div>
-      <dl className={`grid grid-cols-2 gap-1 p-2 sm:grid-cols-3 lg:grid-cols-4 ${tag === "gone" ? "line-through" : ""}`}>
+      <dl className={`grid grid-cols-1 gap-1 p-2 min-[480px]:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 ${tag === "gone" ? "line-through" : ""}`}>
         {r.fields.map((f) => <FieldCell key={f.n} f={f} old={prev?.fields.find((x) => x.n === f.n)} diff={diff && !!prev}
           fk={tag === "gone" ? undefined : `${r.master}#${r.id}#${f.n}`} decisions={decisions} remarks={remarks} onDecide={onDecide} />)}
       </dl>
@@ -177,7 +177,7 @@ export function LandRecordView({ landId, editor }: { landId: number; editor?: (k
               {wrong > 0 && <span className="bg-destructive px-2 py-0.5 text-[0.625rem] font-semibold uppercase tracking-[0.06em] text-white">✗ {wrong} field{wrong === 1 ? "" : "s"} to correct</span>}
               {(req > 0 || docs > 0 || (empty && s.needed)) && <span className="text-xs font-semibold text-destructive">{[empty && s.needed ? "nothing entered" : "", req ? `${req} required empty` : "", docs ? `${docs} document${docs === 1 ? "" : "s"} missing` : ""].filter(Boolean).join(" · ")}</span>}
               {editor && SECTION_MASTERS[s.key] && s.key !== "basic" && can(s.key, "create") && (
-                <span className="ml-auto flex gap-1">
+                <span className="ml-auto flex flex-wrap justify-end gap-1">
                   {SECTION_MASTERS[s.key].map((m) => (
                     <button key={m} onClick={() => setInline(`new:${s.key}:${m}`)}
                       className="h-8 border border-foreground bg-foreground px-3 text-xs font-semibold uppercase tracking-[0.06em] text-background hover:opacity-90">

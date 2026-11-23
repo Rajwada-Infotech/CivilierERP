@@ -21,7 +21,7 @@ const parse = (s) => { if (s == null) return null; try { return JSON.parse(s); }
 const safe = async (fn, fallback) => { try { return await fn(); } catch { return fallback; } };
 
 // GET /lands — every active land with its RS / LR numbers (Land Flowchart's land tabs; filtered by project on the page).
-router.get("/lands", requirePageRight(PAGE, "view"), async (_req, res) => {
+router.get("/lands", requirePageRight(PAGE, "view"), async (req, res) => {
   try {
     const r = await getPool().request().query(`
       SELECT LandId, LandCode, LandName, ProjectId, WorkflowStatus, RsKhatianNo, RsDagNo, LrKhatianNo, LrDagNo

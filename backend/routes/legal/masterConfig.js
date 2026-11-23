@@ -286,7 +286,7 @@ const MASTERS = {
         whatsapp: "(SELECT u.WhatsAppNo FROM dbo.LegalLandEnquiry e JOIN dbo.users u ON u.id = e.CreatedBy WHERE e.EnquiryId = t.EnquiryId)",
         userId: "(SELECT e.CreatedBy FROM dbo.LegalLandEnquiry e WHERE e.EnquiryId = t.EnquiryId)" },
       // A registered land opens for editing while an approved amendment is open (migration 702).
-      { name: "AmendmentOpen", label: "Amendment open", sql: "(SELECT COUNT(*) FROM dbo.LegalLandAmendment a WHERE a.LandId = t.LandId AND a.Status = N'Open')" },
+      { name: "AmendmentOpen", label: "Amendment open", hidden: true, sql: "(SELECT COUNT(*) FROM dbo.LegalLandAmendment a WHERE a.LandId = t.LandId AND a.Status = N'Open')" },
     ],
     // The same Mouza and Dag number twice is almost always the same land entered twice.
     // The same Mouza and Dag is the same land — in any project, as a land or an open enquiry.
@@ -388,12 +388,12 @@ const MASTERS = {
     extras: [
       { name: "LandCode", label: "Land conversion", sql: "(SELECT l.LandCode FROM dbo.LegalLand l WHERE l.LandId = t.LandId)" },
       // Earlier rejected enquiries for the same plot (Mouza + RS or LR Dag), in any project.
-      { name: "RejectedBefore", label: "Rejected before", sql: "(SELECT STRING_AGG(r.EnquiryNo, N', ') FROM dbo.LegalLandEnquiry r WHERE r.EnquiryId <> t.EnquiryId AND r.EnquiryStatus = N'Rejected' AND r.MouzaId = t.MouzaId AND ((t.RsDagNo IS NOT NULL AND r.RsDagNo = t.RsDagNo) OR (t.LrDagNo IS NOT NULL AND r.LrDagNo = t.LrDagNo)))" },
+      { name: "RejectedBefore", label: "Rejected before", hidden: true, sql: "(SELECT STRING_AGG(r.EnquiryNo, N', ') FROM dbo.LegalLandEnquiry r WHERE r.EnquiryId <> t.EnquiryId AND r.EnquiryStatus = N'Rejected' AND r.MouzaId = t.MouzaId AND ((t.RsDagNo IS NOT NULL AND r.RsDagNo = t.RsDagNo) OR (t.LrDagNo IS NOT NULL AND r.LrDagNo = t.LrDagNo)))" },
       // Deed Registry Search: offices still open (the enquiry's actions open once every office's search is complete).
       { name: "OfficesPending", label: "Deed search offices open", sql: "(SELECT COUNT(*) FROM dbo.LegalEnquiryOfficeSearch x WHERE x.EnquiryId = t.EnquiryId AND x.Status = N'Pending')" },
       { name: "OfficesTotal", label: "Deed search offices", sql: "(SELECT COUNT(*) FROM dbo.LegalEnquiryOfficeSearch x WHERE x.EnquiryId = t.EnquiryId)" },
       // Office types that apply to the enquiry's state: 0 means the setup is missing; more means its timelines just need creating.
-      { name: "OfficeTypesForState", label: "Office types for the state", sql: "(SELECT COUNT(*) FROM dbo.LegalRegistrationOfficeType ot LEFT JOIN dbo.LegalDistrict dd ON dd.DistrictId = t.DistrictId WHERE ot.IsActive = 1 AND ot.OnEnquiry = 1 AND (ot.StateName IS NULL OR ot.StateName = dd.State))" },
+      { name: "OfficeTypesForState", label: "Office types for the state", hidden: true, sql: "(SELECT COUNT(*) FROM dbo.LegalRegistrationOfficeType ot LEFT JOIN dbo.LegalDistrict dd ON dd.DistrictId = t.DistrictId WHERE ot.IsActive = 1 AND ot.OnEnquiry = 1 AND (ot.StateName IS NULL OR ot.StateName = dd.State))" },
       { name: "OfficesOverdue", label: "Deed search offices overdue", sql: "(SELECT COUNT(*) FROM dbo.LegalEnquiryOfficeSearch x WHERE x.EnquiryId = t.EnquiryId AND t.EnquiryStatus <> N'Rejected' AND x.Status = N'Pending' AND x.DueDate < CAST(GETDATE() AS DATE))" },
       // Who raised the enquiry, with a WhatsApp link so anyone can talk to them about it.
       { name: "EnquiryBy", label: "Entry by", after: "EnquiryNo", sql: "(SELECT u.name FROM dbo.users u WHERE u.id = t.CreatedBy)",

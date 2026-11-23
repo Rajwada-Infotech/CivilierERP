@@ -257,7 +257,7 @@ function Consideration({ l, revisions, valuation, editable, onSaved }: { l: Deed
       {revisions.length > 0 && (
         <div className="border border-border">
           <p className="border-b border-border bg-muted/40 px-3 py-1.5 text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground">Consideration history</p>
-          <table className="w-full text-left text-xs"><tbody>
+          <div className="overflow-x-auto"><table className="w-full text-left text-xs"><tbody>
             {revisions.map((r) => (
               <tr key={r.RevisionId} className="border-t border-border first:border-t-0">
                 <td className="px-3 py-1.5 tabular-nums">{r.RevisionDate}</td>
@@ -265,7 +265,7 @@ function Consideration({ l, revisions, valuation, editable, onSaved }: { l: Deed
                 <td className="px-3 py-1.5 text-muted-foreground">{r.Reason ?? ""}{r.ValuationDate ? ` · valuation ${r.ValuationDate}` : ""}{r.ByName ? ` — ${r.ByName}` : ""}</td>
               </tr>
             ))}
-          </tbody></table>
+          </tbody></table></div>
         </div>
       )}
     </div>
@@ -407,7 +407,7 @@ function Payments({ l, payments, schedule, editable, onSaved }: { l: DeedRegLand
                 </select>
               </label>
               {chosenTpl && (
-                <table className="w-full text-left text-xs"><tbody>
+                <div className="overflow-x-auto"><table className="w-full text-left text-xs"><tbody>
                   {chosenTpl.lines.map((x) => {
                     const d = new Date(`${l.ConsDate ?? today()}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + Number(x.DueDays));
                     return (
@@ -418,7 +418,7 @@ function Payments({ l, payments, schedule, editable, onSaved }: { l: DeedRegLand
                       </tr>
                     );
                   })}
-                </tbody></table>
+                </tbody></table></div>
               )}
               <div className="flex gap-2">
                 <button className={primary} disabled={busy || !tpl} onClick={applyTpl}>{schedule.length ? "Replace schedule with this" : "Make schedule"}</button>
@@ -587,7 +587,7 @@ function StampDuty({ id, rows, editable, onSaved }: { id: number; rows: StampQue
   };
   return (
     <div className="space-y-3">
-      <table className="w-full text-left text-sm">
+      <div className="overflow-x-auto"><table className="w-full text-left text-sm">
         <thead className="text-[0.6875rem] uppercase tracking-wider text-muted-foreground"><tr><th className="py-1">Query date</th><th className="py-1">Fee type</th><th className="py-1 text-right">Amount</th><th className="py-1">Remarks</th>{editable && <th />}</tr></thead>
         <tbody>
           {rows.map((r) => (
@@ -601,7 +601,7 @@ function StampDuty({ id, rows, editable, onSaved }: { id: number; rows: StampQue
           {!rows.length && <tr><td colSpan={5} className="py-2 text-xs text-muted-foreground">No query yet</td></tr>}
           {rows.length > 0 && <tr className="border-t-2 border-border"><td colSpan={2} className="py-1.5 text-xs font-semibold uppercase">Total</td><td className="py-1.5 text-right font-bold tabular-nums">{inr(total)}</td><td colSpan={2} /></tr>}
         </tbody>
-      </table>
+      </table></div>
       {editable && (
         <div className="legal-g4 border border-border bg-muted/30 p-3">
           <label className="text-xs">Query date<input type="date" className={field} value={f.queryDate} onChange={(e) => setF({ ...f, queryDate: e.target.value })} /></label>

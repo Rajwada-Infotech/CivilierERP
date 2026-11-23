@@ -463,7 +463,7 @@ function YearPanel({ year, r, editable, onSave, onDelete, onClose }: {
         <button className="text-xs underline" onClick={onClose}>Close</button>
       </div>
       <fieldset disabled={!editable} className="legal-g2">
-        <div className="flex gap-2 legal-span">
+        <div className="grid grid-cols-2 gap-2 legal-span sm:flex sm:flex-wrap">
           {(["Found", "Not Found", "Not Applicable", "Under Review"] as const).map((x) => (
             <button key={x} type="button" onClick={() => setResult(x)}
               className={`border px-3 py-1.5 text-sm font-semibold ${result === x ? (x === "Found" ? "border-emerald-700 bg-emerald-600 text-white" : x === "Not Applicable" ? "border-sky-600 bg-sky-600 text-white" : x === "Under Review" ? "border-amber-500 bg-amber-500 text-white" : "border-foreground bg-foreground text-card") : "border-border"}`}>{x}</button>

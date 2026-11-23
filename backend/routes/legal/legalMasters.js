@@ -338,7 +338,7 @@ function sendDbError(res, cfg, err, where) {
 router.get("/meta", (req, res) => {
   res.json(PAGED.map(([key, m]) => ({
     key, title: m.title, group: m.group, pageKey: m.pageKey, desc: m.desc, pk: m.pk, parent: m.parent, noDelete: !!m.noDelete, superAdminDelete: !!m.superAdminDelete, adminOnly: !!m.adminOnly,
-    extras: (m.extras || []).map(({ name, label, whatsapp, after }) => ({ name, label, whatsapp: !!whatsapp, after })),
+    extras: (m.extras || []).map(({ name, label, whatsapp, after, hidden }) => ({ name, label, whatsapp: !!whatsapp, after, hidden: !!hidden })),
     fields: m.fields.map(({ name, label, type, required, options, ref, filterBy, blankOk, fill, default: def, upper, max, mask, auto, suggest, party, hidden, system, multi }) =>
       ({ name, label, type, required: !!required, options, ref, filterBy, blankOk: !!blankOk, fill, default: def, upper: !!upper, max, mask, auto: !!auto, suggest, party, hidden: !!hidden, system: !!system, multi: !!multi,
         creatable: type === "ref" && creatableRef(ref) })),
