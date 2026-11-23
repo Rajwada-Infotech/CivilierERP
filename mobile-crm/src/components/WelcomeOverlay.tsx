@@ -5,6 +5,7 @@
 // onAuthenticated/navHoldMs — the delay this overlay fills is real, not
 // decorative: it's giving the credential-verified-but-not-yet-navigated
 // window something to show).
+import { colors } from "@/theme/colors";
 import { useEffect, useRef } from "react";
 import { Animated, Text, View } from "react-native";
 import { Check } from "lucide-react-native";
@@ -92,7 +93,7 @@ export function WelcomeOverlay({ name, durationMs }: { name?: string; durationMs
             style={{
               height: "100%",
               borderRadius: 2,
-              backgroundColor: "#65a30d",
+              backgroundColor: colors.primary,
               width: barWidth.interpolate({ inputRange: [0, 1], outputRange: ["0%", "100%"] }),
             }}
           />

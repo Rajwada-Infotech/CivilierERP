@@ -125,10 +125,10 @@ export const Press: React.FC<
 
 // ── Type ─────────────────────────────────────────────────────────────────────
 
-/** A capital label: Sora semibold 10, tracked out, graphite. */
+/** A small label in sentence case, muted — the app's kit (screens/crm/ui.tsx), not the old capitals. */
 export const Label: React.FC<{ children: React.ReactNode; color?: string; style?: StyleProp<TextStyle> }> = ({ children, color = S.graphite, style }) => (
   <Text
-    style={[{ fontFamily: fonts.heading.semibold, fontSize: 10, letterSpacing: 1.2, textTransform: "uppercase", color }, style]}
+    style={[{ fontFamily: fonts.body.medium, fontSize: 12.5, color }, style]}
   >
     {children}
   </Text>
@@ -153,41 +153,12 @@ export const Body: React.FC<{ children: React.ReactNode; size?: number; color?: 
 
 // ── Frame ────────────────────────────────────────────────────────────────────
 
-/** The faint 24px grid behind the paper, drawn in tiles of a fixed height. One SVG stretched over a very tall page (a
- * long rights list) makes Android draw one bitmap the size of the whole page, which runs the app out of memory and
- * closes it; tiles 1200px tall (50 grid squares, so the lines meet) keep each bitmap small, and past GRID_MAX_TILES the
- * paper carries on plain. */
-const GRID_TILE = 1200;
-const GRID_MAX_TILES = 8;
-const GridTile: React.FC<{ top: number }> = ({ top }) => (
-  <Svg style={{ position: "absolute", top, left: 0, right: 0, height: GRID_TILE, pointerEvents: "none" }} width="100%" height={GRID_TILE}>
-    <Defs>
-      <Pattern id="sheet-grid" width={24} height={24} patternUnits="userSpaceOnUse">
-        <Path d="M24 0 H0 V24" fill="none" stroke={S.grid} strokeWidth={1} />
-      </Pattern>
-    </Defs>
-    <Rect width="100%" height="100%" fill="url(#sheet-grid)" />
-  </Svg>
-);
-const Grid: React.FC<{ height: number }> = ({ height }) => {
-  const tiles = Math.min(GRID_MAX_TILES, Math.max(1, Math.ceil(height / GRID_TILE)));
-  return (
-    <>
-      {Array.from({ length: tiles }, (_, i) => (
-        <GridTile key={i} top={i * GRID_TILE} />
-      ))}
-    </>
-  );
-};
-
-/** The sheet: paper on a grid, a 1.5 ink border, and a hairline outline standing off it (the web's outline-offset).
- * Its parts rise into place one after another, as the web's `.sheet-in` does; `still` turns that off. */
+/** The sheet: a rounded card, as the app's kit draws one (the old drawing-sheet grid and double border are gone).
+ * Its parts rise into place one after another; `still` turns that off. */
 export const SheetFrame: React.FC<{ children: React.ReactNode; style?: StyleProp<ViewStyle>; still?: boolean }> = ({ children, style, still }) => {
-  const [h, setH] = useState(GRID_TILE);
   return (
-  <View style={[{ margin: 5, padding: 3, borderWidth: 1, borderColor: S.rule }, style]}>
-    <View onLayout={(e) => setH(e.nativeEvent.layout.height)} style={{ backgroundColor: S.paper, borderWidth: 1.5, borderColor: S.ink, overflow: "hidden" }}>
-      <Grid height={h} />
+  <View style={[{ marginHorizontal: 12, marginVertical: 10 }, style]}>
+    <View style={{ backgroundColor: S.paper, borderRadius: 22, borderWidth: 1, borderColor: S.rule, overflow: "hidden" }}>
       {still
         ? children
         : React.Children.toArray(children).map((child, i) => (
@@ -206,10 +177,10 @@ export const TitleText: React.FC<{ children: React.ReactNode; size?: number }> =
   return (
     <Animated.Text
       style={{
-        fontFamily: fonts.heading.bold,
+        fontFamily: fonts.heading.semibold,
         fontSize: size,
-        lineHeight: size * 1.08,
-        letterSpacing: -size * 0.03,
+        lineHeight: size * 1.15,
+        letterSpacing: -size * 0.02,
         color: S.ink,
         opacity: v,
         transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [size * 0.35, 0] }) }],
@@ -241,18 +212,17 @@ export const Rule: React.FC<{ soft?: boolean; ink?: boolean; style?: StyleProp<V
 
 /** The lettered circle that starts a detail's heading. */
 export const Tag: React.FC<{ children: string }> = ({ children }) => (
-  <View style={{ width: 22, height: 22, borderRadius: 11, borderWidth: 1.5, borderColor: S.ink, backgroundColor: S.paper, alignItems: "center", justifyContent: "center" }}>
-    <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 11, color: S.ink }}>{children}</Text>
+  <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: S.blueTint, alignItems: "center", justifyContent: "center" }}>
+    <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 11.5, color: S.blue }}>{children}</Text>
   </View>
 );
 
 /** One lettered section of a sheet: a rule above, then "A — TITLE ————— note". */
 export const Detail: React.FC<{ tag: string; title: string; note?: React.ReactNode; children: React.ReactNode; style?: StyleProp<ViewStyle> }> = ({ tag, title, note, children, style }) => (
-  <View style={[{ borderTopWidth: 1, borderTopColor: S.rule, paddingHorizontal: 14, paddingTop: 16, paddingBottom: 18 }, style]}>
+  <View style={[{ borderTopWidth: 1, borderTopColor: S.ruleSoft, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 18 }, style]}>
     <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 14 }}>
       <Tag>{tag}</Tag>
-      <Label color={S.ink}>{title}</Label>
-      <Grow delay={250} style={{ flex: 1, height: 1, backgroundColor: S.rule }} />
+      <Text style={{ flex: 1, fontFamily: fonts.heading.semibold, fontSize: 15.5, color: S.ink }}>{title}</Text>
       {typeof note === "string" ? <Label>{note}</Label> : note}
     </View>
     {children}
@@ -293,13 +263,14 @@ export const MarkSquare: React.FC<{ tone: MarkTone }> = ({ tone }) => {
   );
 };
 
-/** Status on a sheet: a square mark and a word in capitals; "none" is a dash. */
+/** Status as a soft pill: settled green, waiting / under way amber, stopped red, draft grey; "none" is a dash. */
+const MARK_HUE: Record<MarkTone, string> = { done: "#10B981", waiting: "#F59E0B", moving: "#F59E0B", stopped: "#EF4444", draft: "#9A9AA6" };
 export const SheetMark: React.FC<{ text: string; tone: MarkTone | "none" }> = ({ text, tone }) => {
   if (tone === "none") return <Text style={{ color: S.graphite, fontSize: 12 }}>—</Text>;
+  const hue = MARK_HUE[tone];
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-      <MarkSquare tone={tone} />
-      <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 9, letterSpacing: 1, textTransform: "uppercase", color: markInk(tone) }}>{text}</Text>
+    <View style={{ alignSelf: "flex-start", paddingHorizontal: 10, paddingVertical: 3.5, borderRadius: 999, backgroundColor: `${hue}24` }}>
+      <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 11.5, color: hue }}>{text}</Text>
     </View>
   );
 };
@@ -312,16 +283,16 @@ export const statusTone = (status: string): "done" | "waiting" | "stopped" =>
 /** Segmented keys with an ink border; the chosen one is filled ink. */
 export function Seg<T extends string>({ options, value, onChange }: { options: { value: T; label: string }[]; value: T; onChange: (v: T) => void }) {
   return (
-    <View style={{ flexDirection: "row", alignSelf: "flex-start", borderWidth: 1, borderColor: S.ink }}>
-      {options.map((o, i) => {
+    <View style={{ flexDirection: "row", alignSelf: "flex-start", padding: 3, borderRadius: 999, backgroundColor: S.wash }}>
+      {options.map((o) => {
         const on = o.value === value;
         return (
           <Pressable
             key={o.value}
             onPress={() => onChange(o.value)}
-            style={{ paddingHorizontal: 12, paddingVertical: 8, backgroundColor: on ? S.ink : "transparent", borderLeftWidth: i ? 1 : 0, borderLeftColor: S.ink }}
+            style={{ paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999, backgroundColor: on ? S.blue : "transparent" }}
           >
-            <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 10, letterSpacing: 1.2, textTransform: "uppercase", color: on ? S.paper : S.graphite }}>{o.label}</Text>
+            <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 12.5, color: on ? "#FFFFFF" : S.graphite }}>{o.label}</Text>
           </Pressable>
         );
       })}
@@ -330,7 +301,7 @@ export function Seg<T extends string>({ options, value, onChange }: { options: {
 }
 
 type KeyTone = "ink" | "line" | "red";
-/** A key (button): filled ink, ink outline, or red. Capital Sora label; square. */
+/** A key (button): filled in the accent ("ink"), outlined ("line"), or red. Sentence-case label; rounded. */
 // Keys and rows whose look follows being pressed use Press (above), never Pressable with a style function: on the
 // phone NativeWind's wrapper drops a function style, and keys lose their borders, rows their flexDirection.
 export const Key: React.FC<{
@@ -343,22 +314,22 @@ export const Key: React.FC<{
   style?: StyleProp<ViewStyle>;
 }> = ({ children, label, onPress, disabled, tone = "line", icon, style }) => {
   const filled = tone !== "line";
-  const bg = tone === "ink" ? S.ink : tone === "red" ? S.red : "transparent";
-  const border = tone === "red" ? S.red : S.ink;
-  const fg = tone === "ink" ? S.paper : tone === "red" ? "#ffffff" : S.ink;
+  const bg = tone === "ink" ? S.blue : tone === "red" ? S.red : "transparent";
+  const border = tone === "red" ? S.red : tone === "ink" ? S.blue : S.rule;
+  const fg = tone === "line" ? S.ink : "#ffffff";
   return (
     <Press
       onPress={onPress}
       disabled={disabled}
       style={(pressed) =>
         one(
-        { minHeight: 44, paddingHorizontal: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderWidth: 1, borderColor: border, backgroundColor: pressed && !filled ? S.blueWash : bg, opacity: disabled ? 0.4 : pressed && filled ? 0.85 : 1 },
+        { minHeight: 46, paddingHorizontal: 18, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderRadius: 14, borderWidth: 1, borderColor: border, backgroundColor: pressed && !filled ? S.wash : bg, opacity: disabled ? 0.4 : pressed && filled ? 0.85 : 1 },
         style,
         )
       }
     >
       {icon}
-      {children ?? <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 11, letterSpacing: 1.1, textTransform: "uppercase", color: fg }}>{label}</Text>}
+      {children ?? <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 14, color: fg }}>{label}</Text>}
     </Press>
   );
 };
@@ -378,7 +349,7 @@ export const Field: React.FC<{ label: string; required?: boolean; children: Reac
 export const Input = React.forwardRef<React.ComponentRef<typeof TextInput>, TextInputProps & { right?: React.ReactNode }>(function Input({ right, style, onFocus, onBlur, ...props }, ref) {
   const [focused, setFocused] = useState(false);
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: focused ? S.ink : S.line40, backgroundColor: S.paper }}>
+    <View style={{ flexDirection: "row", alignItems: "center", borderRadius: 14, borderWidth: 1, borderColor: focused ? S.blue : S.rule, backgroundColor: S.paper }}>
       <TextInput
         ref={ref}
         placeholderTextColor={S.faint}
@@ -391,7 +362,7 @@ export const Input = React.forwardRef<React.ComponentRef<typeof TextInput>, Text
           onBlur?.(e);
         }}
         // outlineWidth 0: the wrapper's border is the focus mark; the browser's own ring (web) would sit inside it.
-        style={[{ flex: 1, minHeight: 44, paddingHorizontal: 10, fontFamily: fonts.body.regular, fontSize: 14, color: S.ink, outlineWidth: 0 }, style]}
+        style={[{ flex: 1, minHeight: 48, paddingHorizontal: 14, fontFamily: fonts.body.regular, fontSize: 15, color: S.ink, outlineWidth: 0 }, style]}
         {...props}
       />
       {right}
@@ -401,7 +372,7 @@ export const Input = React.forwardRef<React.ComponentRef<typeof TextInput>, Text
 
 /** A message in the sheet's red: square, a red rule, no fill beyond a wash. */
 export const Notice: React.FC<{ children: React.ReactNode; tone?: "red" | "ink" }> = ({ children, tone = "red" }) => (
-  <View style={{ borderWidth: 1, borderColor: tone === "red" ? S.red : S.ink, backgroundColor: tone === "red" ? S.redWash : "transparent", paddingHorizontal: 12, paddingVertical: 9 }}>
+  <View style={{ borderRadius: 14, backgroundColor: tone === "red" ? S.redWash : S.wash, paddingHorizontal: 14, paddingVertical: 11 }}>
     <Text style={{ fontFamily: fonts.body.medium, fontSize: 13, color: tone === "red" ? S.red : S.ink }}>{children}</Text>
   </View>
 );
@@ -415,7 +386,7 @@ export const Skel: React.FC<{ h?: number; w?: number | `${number}%` }> = ({ h = 
     loop.start();
     return () => loop.stop();
   }, [v]);
-  return <Animated.View style={{ height: h, width: w, marginBottom: 10, backgroundColor: S.ruleSoft, opacity: v }} />;
+  return <Animated.View style={{ height: h, width: w, marginBottom: 10, borderRadius: 8, backgroundColor: S.wash, opacity: v }} />;
 };
 
 // ── Numbers ──────────────────────────────────────────────────────────────────
@@ -441,9 +412,9 @@ export const rupees = (v: unknown) => `₹${n0(v).toLocaleString("en-IN", { mini
 
 export type StatCell = { label: string; value: React.ReactNode; red?: boolean; onPress?: () => void; /** spans the whole row */ wide?: boolean };
 
-/** Figures in a ruled grid (2 columns by default): capital label over the number; a cell with onPress opens something. */
+/** Figures as soft tiles (2 columns by default): a label over the number; a tile with onPress opens something. */
 export const StatGrid: React.FC<{ items: StatCell[]; cols?: 1 | 2 | 3; loading?: boolean; size?: number }> = ({ items, cols = 2, loading, size = 20 }) => (
-  <View style={{ flexDirection: "row", flexWrap: "wrap", borderTopWidth: 1, borderLeftWidth: 1, borderColor: S.rule }}>
+  <View style={{ flexDirection: "row", flexWrap: "wrap", marginHorizontal: -4 }}>
     {items.map((st) => {
       const body = (
         <>
@@ -451,14 +422,14 @@ export const StatGrid: React.FC<{ items: StatCell[]; cols?: 1 | 2 | 3; loading?:
           {loading ? <Skel h={size} w="60%" /> : typeof st.value === "string" || typeof st.value === "number" ? <Figure size={size} color={st.red ? S.red : S.ink}>{st.value}</Figure> : st.value}
         </>
       );
-      const cell: ViewStyle = { width: st.wide ? "100%" : `${100 / cols}%`, padding: 12, gap: 6, borderRightWidth: 1, borderBottomWidth: 1, borderColor: S.rule };
+      const cell: ViewStyle = { width: st.wide ? "100%" : `${100 / cols}%`, padding: 4 };
       return st.onPress ? (
-        <Press key={st.label} onPress={st.onPress} style={(pressed) => one(cell, pressed && { backgroundColor: S.blueWash })}>
-          {body}
+        <Press key={st.label} onPress={st.onPress} style={() => cell}>
+          {(pressed) => <View style={{ borderRadius: 16, padding: 14, gap: 6, backgroundColor: pressed ? S.blueWash : S.wash }}>{body}</View>}
         </Press>
       ) : (
         <View key={st.label} style={cell}>
-          {body}
+          <View style={{ borderRadius: 16, padding: 14, gap: 6, backgroundColor: S.wash }}>{body}</View>
         </View>
       );
     })}
@@ -471,7 +442,7 @@ export const IconKey: React.FC<{ onPress?: () => void; children: React.ReactNode
     onPress={onPress}
     disabled={disabled}
     hitSlop={4}
-    style={(pressed) => ({ width: size, height: size, borderWidth: 1, borderColor: red ? S.red : S.ink, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? (red ? S.redWash : S.blueWash) : "transparent", opacity: disabled ? 0.4 : 1 })}
+    style={(pressed) => ({ width: size, height: size, borderRadius: size / 2, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? (red ? S.redWash : S.blueWash) : red ? S.redWash : S.wash, opacity: disabled ? 0.4 : 1 })}
   >
     {children}
   </Press>
@@ -533,7 +504,7 @@ export function SheetTable<T>({ rows, cols, keyOf, onRowPress }: { rows: T[]; co
     <View onLayout={(e) => setAvail(e.nativeEvent.layout.width)}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false}>
         <View>
-          <View style={{ flexDirection: "row", borderBottomWidth: 1, borderBottomColor: S.ink, paddingBottom: 8 }}>
+          <View style={{ flexDirection: "row", borderBottomWidth: 1, borderBottomColor: S.rule, paddingBottom: 8 }}>
             {cols.map((c, ci) => (
               <View key={c.title} style={{ width: w(c), paddingRight: ci === cols.length - 1 ? 0 : 10, alignItems: c.num ? "flex-end" : "flex-start" }}>
                 <Label>{c.title}</Label>
@@ -635,7 +606,7 @@ export const SheetShell: React.FC<{ eyebrow?: string; title?: string; subtitle?:
       </View>
       {action}
     </View>
-    <View style={{ borderTopWidth: 1, borderTopColor: S.rule, paddingHorizontal: 14, paddingTop: 18, paddingBottom: 20, gap: 20 }}>{children}</View>
+    <View style={{ borderTopWidth: 1, borderTopColor: S.ruleSoft, paddingHorizontal: 16, paddingTop: 18, paddingBottom: 20, gap: 20 }}>{children}</View>
   </SheetFrame>
 );
 
@@ -720,8 +691,8 @@ export const SearchBox: React.FC<{ value: string; onChange: (v: string) => void;
 
 /** A register's heading over its table: the name in capitals, the count under it, an ink rule below. */
 export const RegisterHead: React.FC<{ title: string; count: number; unit?: [string, string] }> = ({ title, count, unit = ["record", "records"] }) => (
-  <View style={{ borderBottomWidth: 1, borderBottomColor: S.ink, paddingBottom: 10 }}>
-    <Label color={S.ink}>{title}</Label>
+  <View style={{ borderBottomWidth: 1, borderBottomColor: S.rule, paddingBottom: 10 }}>
+    <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 15.5, color: S.ink }}>{title}</Text>
     <Body size={12} color={S.graphite} style={{ marginTop: 3 }}>
       {count.toLocaleString("en-IN")} {count === 1 ? unit[0] : unit[1]}
     </Body>
@@ -731,12 +702,12 @@ export const RegisterHead: React.FC<{ title: string; count: number; unit?: [stri
 
 /** A boxed part of a working page (web: Card with an ink border): its title in capitals over an ink rule. */
 export const Panel: React.FC<{ title: string; icon?: React.ReactNode; children: React.ReactNode; style?: StyleProp<ViewStyle> }> = ({ title, icon, children, style }) => (
-  <View style={[{ borderWidth: 1, borderColor: S.ink }, style]}>
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: S.ink }}>
+  <View style={[{ borderRadius: 18, borderWidth: 1, borderColor: S.rule, overflow: "hidden" }, style]}>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: S.ruleSoft }}>
       {icon}
-      <Label color={S.ink}>{title}</Label>
+      <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 15, color: S.ink }}>{title}</Text>
     </View>
-    <View style={{ padding: 12, gap: 14 }}>{children}</View>
+    <View style={{ padding: 14, gap: 14 }}>{children}</View>
   </View>
 );
 

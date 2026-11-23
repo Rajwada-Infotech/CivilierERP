@@ -149,7 +149,7 @@ export default function ApprovalInboxScreen() {
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
               <Press
                 onPress={() => setFilterOpen(true)}
-                style={(pressed) => ({ flex: 1, minHeight: 44, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 10, borderWidth: 1, borderColor: activeModules.length ? S.ink : S.line40, backgroundColor: pressed ? S.blueWash : S.paper })}
+                style={(pressed) => ({ flex: 1, minHeight: 48, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, borderRadius: 14, borderWidth: 1, borderColor: activeModules.length ? S.blue : S.rule, backgroundColor: pressed ? S.blueWash : S.paper })}
               >
                 <SlidersHorizontal size={14} color={activeModules.length ? S.blue : S.graphite} />
                 <Text numberOfLines={1} style={{ flex: 1, fontFamily: fonts.body.regular, fontSize: 13.5, color: activeModules.length ? S.ink : S.faint }}>
@@ -161,7 +161,7 @@ export default function ApprovalInboxScreen() {
                 </Text>
                 <ChevronDown size={13} color={S.graphite} />
               </Press>
-              <IconKey onPress={() => setDateSort((s) => (s === "desc" ? "asc" : "desc"))} size={44}>
+              <IconKey onPress={() => setDateSort((s) => (s === "desc" ? "asc" : "desc"))} size={48}>
                 {dateSort === "desc" ? <ArrowDownWideNarrow size={15} color={S.ink} /> : <ArrowUpWideNarrow size={15} color={S.ink} />}
               </IconKey>
             </View>
@@ -181,12 +181,12 @@ export default function ApprovalInboxScreen() {
                 </Body>
               </View>
             ) : (
-              <View style={{ borderTopWidth: 1, borderTopColor: S.ink }}>
+              <View style={{ borderTopWidth: 1, borderTopColor: S.rule }}>
                 {grouped.map(({ cat, count, modules }) => (
                   <View key={cat}>
                     {/* The category heading only when the list spans more than one. */}
                     {grouped.length > 1 && (
-                      <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: S.ink }}>
+                      <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: S.ruleSoft }}>
                         <Label color={S.ink}>{CATEGORY_LABEL[cat as CategoryId]}</Label>
                         <Label>{String(count)}</Label>
                       </View>
@@ -203,11 +203,11 @@ export default function ApprovalInboxScreen() {
                             style={(pressed) => ({ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, backgroundColor: pressed ? S.blueWash : "transparent" })}
                           >
                             {open ? <ChevronDown size={13} color={S.graphite} /> : <ChevronRight size={13} color={S.graphite} />}
-                            <View style={{ width: 28, height: 28, borderWidth: 1, borderColor: S.line40, alignItems: "center", justifyContent: "center" }}>
-                              <Icon size={13} color={S.ink} />
+                            <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: S.blueTint, alignItems: "center", justifyContent: "center" }}>
+                              <Icon size={15} color={S.blue} />
                             </View>
                             <Text numberOfLines={1} style={{ flex: 1, fontFamily: fonts.body.semibold, fontSize: 13.5, color: S.ink }}>{cfg?.label ?? modItems[0]?.ModuleLabel ?? mod}</Text>
-                            <View style={{ borderWidth: 1, borderColor: S.line40, paddingHorizontal: 6, paddingVertical: 2 }}>
+                            <View style={{ borderRadius: 999, backgroundColor: S.wash, paddingHorizontal: 8, paddingVertical: 2 }}>
                               <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 10.5, color: S.graphite, fontVariant: ["tabular-nums"] }}>{modItems.length}</Text>
                             </View>
                           </Press>
@@ -233,7 +233,7 @@ export default function ApprovalInboxScreen() {
         note={activeModules.length ? `${activeModules.length} chosen` : "All approval types"}
         onClose={() => setFilterOpen(false)}
         footer={
-          <View style={{ flexDirection: "row", gap: 10, padding: 16, borderTopWidth: 1, borderTopColor: S.ink }}>
+          <View style={{ flexDirection: "row", gap: 10, padding: 16, borderTopWidth: 1, borderTopColor: S.rule }}>
             <Key label="Clear" onPress={() => setActiveModules([])} disabled={!activeModules.length} />
             <Key tone="ink" label="Done" onPress={() => setFilterOpen(false)} style={{ flex: 1 }} />
           </View>
@@ -245,7 +245,7 @@ export default function ApprovalInboxScreen() {
             if (!mods.length) return null;
             return (
               <View key={cat}>
-                <View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 6, borderBottomWidth: 1, borderBottomColor: S.ink }}>
+                <View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 6, borderBottomWidth: 1, borderBottomColor: S.ruleSoft }}>
                   <Label color={S.ink}>{CATEGORY_LABEL[cat]}</Label>
                 </View>
                 {mods.map((m) => {

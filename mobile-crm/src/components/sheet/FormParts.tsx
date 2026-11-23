@@ -6,7 +6,7 @@ import { Modal, Pressable, ScrollView, Text, View } from "react-native";
 import { Check, ChevronDown, X } from "lucide-react-native";
 import { sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
-import { Body, Field, IconKey, Input, Label, Press, SearchBox } from "./Sheet";
+import { Body, Field, IconKey, Input, Press, SearchBox } from "./Sheet";
 
 type Width = `${number}%`;
 
@@ -50,7 +50,7 @@ export function PickerField({
     <Field label={label} style={{ width: width ?? (wide ? "100%" : "48%"), marginBottom: 14, opacity: disabled ? 0.5 : 1 }}>
       <Press
         onPress={disabled ? undefined : onPress}
-        style={(pressed) => ({ minHeight: 44, flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 10, borderWidth: 1, borderColor: S.line40, backgroundColor: pressed ? S.blueWash : S.paper })}
+        style={(pressed) => ({ minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, borderRadius: 14, borderWidth: 1, borderColor: S.rule, backgroundColor: pressed ? S.blueWash : S.paper })}
       >
         <Text numberOfLines={1} style={{ color: value ? S.ink : S.faint, fontSize: 14, fontFamily: fonts.body.regular, flexShrink: 1 }}>{value || placeholder}</Text>
         <ChevronDown size={13} color={S.graphite} />
@@ -68,10 +68,10 @@ export function SheetPicker({
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" }} onPress={onClose}>
-        <Pressable onPress={() => {}} style={{ backgroundColor: S.paper, maxHeight: "78%", borderTopWidth: 1.5, borderTopColor: S.ink }}>
-          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: S.ink }}>
+        <Pressable onPress={() => {}} style={{ backgroundColor: S.paper, maxHeight: "78%", borderTopLeftRadius: 24, borderTopRightRadius: 24, overflow: "hidden" }}>
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: S.ruleSoft }}>
             <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
-              <Label color={S.ink}>{title}</Label>
+              <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 16, color: S.ink }}>{title}</Text>
               {!!note && <Body size={11.5} color={S.graphite}>{note}</Body>}
             </View>
             <IconKey onPress={onClose} size={32}>
@@ -99,7 +99,7 @@ export function OptionRow({
       style={(pressed) => ({ flexDirection: "row", alignItems: "flex-start", gap: 10, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: S.ruleSoft, opacity: disabled ? 0.35 : 1, backgroundColor: pressed || selected ? S.blueWash : "transparent" })}
     >
       {check ? (
-        <View style={{ width: 16, height: 16, marginTop: 1, borderWidth: 1, borderColor: S.ink, backgroundColor: selected ? S.ink : "transparent", alignItems: "center", justifyContent: "center" }}>
+        <View style={{ width: 18, height: 18, marginTop: 1, borderRadius: 6, borderWidth: 1.5, borderColor: selected ? S.blue : S.rule, backgroundColor: selected ? S.blue : "transparent", alignItems: "center", justifyContent: "center" }}>
           {selected && <Check size={10} color={S.paper} />}
         </View>
       ) : (

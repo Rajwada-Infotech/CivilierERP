@@ -25,7 +25,7 @@ export function SheetPage({
       style={{ flex: 1, backgroundColor: colors.background }}
       contentContainerStyle={{ paddingBottom: 96 }}
       keyboardShouldPersistTaps="handled"
-      refreshControl={onRefresh ? <RefreshControl refreshing={!!refreshing} onRefresh={onRefresh} tintColor={S.ink} /> : undefined}
+      refreshControl={onRefresh ? <RefreshControl refreshing={!!refreshing} onRefresh={onRefresh} tintColor={S.blue} /> : undefined}
       scrollEventThrottle={200}
       onScroll={
         onEndReached
@@ -60,9 +60,9 @@ export function KeyRow<T extends string>({ options, value, onChange }: { options
           <Press
             key={o.value}
             onPress={() => onChange(o.value)}
-            style={(pressed) => ({ paddingHorizontal: 12, paddingVertical: 9, borderWidth: 1, borderColor: S.ink, backgroundColor: on ? S.ink : pressed ? S.blueWash : "transparent" })}
+            style={(pressed) => ({ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, backgroundColor: on ? S.blue : pressed ? S.blueWash : S.wash })}
           >
-            <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 10, letterSpacing: 1.2, textTransform: "uppercase", color: on ? S.paper : S.graphite }}>{o.label}</Text>
+            <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 12.5, color: on ? "#FFFFFF" : S.graphite }}>{o.label}</Text>
           </Press>
         );
       })}
@@ -72,7 +72,7 @@ export function KeyRow<T extends string>({ options, value, onChange }: { options
 
 /** A register box: the ink-ruled cell the head, search, filters and rows sit in. */
 export function RegisterBox({ children }: { children: React.ReactNode }) {
-  return <View style={{ borderWidth: 1, borderColor: S.ink, padding: 12, gap: 12 }}>{children}</View>;
+  return <View style={{ borderRadius: 18, borderWidth: 1, borderColor: S.rule, padding: 14, gap: 12 }}>{children}</View>;
 }
 
 export function RegisterLoading() {
@@ -130,15 +130,15 @@ export function ProjectGroups<T>({
               <Press
                 key={o.title}
                 onPress={() => setOnly(o.key)}
-                style={(pressed) => ({ paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: on ? S.ink : S.line40, backgroundColor: on ? S.ink : pressed ? S.blueWash : "transparent" })}
+                style={(pressed) => ({ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, backgroundColor: on ? S.blue : pressed ? S.blueWash : "transparent" })}
               >
-                <Text numberOfLines={1} style={{ maxWidth: 200, fontFamily: fonts.heading.semibold, fontSize: 10, letterSpacing: 1, textTransform: "uppercase", color: on ? S.paper : S.graphite }}>{o.title}</Text>
+                <Text numberOfLines={1} style={{ maxWidth: 200, fontFamily: fonts.heading.semibold, fontSize: 12.5, color: on ? "#FFFFFF" : S.graphite }}>{o.title}</Text>
               </Press>
             );
           })}
         </ScrollView>
       )}
-      <View style={{ borderTopWidth: 1, borderTopColor: S.ink }}>
+      <View style={{ borderTopWidth: 1, borderTopColor: S.rule }}>
         {shown.map((g) => {
           const closed = !expandAll && !!collapsed[g.title];
           return (
@@ -148,8 +148,8 @@ export function ProjectGroups<T>({
                 style={(pressed) => ({ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 11, borderBottomWidth: closed ? 0 : 1, borderBottomColor: S.line15, backgroundColor: pressed ? S.blueWash : "transparent" })}
               >
                 {closed ? <ChevronRight size={14} color={S.graphite} /> : <ChevronDown size={14} color={S.graphite} />}
-                <Text numberOfLines={1} style={{ flex: 1, fontFamily: fonts.heading.bold, fontSize: 13.5, letterSpacing: -0.2, color: S.ink }}>{g.title}</Text>
-                <View style={{ borderWidth: 1, borderColor: S.line40, paddingHorizontal: 6, paddingVertical: 2 }}>
+                <Text numberOfLines={1} style={{ flex: 1, fontFamily: fonts.heading.semibold, fontSize: 15, color: S.ink }}>{g.title}</Text>
+                <View style={{ borderRadius: 999, backgroundColor: S.wash, paddingHorizontal: 8, paddingVertical: 2 }}>
                   <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 10, color: S.graphite }}>{`${g.rows.length} ${g.rows.length === 1 ? unit[0] : unit[1]}`}</Text>
                 </View>
               </Press>
@@ -179,7 +179,7 @@ export function RecordRow({
       style={(pressed) => ({ paddingVertical: 12, gap: 7, borderBottomWidth: last ? 0 : 1, borderBottomColor: S.ruleSoft, backgroundColor: pressed ? S.blueWash : "transparent" })}
     >
       <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
-        <Text style={{ flex: 1, minWidth: 0, fontFamily: fonts.heading.semibold, fontSize: 13, letterSpacing: 0.2, color: S.ink }}>
+        <Text style={{ flex: 1, minWidth: 0, fontFamily: fonts.heading.semibold, fontSize: 15, color: S.ink }}>
           {title}
           {!!date && <Text style={{ color: S.graphite, fontFamily: fonts.body.regular, fontSize: 11.5, letterSpacing: 0 }}>{`  ${date}`}</Text>}
         </Text>
@@ -349,7 +349,7 @@ export function FormPage({
       {footer !== undefined ? (
         footer
       ) : onSave ? (
-        <View style={{ flexDirection: "row", gap: 10, paddingHorizontal: 16, paddingTop: 10, paddingBottom: insets.bottom + 12, borderTopWidth: 1, borderTopColor: S.ink, backgroundColor: S.paper }}>
+        <View style={{ flexDirection: "row", gap: 10, paddingHorizontal: 16, paddingTop: 10, paddingBottom: insets.bottom + 12, borderTopWidth: 1, borderTopColor: S.rule, backgroundColor: S.paper }}>
           <Key label="Cancel" onPress={onClose} disabled={saving} />
           <Key tone="ink" label={saving ? "Saving…" : saveLabel} onPress={onSave} disabled={saving || saveDisabled || loading} style={{ flex: 1 }} />
         </View>
@@ -369,7 +369,7 @@ export function FormPage({
 /** One line of a form's item list: a numbered ruled box with its remove key. */
 export function LineBox({ index, title, onRemove, children }: { index: number; title?: string; onRemove?: () => void; children: React.ReactNode }) {
   return (
-    <View style={{ borderWidth: 1, borderColor: S.line40, padding: 10, gap: 10 }}>
+    <View style={{ borderRadius: 16, borderWidth: 1, borderColor: S.rule, padding: 12, gap: 10 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
         <Label color={S.ink} style={{ flex: 1 }}>{title ?? `Line ${index + 1}`}</Label>
         {onRemove && (
@@ -392,7 +392,7 @@ export function ShownValue({ label, value }: { label: string; value: string }) {
   return (
     <View style={{ gap: 6, marginBottom: 12 }}>
       <Label>{label}</Label>
-      <View style={{ minHeight: 44, justifyContent: "center", paddingHorizontal: 10, borderWidth: 1, borderStyle: "dashed", borderColor: S.line40 }}>
+      <View style={{ minHeight: 48, justifyContent: "center", paddingHorizontal: 14, borderRadius: 14, backgroundColor: S.wash }}>
         <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 13, color: S.ink }}>{value}</Text>
       </View>
     </View>

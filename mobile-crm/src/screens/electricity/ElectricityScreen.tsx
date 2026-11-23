@@ -2,9 +2,8 @@
 // ElectricityMaintenance.tsx: Overview, Meters & Readings (record/correct
 // readings, generate bills), Billing (verify/add-to-customer-bill/cancel),
 // Reports, Audit Log. Provider/Tariff master CRUD stays out of scope, same
-// as web (that's Meter Reading Master, a separate admin screen). Its own
-// "Live Grid" amber identity — distinct from Security's cyan ops board and
-// the app's own green ACCENT.
+// as web (that's Meter Reading Master, a separate admin screen). The "Live grid" header block in the app's hero colours
+// and accent, as every Maintenance page.
 import { useMemo, useState } from "react";
 import { View, Text, TextInput, Pressable, ActivityIndicator, ScrollView, RefreshControl, LayoutAnimation } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
@@ -13,6 +12,7 @@ import {
   Zap, Gauge, Users, Clock3, Receipt, Wallet, Search, FileText,
   CheckCircle2, Ban, History as HistoryIcon, BarChart3, ShieldAlert,
 } from "lucide-react-native";
+import { HERO_GRADIENT } from "@/theme/ThemeContext";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { toast } from "@/components/Toast";
@@ -35,8 +35,6 @@ import {
   type AuditLogRow,
 } from "@/api/electricityMaintenanceApi";
 
-const ELEC_AMBER = "#f59e0b";
-const ELEC_INK = "#1c1305";
 
 const fmtDate = (d: string | null | undefined) => (d ? new Date(d).toLocaleDateString("en-IN") : "—");
 const fmtDateTime = (d: string | null | undefined) => (d ? new Date(d).toLocaleString("en-IN") : "—");
@@ -62,7 +60,7 @@ export default function ElectricityScreen() {
           <Pressable
             key={t}
             onPress={() => setTab(t)}
-            style={{ paddingHorizontal: 12, paddingVertical: 7, borderRadius: 999, backgroundColor: tab === t ? ELEC_AMBER : colors.card, borderWidth: 1, borderColor: tab === t ? ELEC_AMBER : colors.border }}
+            style={{ paddingHorizontal: 12, paddingVertical: 7, borderRadius: 999, backgroundColor: tab === t ? colors.primary : colors.card, borderWidth: 1, borderColor: tab === t ? colors.primary : colors.border }}
           >
             <Text style={{ fontSize: 11.5, fontFamily: fonts.heading.semibold, color: tab === t ? "#1a1206" : colors.mutedForeground }}>{t}</Text>
           </Pressable>
@@ -88,7 +86,7 @@ function BentoTile({ label, value, icon: Icon, color, flex = 1 }: {
         <Icon size={12} color={color} />
       </View>
       <Text style={{ fontSize: 19, fontFamily: fonts.heading.bold, color: colors.foreground, fontVariant: ["tabular-nums"] }}>{value}</Text>
-      <Text style={{ fontSize: 9, fontFamily: fonts.heading.semibold, color: colors.mutedForeground, textTransform: "uppercase", letterSpacing: 0.6, marginTop: 2 }}>
+      <Text style={{ fontSize: 12, fontFamily: fonts.heading.semibold, color: colors.mutedForeground, marginTop: 2 }}>
         {label}
       </Text>
     </View>
@@ -110,23 +108,20 @@ function OverviewTab() {
   return (
     <ScrollView
       contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
-      refreshControl={<RefreshControl refreshing={isFetching && !isLoading} onRefresh={() => { void refetch(); }} tintColor={ELEC_AMBER} />}
+      refreshControl={<RefreshControl refreshing={isFetching && !isLoading} onRefresh={() => { void refetch(); }} tintColor={colors.primary} />}
     >
       <LinearGradient
-        colors={[ELEC_INK, "#3a2308", "#1c1305"]}
+        colors={HERO_GRADIENT}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-        style={{ borderRadius: 20, padding: 18, marginBottom: 14, overflow: "hidden", borderWidth: 1, borderColor: `${ELEC_AMBER}30` }}
+        style={{ borderRadius: 20, padding: 18, marginBottom: 14, overflow: "hidden", borderWidth: 1, borderColor: `${colors.primary}30` }}
       >
         <View style={{ position: "absolute", right: -14, top: -10, opacity: 0.09 }}>
-          <Zap size={110} color={ELEC_AMBER} />
+          <Zap size={110} color={colors.primary} />
         </View>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10 }}>
-          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: ELEC_AMBER }} />
-          <Text style={{ color: ELEC_AMBER, fontSize: 9.5, fontFamily: fonts.heading.bold, letterSpacing: 2 }}>LIVE GRID</Text>
-          <Text style={{ color: "rgba(254,243,199,0.5)", fontSize: 9.5, fontFamily: fonts.body.regular, letterSpacing: 0.4, marginLeft: 4 }}>
-            ELECTRICITY MAINTENANCE
-          </Text>
+          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary }} />
+          <Text style={{ color: colors.primary, fontSize: 12.5, fontFamily: fonts.heading.semibold }}>Live grid</Text>
         </View>
         <Text style={{ color: "#fef3c7", fontSize: 34, fontFamily: fonts.heading.bold, letterSpacing: 0.3, fontVariant: ["tabular-nums"] }}>
           {formatINR(data?.currentAmount ?? 0)}
@@ -143,11 +138,11 @@ function OverviewTab() {
           <View
             style={{
               flexDirection: "row", alignItems: "center", gap: 16,
-              backgroundColor: colors.card, borderRadius: 20, borderWidth: 1, borderColor: `${ELEC_AMBER}30`,
+              backgroundColor: colors.card, borderRadius: 20, borderWidth: 1, borderColor: `${colors.primary}30`,
               padding: 16, marginBottom: 10,
             }}
           >
-            <RadialGauge progress={readPct} size={92} strokeWidth={10} color={ELEC_AMBER} centerValue={String(read)} centerLabel="read" />
+            <RadialGauge progress={readPct} size={92} strokeWidth={10} color={colors.primary} centerValue={String(read)} centerLabel="read" />
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={{ color: colors.foreground, fontSize: 15, fontFamily: fonts.heading.bold }}>This Cycle's Readings</Text>
               <Text style={{ color: colors.mutedForeground, fontSize: 11, fontFamily: fonts.body.regular, marginTop: 3, lineHeight: 15 }}>
@@ -155,9 +150,9 @@ function OverviewTab() {
               </Text>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginTop: 8 }}>
                 <View style={{ flex: 1, height: 4, borderRadius: 2, backgroundColor: colors.muted, overflow: "hidden" }}>
-                  <View style={{ width: `${Math.round(readPct * 100)}%`, height: "100%", backgroundColor: ELEC_AMBER, borderRadius: 2 }} />
+                  <View style={{ width: `${Math.round(readPct * 100)}%`, height: "100%", backgroundColor: colors.primary, borderRadius: 2 }} />
                 </View>
-                <Text style={{ color: ELEC_AMBER, fontSize: 10.5, fontFamily: fonts.heading.bold }}>{Math.round(readPct * 100)}%</Text>
+                <Text style={{ color: colors.primary, fontSize: 10.5, fontFamily: fonts.heading.bold }}>{Math.round(readPct * 100)}%</Text>
               </View>
             </View>
           </View>
@@ -249,13 +244,13 @@ function MetersTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
               <Card key={m.Id}>
                 <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
                   <View style={{ width: 32, height: 32, borderRadius: 9, backgroundColor: pending ? "rgba(245,158,11,0.14)" : "rgba(56,189,248,0.12)", alignItems: "center", justifyContent: "center" }}>
-                    <Zap size={14} color={pending ? ELEC_AMBER : "#7dd3fc"} />
+                    <Zap size={14} color={pending ? colors.primary : "#7dd3fc"} />
                   </View>
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                       <Text style={{ color: colors.foreground, fontSize: 13, fontFamily: fonts.heading.semibold }}>{m.MeterNumber}</Text>
                       <Pill label={m.Status} tone={m.Status === "Active" ? "#10b981" : undefined} />
-                      {pending && <Pill label="Reading Due" tone={ELEC_AMBER} />}
+                      {pending && <Pill label="Reading Due" tone={colors.primary} />}
                     </View>
                     <Line>{m.CustomerName}{m.UnitNo ? ` · ${m.UnitNo}` : ""}</Line>
                     <Line>{m.ProviderName} · {m.BillingCycle}{m.LatestCurrentReading != null ? ` · last ${m.LatestCurrentReading}` : ""}</Line>
@@ -272,8 +267,8 @@ function MetersTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
                       onPress={() => setReadingFor(m)}
                       style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 11, paddingVertical: 7, borderRadius: 9, backgroundColor: "rgba(245,158,11,0.16)", borderWidth: 1, borderColor: "rgba(245,158,11,0.35)", transform: [{ scale: pressed ? 0.95 : 1 }] })}
                     >
-                      <Gauge size={12} color={ELEC_AMBER} />
-                      <Text style={{ color: ELEC_AMBER, fontSize: 10.5, fontFamily: fonts.heading.semibold }}>Reading</Text>
+                      <Gauge size={12} color={colors.primary} />
+                      <Text style={{ color: colors.primary, fontSize: 10.5, fontFamily: fonts.heading.semibold }}>Reading</Text>
                     </Pressable>
                   )}
                   {rights.canCreate && m.Status === "Active" && (
@@ -317,7 +312,7 @@ function MetersTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
       {historyFor && <MeterHistorySheet meter={historyFor} onClose={() => setHistoryFor(null)} />}
       {auditFor && <AuditLogSheet title={`Audit Log — ${auditFor.MeterNumber}`} filters={{ meterId: auditFor.Id }} onClose={() => setAuditFor(null)} />}
 
-      <SuccessBurst visible={!!burstLabel} label={burstLabel ?? ""} color={ELEC_AMBER} ink={ELEC_INK} />
+      <SuccessBurst visible={!!burstLabel} label={burstLabel ?? ""} color={colors.primary} ink={HERO_GRADIENT[0]} />
     </View>
   );
 }
@@ -360,9 +355,9 @@ function AddReadingSheet({ meter, onClose, onDone }: { meter: MeterRow; onClose:
             <Pressable
               key={t}
               onPress={() => setReadingType(t)}
-              style={{ flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: "center", borderWidth: 1, borderColor: readingType === t ? ELEC_AMBER : colors.border, backgroundColor: readingType === t ? `${ELEC_AMBER}1a` : "transparent" }}
+              style={{ flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: "center", borderWidth: 1, borderColor: readingType === t ? colors.primary : colors.border, backgroundColor: readingType === t ? `${colors.primary}1a` : "transparent" }}
             >
-              <Text style={{ color: readingType === t ? ELEC_AMBER : colors.mutedForeground, fontSize: 11.5, fontFamily: fonts.heading.semibold }}>{t}</Text>
+              <Text style={{ color: readingType === t ? colors.primary : colors.mutedForeground, fontSize: 11.5, fontFamily: fonts.heading.semibold }}>{t}</Text>
             </Pressable>
           ))}
         </View>
@@ -434,7 +429,7 @@ function GenerateBillSheet({ meter, onClose, onDone }: { meter: MeterRow; onClos
 
       {previewError && (
         <View style={{ borderWidth: 1, borderColor: "rgba(245,158,11,0.35)", backgroundColor: "rgba(245,158,11,0.08)", borderRadius: 10, padding: 10, marginBottom: 12 }}>
-          <Text style={{ color: ELEC_AMBER, fontSize: 11.5, fontFamily: fonts.body.regular }}>{previewError}</Text>
+          <Text style={{ color: colors.primary, fontSize: 11.5, fontFamily: fonts.body.regular }}>{previewError}</Text>
         </View>
       )}
 
@@ -486,7 +481,7 @@ function MeterHistorySheet({ meter, onClose }: { meter: MeterRow; onClose: () =>
                   <Text style={{ color: colors.foreground, fontSize: 12, fontFamily: fonts.heading.semibold }}>{fmtDate(r.ReadingDate)} · {r.ReadingType}</Text>
                   {!r.IsSuperseded && (
                     <Pressable onPress={() => setCorrecting(r)} hitSlop={6}>
-                      <Text style={{ color: ELEC_AMBER, fontSize: 10.5, fontFamily: fonts.heading.semibold }}>Correct</Text>
+                      <Text style={{ color: colors.primary, fontSize: 10.5, fontFamily: fonts.heading.semibold }}>Correct</Text>
                     </Pressable>
                   )}
                 </View>
@@ -627,7 +622,7 @@ function BillsTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
                 )}
                 {rights.canEdit && b.BillStatus === "Verified" && (
                   <Pressable onPress={() => setAddingTo(b)} style={{ flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 11, paddingVertical: 7, borderRadius: 9, backgroundColor: "rgba(245,158,11,0.16)", borderWidth: 1, borderColor: "rgba(245,158,11,0.35)" }}>
-                    <Text style={{ color: ELEC_AMBER, fontSize: 10.5, fontFamily: fonts.heading.semibold }}>Add to Bill</Text>
+                    <Text style={{ color: colors.primary, fontSize: 10.5, fontFamily: fonts.heading.semibold }}>Add to Bill</Text>
                   </Pressable>
                 )}
                 {rights.canDelete && (b.BillStatus === "PendingVerification" || b.BillStatus === "Verified") && (
@@ -664,7 +659,7 @@ function BillsTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
       )}
       {auditFor && <AuditLogSheet title={`Audit Log — Bill #${auditFor.Id}`} filters={{ billId: auditFor.Id }} onClose={() => setAuditFor(null)} />}
 
-      <SuccessBurst visible={!!burstLabel} label={burstLabel ?? ""} color={ELEC_AMBER} ink={ELEC_INK} />
+      <SuccessBurst visible={!!burstLabel} label={burstLabel ?? ""} color={colors.primary} ink={HERO_GRADIENT[0]} />
     </View>
   );
 }
@@ -774,15 +769,15 @@ function ReportsTab() {
       </View>
 
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10 }}>
-        <BarChart3 size={13} color={ELEC_AMBER} />
-        <Text style={{ color: colors.foreground, fontSize: 11.5, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.4 }}>Summary</Text>
+        <BarChart3 size={13} color={colors.primary} />
+        <Text style={{ color: colors.foreground, fontSize: 15.5, fontFamily: fonts.heading.semibold }}>Summary</Text>
       </View>
       {monthlyLoading ? (
         <ActivityIndicator color={colors.mutedForeground} style={{ marginBottom: 20 }} />
       ) : (
         <View style={{ marginBottom: 20, gap: 10 }}>
           <View style={{ flexDirection: "row", gap: 10 }}>
-            <BentoTile label="Total Meters" value={monthly?.totalMeters ?? 0} icon={Gauge} color={ELEC_AMBER} />
+            <BentoTile label="Total Meters" value={monthly?.totalMeters ?? 0} icon={Gauge} color={colors.primary} />
             <BentoTile label="Readings Done" value={monthly?.readingsCompleted ?? 0} icon={CheckCircle2} color="#38bdf8" />
           </View>
           <View style={{ flexDirection: "row", gap: 10 }}>
@@ -793,7 +788,7 @@ function ReportsTab() {
         </View>
       )}
 
-      <Text style={{ color: colors.foreground, fontSize: 11.5, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 10 }}>Provider-wise</Text>
+      <Text style={{ color: colors.foreground, fontSize: 15.5, fontFamily: fonts.heading.semibold, marginBottom: 10 }}>Provider-wise</Text>
       {providerLoading ? (
         <ActivityIndicator color={colors.mutedForeground} style={{ marginBottom: 20 }} />
       ) : providerWise.length === 0 ? (
@@ -814,7 +809,7 @@ function ReportsTab() {
         </View>
       )}
 
-      <Text style={{ color: colors.foreground, fontSize: 11.5, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 10 }}>Customer-wise</Text>
+      <Text style={{ color: colors.foreground, fontSize: 15.5, fontFamily: fonts.heading.semibold, marginBottom: 10 }}>Customer-wise</Text>
       {customerLoading ? (
         <ActivityIndicator color={colors.mutedForeground} />
       ) : customerWise.length === 0 ? (

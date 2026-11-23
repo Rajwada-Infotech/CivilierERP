@@ -24,7 +24,6 @@ import {
 } from "@/api/maintenanceBillApi";
 import type { MainStackParamList } from "@/navigation/MainStack";
 
-const ACCENT = "#65a30d";
 
 type Props = NativeStackScreenProps<MainStackParamList, "BillForm">;
 
@@ -204,12 +203,12 @@ export default function BillFormScreen({ route, navigation }: Props) {
               borderRadius: 12,
               borderWidth: 1,
               borderStyle: "dashed",
-              borderColor: `${ACCENT}55`,
-              backgroundColor: `${ACCENT}0f`,
+              borderColor: `${colors.primary}55`,
+              backgroundColor: `${colors.primary}0f`,
             }}
           >
-            <Plus size={13} color={ACCENT} />
-            <Text style={{ color: ACCENT, fontSize: 12.5, fontFamily: fonts.heading.semibold }}>Add Charge Head</Text>
+            <Plus size={13} color={colors.primary} />
+            <Text style={{ color: colors.primary, fontSize: 12.5, fontFamily: fonts.heading.semibold }}>Add Charge Head</Text>
           </Pressable>
 
           {selectedCharges.length > 0 && (
@@ -240,7 +239,7 @@ export default function BillFormScreen({ route, navigation }: Props) {
         </Pressable>
         <Pressable
           onPress={saving ? undefined : handleSave}
-          style={{ flex: 1.5, paddingVertical: 13, borderRadius: 12, alignItems: "center", backgroundColor: ACCENT, opacity: saving ? 0.6 : 1 }}
+          style={{ flex: 1.5, paddingVertical: 13, borderRadius: 12, alignItems: "center", backgroundColor: colors.primary, opacity: saving ? 0.6 : 1 }}
         >
           {saving ? (
             <ActivityIndicator color="#1a1a1a" size="small" />

@@ -20,7 +20,8 @@ const PAD_BOTTOM = 20;
 const fmtAxisDate = (d: string) =>
   new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
 
-export function TrendLineChart({ data, color = "#65a30d" }: { data: TrendPoint[]; color?: string }) {
+export function TrendLineChart({ data, color: given }: { data: TrendPoint[]; color?: string }) {
+  const color = given ?? colors.primary;
   const [width, setWidth] = useState(0);
   const onLayout = (e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width);
 

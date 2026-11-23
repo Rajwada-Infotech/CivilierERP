@@ -160,7 +160,7 @@ export default function MainStack() {
         <Stack.Screen name="Electricity" component={ElectricityScreen} options={{ title: "Electricity Maintenance" }} />
         <Stack.Screen name="CrmRegister" component={CrmRegisterScreen} options={({ route }) => ({ title: (pairParent(route.params.register) ?? registerByKey(route.params.register))?.label ?? "CRM" })} />
         <Stack.Screen name="CrmBooking" component={BookingDetailScreen} options={({ route }) => ({ title: route.params.title || "Booking" })} />
-        <Stack.Screen name="CrmCustomer" component={Customer360Screen} options={({ route }) => ({ title: route.params.title || "Customer 360" })} />
+        <Stack.Screen name="CrmCustomer" component={Customer360Screen} options={{ title: "Customer 360" }} />
         <Stack.Screen name="CrmTicket" component={TicketScreen} options={{ title: "Service Ticket" }} />
         <Stack.Screen name="CrmTicketNew" component={NewTicketScreen} options={{ title: "New Service Ticket" }} />
         <Stack.Screen name="CrmWelcomeCall" component={WelcomeCallScreen} options={{ title: "Log Welcome Call" }} />

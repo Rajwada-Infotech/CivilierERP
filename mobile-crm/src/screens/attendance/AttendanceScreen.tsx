@@ -12,6 +12,7 @@ import {
   LogIn, LogOut, Plus, Search, Pencil, CheckCircle2, XCircle, Ban,
   History as HistoryIcon, CalendarClock,
 } from "lucide-react-native";
+import { HERO_GRADIENT } from "@/theme/ThemeContext";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { toast } from "@/components/Toast";
@@ -36,7 +37,6 @@ import {
   type AttendanceStatus, type VerificationStatus,
 } from "@/api/securityAttendanceApi";
 
-const ACCENT = "#65a30d";
 const today = () => new Date().toISOString().slice(0, 10);
 
 const STATUS_TONE: Record<AttendanceStatus, string> = {
@@ -76,7 +76,7 @@ export default function AttendanceScreen() {
           <Pressable
             key={t}
             onPress={() => setTab(t)}
-            style={{ paddingHorizontal: 12, paddingVertical: 7, borderRadius: 999, backgroundColor: tab === t ? ACCENT : colors.card, borderWidth: 1, borderColor: tab === t ? ACCENT : colors.border }}
+            style={{ paddingHorizontal: 12, paddingVertical: 7, borderRadius: 999, backgroundColor: tab === t ? colors.primary : colors.card, borderWidth: 1, borderColor: tab === t ? colors.primary : colors.border }}
           >
             <Text style={{ fontSize: 11.5, fontFamily: fonts.heading.semibold, color: tab === t ? "#1a1a1a" : colors.mutedForeground }}>{t}</Text>
           </Pressable>
@@ -97,10 +97,7 @@ export default function AttendanceScreen() {
 // top (this screen is about who's on the ground *right now*), one
 // oversized gauge tile for the number that actually matters on a phone at
 // a glance (how many guards are on duty this second), then a tighter
-// bento of the supporting counts. Its own small cyan/night-watch palette,
-// distinct from the green ACCENT the rest of this app uses.
-const OPS_CYAN = "#22d3ee";
-const OPS_INK = "#0a1120";
+// bento of the supporting counts, in the app's accent and hero colours.
 
 function LiveClockBand() {
   const [now, setNow] = useState(new Date());
@@ -111,22 +108,19 @@ function LiveClockBand() {
 
   return (
     <LinearGradient
-      colors={[OPS_INK, "#0f2338", "#0a1120"]}
+      colors={HERO_GRADIENT}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
-      style={{ borderRadius: 20, padding: 18, marginBottom: 14, overflow: "hidden", borderWidth: 1, borderColor: `${OPS_CYAN}30` }}
+      style={{ borderRadius: 20, padding: 18, marginBottom: 14, overflow: "hidden", borderWidth: 1, borderColor: `${colors.primary}30` }}
     >
       {/* Watermark icon — purely decorative, oversized and clipped */}
       <View style={{ position: "absolute", right: -14, top: -10, opacity: 0.08 }}>
-        <ShieldCheck size={110} color={OPS_CYAN} />
+        <ShieldCheck size={110} color={colors.primary} />
       </View>
 
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10 }}>
-        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: OPS_CYAN }} />
-        <Text style={{ color: OPS_CYAN, fontSize: 9.5, fontFamily: fonts.heading.bold, letterSpacing: 2 }}>LIVE</Text>
-        <Text style={{ color: "rgba(226,232,240,0.5)", fontSize: 9.5, fontFamily: fonts.body.regular, letterSpacing: 0.4, marginLeft: 4 }}>
-          SECURITY OPS
-        </Text>
+        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary }} />
+        <Text style={{ color: colors.primary, fontSize: 12.5, fontFamily: fonts.heading.semibold }}>Live</Text>
       </View>
 
       <Text style={{ color: "#f1f5f9", fontSize: 40, fontFamily: fonts.heading.bold, letterSpacing: 0.5, fontVariant: ["tabular-nums"] }}>
@@ -151,7 +145,7 @@ function BentoTile({ label, value, icon: Icon, color, flex = 1 }: {
         <Icon size={12} color={color} />
       </View>
       <Text style={{ fontSize: 19, fontFamily: fonts.heading.bold, color: colors.foreground, fontVariant: ["tabular-nums"] }}>{value}</Text>
-      <Text style={{ fontSize: 9, fontFamily: fonts.heading.semibold, color: colors.mutedForeground, textTransform: "uppercase", letterSpacing: 0.6, marginTop: 2 }}>
+      <Text style={{ fontSize: 12, fontFamily: fonts.heading.semibold, color: colors.mutedForeground, marginTop: 2 }}>
         {label}
       </Text>
     </View>
@@ -172,7 +166,7 @@ function OverviewTab() {
   return (
     <ScrollView
       contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
-      refreshControl={<RefreshControl refreshing={isFetching && !isLoading} onRefresh={() => { void refetch(); }} tintColor={OPS_CYAN} />}
+      refreshControl={<RefreshControl refreshing={isFetching && !isLoading} onRefresh={() => { void refetch(); }} tintColor={colors.primary} />}
     >
       <LiveClockBand />
 
@@ -184,7 +178,7 @@ function OverviewTab() {
           <View
             style={{
               flexDirection: "row", alignItems: "center", gap: 16,
-              backgroundColor: colors.card, borderRadius: 20, borderWidth: 1, borderColor: `${OPS_CYAN}30`,
+              backgroundColor: colors.card, borderRadius: 20, borderWidth: 1, borderColor: `${colors.primary}30`,
               padding: 16, marginBottom: 10,
             }}
           >
@@ -192,7 +186,7 @@ function OverviewTab() {
               progress={dutyPct}
               size={92}
               strokeWidth={10}
-              color={OPS_CYAN}
+              color={colors.primary}
               centerValue={String(onDuty)}
               centerLabel="on duty"
             />
@@ -203,9 +197,9 @@ function OverviewTab() {
               </Text>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginTop: 8 }}>
                 <View style={{ flex: 1, height: 4, borderRadius: 2, backgroundColor: colors.muted, overflow: "hidden" }}>
-                  <View style={{ width: `${Math.round(dutyPct * 100)}%`, height: "100%", backgroundColor: OPS_CYAN, borderRadius: 2 }} />
+                  <View style={{ width: `${Math.round(dutyPct * 100)}%`, height: "100%", backgroundColor: colors.primary, borderRadius: 2 }} />
                 </View>
-                <Text style={{ color: OPS_CYAN, fontSize: 10.5, fontFamily: fonts.heading.bold }}>{Math.round(dutyPct * 100)}%</Text>
+                <Text style={{ color: colors.primary, fontSize: 10.5, fontFamily: fonts.heading.bold }}>{Math.round(dutyPct * 100)}%</Text>
               </View>
             </View>
           </View>
@@ -246,8 +240,8 @@ function OverviewTab() {
 function SectionHeader({ label, icon: Icon }: { label: string; icon: React.ComponentType<{ size?: number; color?: string }> }) {
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10, marginTop: 4 }}>
-      <Icon size={13} color={ACCENT} />
-      <Text style={{ color: colors.foreground, fontSize: 11.5, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.4 }}>{label}</Text>
+      <Icon size={13} color={colors.primary} />
+      <Text style={{ color: colors.foreground, fontSize: 15.5, fontFamily: fonts.heading.semibold }}>{label}</Text>
     </View>
   );
 }
@@ -354,7 +348,7 @@ function TodayTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
     <View style={{ flex: 1 }}>
       <ScrollView
         contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={ACCENT} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
       >
         <SectionHeader label={`Not Yet Checked In — ${fmtDate(date)}`} icon={LogIn} />
         {notYetAttended.length === 0 ? (
@@ -366,8 +360,8 @@ function TodayTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
             {notYetAttended.map((p) => (
               <Card key={p.Id}>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                  <View style={{ width: 32, height: 32, borderRadius: 9, backgroundColor: "rgba(101,163,13,0.14)", alignItems: "center", justifyContent: "center" }}>
-                    <ShieldCheck size={14} color="#bef264" />
+                  <View style={{ width: 32, height: 32, borderRadius: 9, backgroundColor: `${colors.primary}24`, alignItems: "center", justifyContent: "center" }}>
+                    <ShieldCheck size={14} color={colors.primary} />
                   </View>
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 13, fontFamily: fonts.heading.semibold }}>{p.Name}</Text>
@@ -384,12 +378,12 @@ function TodayTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
                         onPress={() => openCheckIn(p)}
                         style={({ pressed }) => ({
                           flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 11, paddingVertical: 8, borderRadius: 10,
-                          backgroundColor: "rgba(101,163,13,0.16)", borderWidth: 1, borderColor: "rgba(101,163,13,0.35)",
+                          backgroundColor: `${colors.primary}29`, borderWidth: 1, borderColor: `${colors.primary}59`,
                           transform: [{ scale: pressed ? 0.94 : 1 }],
                         })}
                       >
-                        <LogIn size={12} color="#bef264" />
-                        <Text style={{ color: "#bef264", fontSize: 11, fontFamily: fonts.heading.semibold }}>Check In</Text>
+                        <LogIn size={12} color={colors.primary} />
+                        <Text style={{ color: colors.primary, fontSize: 11, fontFamily: fonts.heading.semibold }}>Check In</Text>
                       </Pressable>
                     )}
                   </View>
@@ -410,8 +404,8 @@ function TodayTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
             return (
               <Card key={a.Id}>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                  <View style={{ width: 32, height: 32, borderRadius: 9, backgroundColor: "rgba(101,163,13,0.14)", alignItems: "center", justifyContent: "center" }}>
-                    <ShieldCheck size={14} color="#bef264" />
+                  <View style={{ width: 32, height: 32, borderRadius: 9, backgroundColor: `${colors.primary}24`, alignItems: "center", justifyContent: "center" }}>
+                    <ShieldCheck size={14} color={colors.primary} />
                   </View>
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
@@ -500,7 +494,7 @@ function TodayTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
         onClose={() => setShiftPickerOpen(false)}
       />
 
-      <SuccessBurst visible={!!burstLabel} label={burstLabel ?? ""} color={OPS_CYAN} ink={OPS_INK} />
+      <SuccessBurst visible={!!burstLabel} label={burstLabel ?? ""} color={colors.primary} ink={HERO_GRADIENT[0]} />
     </View>
   );
 }
@@ -532,7 +526,7 @@ function PersonnelTab({ rights }: { rights: ReturnType<typeof usePageRights> }) 
         {rights.canCreate && (
           <Pressable
             onPress={() => setFormTarget("new")}
-            style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 10, borderRadius: 12, backgroundColor: ACCENT, marginBottom: 14 }}
+            style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 10, borderRadius: 12, backgroundColor: colors.primary, marginBottom: 14 }}
           >
             <Plus size={13} color="#1a1a1a" />
             <Text style={{ color: "#1a1a1a", fontSize: 12.5, fontFamily: fonts.heading.bold }}>Add Personnel</Text>
@@ -682,9 +676,9 @@ function PersonnelFormSheet({
               <Pressable
                 key={s}
                 onPress={() => setStatus(s)}
-                style={{ flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: "center", borderWidth: 1, borderColor: status === s ? ACCENT : colors.border, backgroundColor: status === s ? `${ACCENT}1a` : "transparent" }}
+                style={{ flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: "center", borderWidth: 1, borderColor: status === s ? colors.primary : colors.border, backgroundColor: status === s ? `${colors.primary}1a` : "transparent" }}
               >
-                <Text style={{ color: status === s ? ACCENT : colors.mutedForeground, fontSize: 12, fontFamily: fonts.heading.semibold }}>{s}</Text>
+                <Text style={{ color: status === s ? colors.primary : colors.mutedForeground, fontSize: 12, fontFamily: fonts.heading.semibold }}>{s}</Text>
               </Pressable>
             ))}
           </View>
@@ -974,7 +968,7 @@ function ShiftsTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
         {rights.canCreate && (
           <Pressable
             onPress={() => setFormTarget("new")}
-            style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 10, borderRadius: 12, backgroundColor: ACCENT, marginBottom: 14 }}
+            style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 10, borderRadius: 12, backgroundColor: colors.primary, marginBottom: 14 }}
           >
             <Plus size={13} color="#1a1a1a" />
             <Text style={{ color: "#1a1a1a", fontSize: 12.5, fontFamily: fonts.heading.bold }}>Add Shift</Text>
@@ -1076,9 +1070,9 @@ function ShiftFormSheet({ shift, onClose, onSaved }: { shift: SecurityShift | nu
             <Pressable
               key={s}
               onPress={() => setStatus(s)}
-              style={{ flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: "center", borderWidth: 1, borderColor: status === s ? ACCENT : colors.border, backgroundColor: status === s ? `${ACCENT}1a` : "transparent" }}
+              style={{ flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: "center", borderWidth: 1, borderColor: status === s ? colors.primary : colors.border, backgroundColor: status === s ? `${colors.primary}1a` : "transparent" }}
             >
-              <Text style={{ color: status === s ? ACCENT : colors.mutedForeground, fontSize: 12, fontFamily: fonts.heading.semibold }}>{s}</Text>
+              <Text style={{ color: status === s ? colors.primary : colors.mutedForeground, fontSize: 12, fontFamily: fonts.heading.semibold }}>{s}</Text>
             </Pressable>
           ))}
         </View>

@@ -1,5 +1,6 @@
-// Mobile form kit — single-column, tap-friendly, sticky submit bar.
-// Used by every Maintenance create/edit screen.
+// Mobile form kit — single-column, tap-friendly, sticky submit bar. Used by every create / edit screen (Maintenance
+// and CRM). Sentence-case labels over soft rounded fields, as the app's kit (screens/crm/ui.tsx). The styles are worked
+// out at each draw, so a change of theme (light / dark, accent) shows at once.
 import type { ReactNode } from "react";
 import {
   View, Text, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator,
@@ -8,18 +9,16 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 
-const labelStyle = {
+const labelStyle = () => ({
   color: colors.mutedForeground,
-  fontSize: 10,
+  fontSize: 13,
   fontFamily: fonts.body.medium,
-  textTransform: "uppercase" as const,
-  letterSpacing: 0.4,
-  marginBottom: 5,
-};
+  marginBottom: 7,
+});
 
 export function FieldLabel({ label, required }: { label: string; required?: boolean }) {
   return (
-    <Text style={labelStyle}>
+    <Text style={labelStyle()}>
       {label}
       {required ? <Text style={{ color: colors.destructive }}> *</Text> : null}
     </Text>
@@ -29,21 +28,21 @@ export function FieldLabel({ label, required }: { label: string; required?: bool
 export function FieldError({ error }: { error?: string | null }) {
   if (!error) return null;
   return (
-    <Text style={{ color: colors.destructive, fontSize: 10.5, fontFamily: fonts.body.regular, marginTop: 4 }}>{error}</Text>
+    <Text style={{ color: colors.destructive, fontSize: 12.5, fontFamily: fonts.body.regular, marginTop: 5 }}>{error}</Text>
   );
 }
 
-const boxStyle = {
+const boxStyle = () => ({
   borderWidth: 1,
   borderColor: colors.border,
-  backgroundColor: `${colors.card}80`,
-  borderRadius: 12,
-  paddingHorizontal: 12,
-  minHeight: 44,
+  backgroundColor: colors.card,
+  borderRadius: 14,
+  paddingHorizontal: 14,
+  minHeight: 48,
   color: colors.foreground,
-  fontSize: 13.5,
+  fontSize: 15,
   fontFamily: fonts.body.regular,
-};
+});
 
 export function TextField({
   label, value, onChangeText, placeholder, required, error, autoCapitalize, keyboardType, multiline, disabled,
@@ -72,8 +71,8 @@ export function TextField({
         multiline={multiline}
         editable={!disabled}
         style={[
-          boxStyle,
-          multiline ? { minHeight: 84, paddingTop: 10, textAlignVertical: "top" } : { paddingVertical: 10 },
+          boxStyle(),
+          multiline ? { minHeight: 96, paddingTop: 12, textAlignVertical: "top" } : { paddingVertical: 12 },
           error ? { borderColor: colors.destructive } : null,
           disabled ? { opacity: 0.5 } : null,
         ]}
@@ -96,8 +95,8 @@ export function FormSection({ title, children }: { title: string; children: Reac
     <View style={{ marginBottom: 18 }}>
       <Text
         style={{
-          color: colors.foreground, fontSize: 11, fontFamily: fonts.heading.bold,
-          letterSpacing: 1, textTransform: "uppercase", marginBottom: 12,
+          color: colors.foreground, fontSize: 17, fontFamily: fonts.heading.semibold,
+          letterSpacing: -0.2, marginBottom: 12,
         }}
       >
         {title}
@@ -108,9 +107,9 @@ export function FormSection({ title, children }: { title: string; children: Reac
 }
 
 export function FormScaffold({
-  children, onSubmit, submitLabel = "Save", onCancel, submitting, disabled, tone = "#65a30d", toneInk = "#1a1a1a",
+  children, onSubmit, submitLabel = "Save", onCancel, submitting, disabled, tone, toneInk = "#FFFFFF",
 }: {
-  /** The submit key's colour and its text colour: Maintenance green by default; the CRM forms pass the CRM colour. */
+  /** The submit key's colour and its text colour: the app's accent (Settings) unless a screen passes its own. */
   tone?: string;
   toneInk?: string;
   children: ReactNode;
@@ -148,7 +147,7 @@ export function FormScaffold({
           onPress={submitting || disabled ? undefined : onSubmit}
           style={{
             flex: 1.5, paddingVertical: 13, borderRadius: 12, alignItems: "center",
-            backgroundColor: tone, opacity: submitting || disabled ? 0.6 : 1,
+            backgroundColor: tone ?? colors.primary, opacity: submitting || disabled ? 0.6 : 1,
           }}
         >
           {submitting ? (

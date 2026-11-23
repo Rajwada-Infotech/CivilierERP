@@ -71,6 +71,8 @@ export const sheet: Record<string, string> = {
   redWash: rgba(colors.destructive, 0.1),
   grid: rgba(colors.foreground, 0.04),
   hatch: rgba(colors.foreground, 0.24),
+  /** A soft fill for tiles and pills on a card. */
+  wash: rgba(colors.foreground, 0.06),
 };
 
 /** The palette the app shows, from the theme (ThemeContext.tsx): the page, card, text and line colours as hex (screens
@@ -94,5 +96,6 @@ export function applyPalette(p: Palette) {
     line40: rgba(colors.foreground, 0.4), line15: rgba(colors.foreground, 0.15), blue: colors.primary,
     blueWash: rgba(colors.primary, 0.1), blueTint: rgba(colors.primary, 0.18), red: colors.destructive,
     redWash: rgba(colors.destructive, 0.1), grid: rgba(colors.foreground, 0.04), hatch: rgba(colors.foreground, 0.24),
+    wash: rgba(colors.foreground, 0.06),
   });
 }

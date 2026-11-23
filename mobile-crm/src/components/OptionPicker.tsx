@@ -24,15 +24,15 @@ export function PickerRow({
       onPress={disabled ? undefined : onPress}
       style={{
         flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-        paddingHorizontal: 14, paddingVertical: 12, borderRadius: 12, marginBottom: 14,
-        borderWidth: 1, borderColor: colors.border, backgroundColor: `${colors.card}80`, opacity: disabled ? 0.5 : 1,
+        paddingHorizontal: 14, paddingVertical: 12, borderRadius: 14, marginBottom: 14,
+        borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, opacity: disabled ? 0.5 : 1,
       }}
     >
       <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.body.medium, textTransform: "uppercase", letterSpacing: 0.4 }}>
+        <Text style={{ color: colors.mutedForeground, fontSize: 13, fontFamily: fonts.body.medium }}>
           {label}{required ? " *" : ""}
         </Text>
-        <Text numberOfLines={1} style={{ color: value ? colors.foreground : `${colors.mutedForeground}99`, fontSize: 13, fontFamily: fonts.body.medium, marginTop: 2 }}>
+        <Text numberOfLines={1} style={{ color: value ? colors.foreground : `${colors.mutedForeground}99`, fontSize: 15, fontFamily: fonts.body.medium, marginTop: 3 }}>
           {value || placeholder}
         </Text>
       </View>

@@ -48,7 +48,7 @@ export function Chips<T extends string>({ label, options, value, onChange, label
 }) {
   return (
     <View style={{ marginBottom: 14 }}>
-      <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.body.medium, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 7 }}>
+      <Text style={{ color: colors.mutedForeground, fontSize: 13, fontFamily: fonts.body.medium, marginBottom: 8 }}>
         {label}{required ? <Text style={{ color: colors.destructive }}> *</Text> : null}
       </Text>
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>

@@ -1,9 +1,11 @@
 // Small decorative ring around the CivilierERP mark — used on the login
 // card. Generic (no module branding), ported from mobile-supplier's
 // SupplierLogoRing minus the emerald-specific palette.
+import { colors } from "@/theme/colors";
 import { View, Image } from "react-native";
 
-export function LogoRing({ size = 64, color = "#65a30d" }: { size?: number; color?: string }) {
+export function LogoRing({ size = 64, color: given }: { size?: number; color?: string }) {
+  const color = given ?? colors.primary;
   const inner = Math.round(size * 0.62);
   return (
     <View

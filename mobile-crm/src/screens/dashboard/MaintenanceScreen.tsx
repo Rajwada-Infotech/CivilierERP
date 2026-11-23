@@ -20,7 +20,6 @@ import { getActiveChargeHeads } from "@/api/chargeHeadApi";
 import { getMaintenanceBills } from "@/api/maintenanceBillApi";
 import { Figure, Heading, MenuGroup, Section, TAB_BAR_CLEARANCE } from "@/screens/crm/ui";
 
-const ACCENT = "#65a30d";
 
 type MaintenanceRoute = "Directory" | "Bills" | "ServiceRequests" | "Attendance" | "Electricity";
 /** The Maintenance pages, each with the page right that shows it — one list for the tab, its visibility and Home. */
@@ -101,9 +100,9 @@ export default function MaintenanceScreen() {
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
       contentContainerStyle={{ padding: 16, paddingBottom: TAB_BAR_CLEARANCE }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={ACCENT} />}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
     >
-      <MenuGroup items={pages.map((p) => ({ key: p.route, label: p.label, sub: p.sub, icon: p.icon, tint: ACCENT, onPress: () => nav.navigate(p.route) }))} />
+      <MenuGroup items={pages.map((p) => ({ key: p.route, label: p.label, sub: p.sub, icon: p.icon, tint: colors.primary, onPress: () => nav.navigate(p.route) }))} />
       <View style={{ height: 18 }} />
 
       {!overview ? null : <View style={{ marginBottom: 10 }}><Heading title="Maintenance Overview" /></View>}
@@ -116,7 +115,7 @@ export default function MaintenanceScreen() {
         <>
           <View style={{ gap: 10, marginBottom: 20 }}>
             <View style={{ flexDirection: "row", gap: 10 }}>
-              <StatCard label="Confirmed Customers" value={String(directoryRows.length)} icon={Users} color={ACCENT} />
+              <StatCard label="Confirmed Customers" value={String(directoryRows.length)} icon={Users} color={colors.primary} />
               <StatCard label="Active Charge Heads" value={String(chargeHeadRows.length)} icon={ListChecks} color="#0ea5e9" />
             </View>
             <View style={{ flexDirection: "row", gap: 10 }}>
@@ -135,7 +134,7 @@ export default function MaintenanceScreen() {
             ) : (
               <DonutChart
                 data={[
-                  { name: "Active", value: activeBills.length, color: ACCENT },
+                  { name: "Active", value: activeBills.length, color: colors.primary },
                   { name: "Cancelled", value: cancelledBills.length, color: "#ef4444" },
                 ]}
               />
@@ -150,7 +149,7 @@ export default function MaintenanceScreen() {
             ) : (
               <DonutChart
                 data={[
-                  { name: "Billed", value: billedCustomerCount, color: ACCENT },
+                  { name: "Billed", value: billedCustomerCount, color: colors.primary },
                   { name: "Not Yet Billed", value: unbilledCustomerCount, color: "#94a3b8" },
                 ]}
               />
@@ -158,7 +157,7 @@ export default function MaintenanceScreen() {
           </ChartCard>
 
           <ChartCard title="Billing Amount — Last 14 Days" icon={TrendingUp}>
-            <TrendLineChart data={trendData} color={ACCENT} />
+            <TrendLineChart data={trendData} color={colors.primary} />
           </ChartCard>
         </>
       )}

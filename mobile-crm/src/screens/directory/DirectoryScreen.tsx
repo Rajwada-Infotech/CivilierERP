@@ -4,8 +4,7 @@
 // mirrors the web app's own telephone-directory style
 // (src/pages/maintenance/MaintenanceDirectory.tsx): initials avatar, name,
 // phone/unit/project meta, booking no + date, tap through to a profile.
-// Its own "Resident Directory" violet identity in the header — distinct
-// from Security's cyan ops board and Electricity's amber live grid.
+// The header block in the app's hero colours and accent, as every Maintenance page.
 import { useEffect, useMemo, useState } from "react";
 import { View, Text, TextInput, Pressable } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
@@ -13,14 +12,13 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { Search, Phone, Home, Building2, Users, MapPinned } from "lucide-react-native";
+import { HERO_GRADIENT } from "@/theme/ThemeContext";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { DataList } from "@/components/list/DataList";
 import { getMaintenanceDirectory, type MaintenanceDirectoryRow } from "@/api/maintenanceApi";
 import type { MainStackParamList } from "@/navigation/MainStack";
 
-const DIR_VIOLET = "#a78bfa";
-const DIR_INK = "#150f28";
 
 function initialOf(name: string | null | undefined): string {
   return (name || "?").trim().charAt(0).toUpperCase();
@@ -30,10 +28,10 @@ function StatTile({ label, value, icon: Icon }: {
   label: string; value: string | number; icon: React.ComponentType<{ size?: number; color?: string }>;
 }) {
   return (
-    <View style={{ flex: 1, backgroundColor: colors.card, borderRadius: 14, borderWidth: 1, borderColor: `${DIR_VIOLET}28`, padding: 12 }}>
+    <View style={{ flex: 1, backgroundColor: colors.card, borderRadius: 14, borderWidth: 1, borderColor: `${colors.primary}28`, padding: 12 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 }}>
-        <Icon size={12} color={DIR_VIOLET} />
-        <Text style={{ fontSize: 9, fontFamily: fonts.heading.semibold, color: colors.mutedForeground, textTransform: "uppercase", letterSpacing: 0.5 }}>
+        <Icon size={12} color={colors.primary} />
+        <Text style={{ fontSize: 12, fontFamily: fonts.heading.semibold, color: colors.mutedForeground }}>
           {label}
         </Text>
       </View>
@@ -80,17 +78,17 @@ export default function DirectoryScreen() {
       header={
         <View style={{ paddingHorizontal: 16, paddingTop: 16 }}>
           <LinearGradient
-            colors={[DIR_INK, "#241a3d", DIR_INK]}
+            colors={HERO_GRADIENT}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
-            style={{ borderRadius: 18, padding: 16, marginBottom: 10, overflow: "hidden", borderWidth: 1, borderColor: `${DIR_VIOLET}30` }}
+            style={{ borderRadius: 18, padding: 16, marginBottom: 10, overflow: "hidden", borderWidth: 1, borderColor: `${colors.primary}30` }}
           >
             <View style={{ position: "absolute", right: -12, top: -8, opacity: 0.09 }}>
-              <Users size={96} color={DIR_VIOLET} />
+              <Users size={96} color={colors.primary} />
             </View>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 8 }}>
-              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: DIR_VIOLET }} />
-              <Text style={{ color: DIR_VIOLET, fontSize: 9.5, fontFamily: fonts.heading.bold, letterSpacing: 2 }}>RESIDENT DIRECTORY</Text>
+              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary }} />
+              <Text style={{ color: colors.primary, fontSize: 12.5, fontFamily: fonts.heading.semibold }}>Resident directory</Text>
             </View>
             <Text style={{ color: "#ede9fe", fontSize: 30, fontFamily: fonts.heading.bold, fontVariant: ["tabular-nums"] }}>
               {stats.total}
@@ -127,7 +125,7 @@ export default function DirectoryScreen() {
             backgroundColor: pressed ? colors.muted : colors.card,
             borderRadius: 16,
             borderWidth: 1,
-            borderColor: pressed ? `${DIR_VIOLET}40` : `${DIR_VIOLET}18`,
+            borderColor: pressed ? `${colors.primary}40` : `${colors.primary}18`,
             paddingVertical: 16,
             paddingHorizontal: 16,
             marginBottom: 10,
@@ -140,12 +138,12 @@ export default function DirectoryScreen() {
               borderRadius: 22,
               alignItems: "center",
               justifyContent: "center",
-              backgroundColor: `${DIR_VIOLET}18`,
+              backgroundColor: `${colors.primary}18`,
               borderWidth: 1.5,
-              borderColor: `${DIR_VIOLET}40`,
+              borderColor: `${colors.primary}40`,
             }}
           >
-            <Text style={{ color: DIR_VIOLET, fontSize: 16, fontFamily: fonts.heading.bold }}>
+            <Text style={{ color: colors.primary, fontSize: 16, fontFamily: fonts.heading.bold }}>
               {initialOf(c.CustomerName)}
             </Text>
           </View>
@@ -157,9 +155,9 @@ export default function DirectoryScreen() {
 
             <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: 8 }}>
               {(c.UnitNo || c.BlockName) && (
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: `${DIR_VIOLET}14`, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3.5 }}>
-                  <Home size={9} color={DIR_VIOLET} />
-                  <Text style={{ color: DIR_VIOLET, fontSize: 10, fontFamily: fonts.heading.semibold }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: `${colors.primary}14`, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3.5 }}>
+                  <Home size={9} color={colors.primary} />
+                  <Text style={{ color: colors.primary, fontSize: 10, fontFamily: fonts.heading.semibold }}>
                     {[c.BlockName, c.UnitNo].filter(Boolean).join(" / ")}
                   </Text>
                 </View>

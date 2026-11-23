@@ -14,20 +14,20 @@ import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { getHandedOverTickets } from "@/api/serviceTicketApi";
 
-const VIOLET = "#a78bfa";
 
-const STATUS_COLOR: Record<string, { bg: string; text: string; border: string }> = {
+// Worked out at each draw: the closed tone follows the theme.
+const statusColors = (): Record<string, { bg: string; text: string; border: string }> => ({
   Open:       { bg: "#fef3c720", text: "#d97706", border: "#fbbf2440" },
   Assigned:   { bg: "#e0f2fe20", text: "#0284c7", border: "#38bdf840" },
   InProgress: { bg: "#ede9fe20", text: "#7c3aed", border: "#a78bfa40" },
   Resolved:   { bg: "#d1fae520", text: "#059669", border: "#34d39940" },
   Closed:     { bg: colors.muted + "20", text: colors.mutedForeground, border: colors.border },
   Reopened:   { bg: "#fed7aa20", text: "#c2410c", border: "#fb923c40" },
-};
+});
 
-const PRIORITY_COLOR: Record<string, string> = {
+const priorityColors = (): Record<string, string> => ({
   Urgent: "#ef4444", High: "#f97316", Normal: "#0ea5e9", Low: colors.mutedForeground,
-};
+});
 
 const STATUS_TABS: { label: string; value: string }[] = [
   { label: "All", value: "" },
@@ -82,9 +82,9 @@ export default function ServiceRequestsScreen() {
             <Pressable
               key={tab.value}
               onPress={() => setStatusTab(tab.value)}
-              style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10, borderWidth: 1, borderColor: active ? `${VIOLET}60` : colors.border, backgroundColor: active ? `${VIOLET}18` : "transparent" }}
+              style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10, borderWidth: 1, borderColor: active ? `${colors.primary}60` : colors.border, backgroundColor: active ? `${colors.primary}18` : "transparent" }}
             >
-              <Text style={{ fontSize: 12, fontFamily: active ? fonts.heading.semibold : fonts.body.regular, color: active ? VIOLET : colors.mutedForeground }}>
+              <Text style={{ fontSize: 12, fontFamily: active ? fonts.heading.semibold : fonts.body.regular, color: active ? colors.primary : colors.mutedForeground }}>
                 {tab.label}
               </Text>
             </Pressable>
@@ -96,7 +96,7 @@ export default function ServiceRequestsScreen() {
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 100 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={VIOLET} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
       >
         {isLoading ? (
           <View style={{ paddingVertical: 60, alignItems: "center" }}>
@@ -108,8 +108,8 @@ export default function ServiceRequestsScreen() {
           </Text>
         ) : data.length === 0 ? (
           <View style={{ paddingVertical: 60, alignItems: "center", gap: 10 }}>
-            <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: `${VIOLET}14`, alignItems: "center", justifyContent: "center" }}>
-              <Ticket size={22} color={VIOLET} />
+            <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: `${colors.primary}14`, alignItems: "center", justifyContent: "center" }}>
+              <Ticket size={22} color={colors.primary} />
             </View>
             <Text style={{ color: colors.foreground, fontSize: 13.5, fontFamily: fonts.body.semibold }}>No service requests</Text>
             <Text style={{ color: colors.mutedForeground, fontSize: 11.5, fontFamily: fonts.body.regular, textAlign: "center", maxWidth: 240 }}>
@@ -119,7 +119,7 @@ export default function ServiceRequestsScreen() {
         ) : (
           <View style={{ gap: 10 }}>
             {data.map((t) => {
-              const sc = STATUS_COLOR[t.Status] || STATUS_COLOR.Closed;
+              const sc = statusColors()[t.Status] || statusColors().Closed;
               return (
                 <Pressable
                   key={t.Id}
@@ -133,7 +133,7 @@ export default function ServiceRequestsScreen() {
                       <View style={{ paddingHorizontal: 7, paddingVertical: 2, borderRadius: 8, borderWidth: 1, borderColor: sc.border, backgroundColor: sc.bg }}>
                         <Text style={{ fontSize: 10, fontFamily: fonts.heading.semibold, color: sc.text }}>{t.Status}</Text>
                       </View>
-                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: PRIORITY_COLOR[t.Priority] }} />
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: priorityColors()[t.Priority] }} />
                     </View>
                     <Text style={{ fontSize: 10, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>{t.Category}</Text>
                   </View>

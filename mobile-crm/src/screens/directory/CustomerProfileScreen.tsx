@@ -1,13 +1,14 @@
 // Customer Maintenance Profile — direct port of the web app's
 // src/pages/maintenance/CustomerMaintenanceProfile.tsx: contact/unit/
 // project info + payment history (empty state until maintenance payment
-// collection is wired up, same as web). Same "Resident Directory" violet
-// identity as DirectoryScreen.tsx, which this opens from.
+// collection is wired up, same as web). In the app's accent and hero colours, as DirectoryScreen.tsx, which this
+// opens from.
 import { View, Text, ScrollView, ActivityIndicator } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useQuery } from "@tanstack/react-query";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Phone, Mail, Home, Building2, Wallet, ListChecks, Receipt, Ticket } from "lucide-react-native";
+import { HERO_GRADIENT } from "@/theme/ThemeContext";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { getMaintenanceCustomer, getMaintenanceCharges } from "@/api/maintenanceApi";
@@ -15,19 +16,17 @@ import { getMaintenanceBills } from "@/api/maintenanceBillApi";
 import { getTicketsForBooking } from "@/api/serviceTicketApi";
 import type { MainStackParamList } from "@/navigation/MainStack";
 
-const DIR_VIOLET = "#a78bfa";
-const DIR_INK = "#150f28";
 
 type Props = NativeStackScreenProps<MainStackParamList, "CustomerProfile">;
 
 function InfoTile({ icon: Icon, label, value }: { icon: typeof Phone; label: string; value: string }) {
   return (
-    <View style={{ flex: 1, minWidth: "45%", backgroundColor: colors.card, borderRadius: 14, borderWidth: 1, borderColor: `${DIR_VIOLET}20`, padding: 13 }}>
+    <View style={{ flex: 1, minWidth: "45%", backgroundColor: colors.card, borderRadius: 14, borderWidth: 1, borderColor: `${colors.primary}20`, padding: 13 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 8 }}>
-        <View style={{ width: 22, height: 22, borderRadius: 7, backgroundColor: `${DIR_VIOLET}18`, alignItems: "center", justifyContent: "center" }}>
-          <Icon size={11} color={DIR_VIOLET} />
+        <View style={{ width: 22, height: 22, borderRadius: 7, backgroundColor: `${colors.primary}18`, alignItems: "center", justifyContent: "center" }}>
+          <Icon size={11} color={colors.primary} />
         </View>
-        <Text style={{ color: colors.mutedForeground, fontSize: 9.5, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.5 }}>
+        <Text style={{ color: colors.mutedForeground, fontSize: 12.5, fontFamily: fonts.heading.semibold }}>
           {label}
         </Text>
       </View>
@@ -94,10 +93,10 @@ export default function CustomerProfileScreen({ route }: Props) {
     <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
       {/* ── Identity hero ── */}
       <LinearGradient
-        colors={[DIR_INK, "#241a3d", DIR_INK]}
+        colors={HERO_GRADIENT}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-        style={{ borderRadius: 20, padding: 18, marginBottom: 16, overflow: "hidden", borderWidth: 1, borderColor: `${DIR_VIOLET}30`, flexDirection: "row", alignItems: "center", gap: 14 }}
+        style={{ borderRadius: 20, padding: 18, marginBottom: 16, overflow: "hidden", borderWidth: 1, borderColor: `${colors.primary}30`, flexDirection: "row", alignItems: "center", gap: 14 }}
       >
         <View
           style={{
@@ -106,12 +105,12 @@ export default function CustomerProfileScreen({ route }: Props) {
             borderRadius: 28,
             alignItems: "center",
             justifyContent: "center",
-            backgroundColor: `${DIR_VIOLET}1f`,
+            backgroundColor: `${colors.primary}1f`,
             borderWidth: 1.5,
-            borderColor: `${DIR_VIOLET}45`,
+            borderColor: `${colors.primary}45`,
           }}
         >
-          <Text style={{ color: DIR_VIOLET, fontSize: 21, fontFamily: fonts.heading.bold }}>{initial}</Text>
+          <Text style={{ color: colors.primary, fontSize: 21, fontFamily: fonts.heading.bold }}>{initial}</Text>
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text numberOfLines={1} style={{ color: "#ede9fe", fontSize: 17, fontFamily: fonts.heading.bold }}>
@@ -134,14 +133,14 @@ export default function CustomerProfileScreen({ route }: Props) {
       {/* ── Quick stats ── */}
       <View style={{ flexDirection: "row", gap: 8, marginBottom: 20 }}>
         {[
-          { label: "Charges", value: String(chargeRows.length),         icon: ListChecks, color: "#65a30d" },
+          { label: "Charges", value: String(chargeRows.length),         icon: ListChecks, color: colors.primary },
           { label: "Billed",  value: INR(totalBilled),                  icon: Wallet,     color: "#f59e0b" },
-          { label: "Tickets", value: `${openTickets.length} open`,      icon: Ticket,     color: DIR_VIOLET },
+          { label: "Tickets", value: `${openTickets.length} open`,      icon: Ticket,     color: colors.primary },
         ].map((s) => (
           <View key={s.label} style={{ flex: 1, backgroundColor: colors.card, borderRadius: 12, borderWidth: 1, borderColor: `${s.color}30`, padding: 11 }}>
             <s.icon size={13} color={s.color} />
             <Text style={{ color: colors.foreground, fontSize: 13, fontFamily: fonts.heading.bold, marginTop: 6 }}>{s.value}</Text>
-            <Text style={{ color: colors.mutedForeground, fontSize: 9.5, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.5, marginTop: 2 }}>{s.label}</Text>
+            <Text style={{ color: colors.mutedForeground, fontSize: 12.5, fontFamily: fonts.heading.semibold, marginTop: 2 }}>{s.label}</Text>
           </View>
         ))}
       </View>
@@ -149,7 +148,7 @@ export default function CustomerProfileScreen({ route }: Props) {
       {/* ── Bills ── */}
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10 }}>
         <Receipt size={13} color="#f59e0b" />
-        <Text style={{ color: colors.foreground, fontSize: 11.5, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.4 }}>
+        <Text style={{ color: colors.foreground, fontSize: 15.5, fontFamily: fonts.heading.semibold }}>
           Bills
         </Text>
       </View>
@@ -177,8 +176,8 @@ export default function CustomerProfileScreen({ route }: Props) {
 
       {/* ── Service Ticket summary ── */}
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10 }}>
-        <Ticket size={13} color={DIR_VIOLET} />
-        <Text style={{ color: colors.foreground, fontSize: 11.5, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.4 }}>
+        <Ticket size={13} color={colors.primary} />
+        <Text style={{ color: colors.foreground, fontSize: 15.5, fontFamily: fonts.heading.semibold }}>
           Service Tickets
         </Text>
       </View>
@@ -188,13 +187,13 @@ export default function CustomerProfileScreen({ route }: Props) {
           <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, marginTop: 8 }}>No service tickets yet.</Text>
         </View>
       ) : (
-        <View style={{ borderRadius: 14, borderWidth: 1, borderColor: `${DIR_VIOLET}30`, overflow: "hidden" }}>
+        <View style={{ borderRadius: 14, borderWidth: 1, borderColor: `${colors.primary}30`, overflow: "hidden" }}>
           {ticketRows.map((t, i) => (
             <View key={t.Id} style={{ paddingHorizontal: 13, paddingVertical: 10, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: colors.border }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 3 }}>
                 <Text style={{ fontSize: 10, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>{t.TicketNo}</Text>
-                <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: `${DIR_VIOLET}18` }}>
-                  <Text style={{ fontSize: 10, fontFamily: fonts.heading.semibold, color: DIR_VIOLET }}>{t.Status}</Text>
+                <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: `${colors.primary}18` }}>
+                  <Text style={{ fontSize: 10, fontFamily: fonts.heading.semibold, color: colors.primary }}>{t.Status}</Text>
                 </View>
                 <Text style={{ fontSize: 10, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>{t.Category}</Text>
               </View>

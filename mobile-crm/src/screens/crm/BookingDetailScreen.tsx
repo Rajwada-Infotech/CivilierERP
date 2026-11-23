@@ -16,7 +16,7 @@ import { getTicketsForBooking } from "@/api/serviceTicketApi";
 import type { MainStackParamList } from "@/navigation/MainStack";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
-import { ActionKey, CRM, ContactKeys, Empty, Figure, Kv, LinkRow, Section, fmtDate, joinDot, money, Pill, useCardStyle } from "./ui";
+import { ActionKey, CRM, ContactKeys, Empty, HeroSurface, Kv, LinkRow, ON_HERO, Section, Tap, fmtDate, joinDot, money, Pill, useCardStyle, words } from "./ui";
 import { useCrmOpen } from "./CrmRegisterScreen";
 import { milestoneMissing, nextOpenMilestone } from "./CrmForms";
 
@@ -69,6 +69,7 @@ export default function BookingDetailScreen() {
   const error = (bookingQ.error || payQ.error) as Error | null;
   const status = head.Status || head.BookingStatus;
   const live = !CLOSED.includes(status);
+  const price = Number(head.GrandTotal ?? sum?.totalDue) || 0;
   const title = head.BookingNo || params.title || "Booking";
   const canPay = live && canDoAction("crm-payments", "edit");
   const canDeposit = live && canDoAction("crm-payments", "create");
@@ -96,43 +97,56 @@ export default function BookingDetailScreen() {
         <Text style={{ color: colors.destructive, fontSize: 12, fontFamily: fonts.body.regular }}>{error.message}</Text>
       ) : (
         <>
-          {/* Who and what */}
-          <View style={{ ...card, padding: 18, marginBottom: 12 }}>
-            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-              <Text style={{ fontSize: 18, fontFamily: fonts.heading.bold, color: colors.foreground }}>{head.BookingNo || params.title}</Text>
-              {head.Status || head.BookingStatus ? <Pill label={head.Status || head.BookingStatus} /> : null}
-            </View>
-            <Text style={{ fontSize: 12.5, fontFamily: fonts.body.medium, color: colors.foreground, marginTop: 6 }}>
-              {customer?.CustomerName || head.ApplicantName || "—"}
-            </Text>
-            <Text style={{ fontSize: 11.5, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 4 }}>
-              {joinDot(head.ProjectName, [head.BlockName, head.FloorName, head.UnitNo].filter(Boolean).join(" / "), head.UnitType)}
-            </Text>
-            {head.BookingDate ? (
-              <Text style={{ fontSize: 11.5, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 2 }}>Booked {fmtDate(head.BookingDate)}</Text>
-            ) : null}
-            <View style={{ marginTop: 12 }}><ContactKeys mobile={customer?.Mobile || head.Mobile} /></View>
+          {/* Who, what, and the money — the booking number is the header's, so it isn't repeated here */}
+          <View style={{ marginBottom: 12 }}>
+            <HeroSurface padding={20}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                {status ? (
+                  <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: ON_HERO.glass }}>
+                    <Text style={{ fontSize: 12, fontFamily: fonts.heading.semibold, color: ON_HERO.primary }}>{words(status)}</Text>
+                  </View>
+                ) : null}
+                {overdue > 0 ? (
+                  <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: "rgba(248,113,113,0.24)" }}>
+                    <Text style={{ fontSize: 12, fontFamily: fonts.heading.semibold, color: "#FECACA" }}>{overdue} overdue</Text>
+                  </View>
+                ) : null}
+              </View>
+              <Text numberOfLines={1} style={{ fontSize: 22, fontFamily: fonts.heading.semibold, color: ON_HERO.primary, letterSpacing: -0.3, marginTop: 14 }}>
+                {customer?.CustomerName || head.ApplicantName || "—"}
+              </Text>
+              <Text style={{ fontSize: 13, lineHeight: 18, fontFamily: fonts.body.regular, color: ON_HERO.secondary, marginTop: 3 }}>
+                {joinDot(head.ProjectName, [head.BlockName, head.FloorName, head.UnitNo].filter(Boolean).join(" / "), head.UnitType, head.BookingDate && `Booked ${fmtDate(head.BookingDate)}`)}
+              </Text>
+              {sum ? (
+                <View style={{ marginTop: 18, gap: 8 }}>
+                  <Text style={{ fontSize: 12.5, fontFamily: fonts.body.medium, color: ON_HERO.secondary }}>Balance</Text>
+                  <Text style={{ fontSize: 30, fontFamily: fonts.heading.semibold, color: ON_HERO.primary, letterSpacing: -0.6, marginTop: -4 }}>{money(sum.balance)}</Text>
+                  <View style={{ height: 6, borderRadius: 3, backgroundColor: ON_HERO.glass, overflow: "hidden" }}>
+                    <View style={{ height: 6, borderRadius: 3, width: `${price ? Math.min(100, (Number(sum.totalPaid) / price) * 100) : 0}%`, backgroundColor: "#34D399" }} />
+                  </View>
+                  <Text style={{ fontSize: 12.5, fontFamily: fonts.body.medium, color: ON_HERO.secondary }}>Paid {money(sum.totalPaid)} of {money(price)}</Text>
+                </View>
+              ) : null}
+              <View style={{ marginTop: 16 }}><ContactKeys mobile={customer?.Mobile || head.Mobile} /></View>
+            </HeroSurface>
           </View>
 
-          {/* Money first */}
-          {sum ? (
-            <View style={{ gap: 10, marginBottom: 12 }}>
-              <View style={{ flexDirection: "row", gap: 10 }}>
-                <Figure label="Price" value={money(head.GrandTotal ?? sum.totalDue)} tone="#3b82f6" />
-                <Figure label="Paid" value={money(sum.totalPaid)} tone="#10b981" />
-              </View>
-              <View style={{ flexDirection: "row", gap: 10 }}>
-                <Figure label="Balance" value={money(sum.balance)} tone="#f59e0b" />
-                <Figure label="Overdue" value={String(overdue)} sub={`milestone${overdue === 1 ? "" : "s"}`} tone={overdue > 0 ? "#ef4444" : colors.mutedForeground} />
-              </View>
-            </View>
-          ) : null}
-
           {canCall || canDeposit || canTicket ? (
-            <View style={{ gap: 8, marginBottom: 12 }}>
-              {canCall ? <View style={{ flexDirection: "row" }}><ActionKey label="Log welcome call" icon={PhoneCall} outline onPress={() => nav.navigate("CrmWelcomeCall", { bookingId: id, title })} /></View> : null}
-              {canDeposit ? <View style={{ flexDirection: "row" }}><ActionKey label="Deposit on account" icon={Wallet} outline onPress={() => nav.navigate("CrmPayment", { bookingId: id, title })} /></View> : null}
-              {canTicket ? <View style={{ flexDirection: "row" }}><ActionKey label="Raise ticket" icon={Ticket} outline onPress={() => nav.navigate("CrmTicketNew", { bookingId: id, title })} /></View> : null}
+            <View style={{ flexDirection: "row", gap: 10, marginBottom: 12 }}>
+              {[
+                canCall && { key: "call", label: "Log welcome call", icon: PhoneCall, go: () => nav.navigate("CrmWelcomeCall", { bookingId: id, title }) },
+                canDeposit && { key: "deposit", label: "Deposit on account", icon: Wallet, go: () => nav.navigate("CrmPayment", { bookingId: id, title }) },
+                canTicket && { key: "ticket", label: "Raise ticket", icon: Ticket, go: () => nav.navigate("CrmTicketNew", { bookingId: id, title }) },
+              ].filter((a): a is { key: string; label: string; icon: typeof Ticket; go: () => void } => !!a).map((a) => (
+                <Tap key={a.key} onPress={a.go} accessibilityRole="button" accessibilityLabel={a.label}
+                  style={({ pressed }) => ({ ...card, flex: 1, alignItems: "center", gap: 8, paddingVertical: 14, paddingHorizontal: 6, opacity: pressed ? 0.75 : 1 })}>
+                  <View style={{ width: 40, height: 40, borderRadius: 13, backgroundColor: `${CRM}24`, alignItems: "center", justifyContent: "center" }}>
+                    <a.icon size={19} color={CRM} />
+                  </View>
+                  <Text numberOfLines={2} style={{ fontSize: 12.5, lineHeight: 16, textAlign: "center", fontFamily: fonts.heading.semibold, color: colors.foreground }}>{a.label}</Text>
+                </Tap>
+              ))}
             </View>
           ) : null}
 
@@ -256,7 +270,6 @@ export default function BookingDetailScreen() {
               <Kv label="Unit value" value={money(b.TotalValue)} />
               {pb ? <Kv label="Parking" value={money(pb.ParkingTotal)} /> : null}
               {pb ? <Kv label="Extra charges" value={money(pb.ExtraChargesTotal)} /> : null}
-              {pb ? <Kv label="Grand total" value={money(pb.GrandTotal)} strong /> : null}
               <Kv label="Booking amount" value={money(b.BookingAmount)} />
             </Section>
           ) : null}

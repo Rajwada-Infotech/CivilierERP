@@ -29,7 +29,7 @@ export function ConfirmSheet({
   children?: ReactNode;
 }) {
   const insets = useSafeAreaInsets();
-  const accent = tone === "danger" ? colors.destructive : "#65a30d";
+  const accent = tone === "danger" ? colors.destructive : colors.primary;
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>

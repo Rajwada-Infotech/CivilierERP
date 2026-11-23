@@ -15,7 +15,6 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { getMaintenanceBills, type MaintenanceBillListRow } from "@/api/maintenanceBillApi";
 import type { MainStackParamList } from "@/navigation/MainStack";
 
-const ACCENT = "#65a30d";
 const FILTERS = ["All", "Active", "Cancelled"] as const;
 
 const fmtDate = (d?: string | null) =>
@@ -47,7 +46,7 @@ export default function BillsScreen() {
           <View style={{ paddingHorizontal: 16, paddingTop: 16, alignItems: "flex-end" }}>
             <Pressable
               onPress={() => navigation.navigate("BillForm", {})}
-              style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 999, backgroundColor: ACCENT }}
+              style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 999, backgroundColor: colors.primary }}
             >
               <Plus size={13} color="#1a1a1a" />
               <Text style={{ color: "#1a1a1a", fontSize: 12, fontFamily: fonts.heading.bold }}>Create Bill</Text>
@@ -71,8 +70,8 @@ export default function BillsScreen() {
             })}
           >
             <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
-              <View style={{ width: 32, height: 32, borderRadius: 9, backgroundColor: overdue ? "rgba(239,68,68,0.14)" : "rgba(101,163,13,0.14)", alignItems: "center", justifyContent: "center" }}>
-                <Receipt size={14} color={overdue ? "#f87171" : "#bef264"} />
+              <View style={{ width: 32, height: 32, borderRadius: 9, backgroundColor: overdue ? "rgba(239,68,68,0.14)" : `${colors.primary}24`, alignItems: "center", justifyContent: "center" }}>
+                <Receipt size={14} color={overdue ? "#f87171" : colors.primary} />
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>

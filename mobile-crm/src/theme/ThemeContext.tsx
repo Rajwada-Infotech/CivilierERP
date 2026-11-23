@@ -51,16 +51,18 @@ function shade(hex: string, t: number) {
   return `#${((1 << 24) | (ch(16) << 16) | (ch(8) << 8) | ch(0)).toString(16).slice(1)}`;
 }
 
+/** The deep purple gradient (the user's choice, 2026-11-18) — the same in light and dark, so its text is always light.
+ * The hero cards and the screens' dark header blocks all use it. */
+export const HERO = { heroFrom: "#0F0C29", heroMid: "#1A1448", heroTo: "#302B63" } as const;
+export const HERO_GRADIENT = [HERO.heroFrom, HERO.heroMid, HERO.heroTo] as const;
+
 // Surfaces step up in lightness instead of being outlined (tonal elevation): page → card → raised.
 // The home card (hero*) is always deep, in both modes — like a premium bank card — so its text is always light.
 function buildTokens(mode: "dark" | "light", accentKey: AccentKey): BrandTokens {
   const accent = ACCENTS[accentKey].hex;
   const isDark  = mode === "dark";
   const accentGradient = [shade(accent, 0.28), accent, shade(accent, -0.22)] as const;
-  const hero = {
-    // The deep purple gradient (the user's choice, 2026-11-18) — the same in light and dark, so its text is always light.
-    heroFrom: "#0F0C29", heroMid: "#1A1448", heroTo: "#302B63",
-  };
+  const hero = HERO;
 
   if (isDark) {
     return {

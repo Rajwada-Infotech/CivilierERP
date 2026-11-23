@@ -37,7 +37,7 @@ function Field({ label, value, last = false }: { label: string; value: string; l
         borderRightColor: colors.border,
       }}
     >
-      <Text style={{ color: colors.mutedForeground, fontSize: 8.5, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.4 }}>
+      <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.heading.semibold }}>
         {label}
       </Text>
       <Text style={{ color: colors.foreground, fontSize: 12, fontFamily: fonts.heading.semibold, marginTop: 2 }}>
@@ -156,7 +156,7 @@ export default function BillViewScreen({ route }: Props) {
 
           {/* Name */}
           <View style={{ paddingVertical: 10, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: colors.border }}>
-            <Text style={{ color: colors.mutedForeground, fontSize: 8.5, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.4 }}>
+            <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.heading.semibold }}>
               Name
             </Text>
             <Text style={{ color: colors.foreground, fontSize: 13.5, fontFamily: fonts.heading.semibold, marginTop: 2 }}>
@@ -166,9 +166,9 @@ export default function BillViewScreen({ route }: Props) {
 
           {/* Sr / Description / Amount */}
           <View style={{ flexDirection: "row", backgroundColor: colors.muted, paddingVertical: 8, paddingHorizontal: 12 }}>
-            <Text style={{ width: 28, color: colors.mutedForeground, fontSize: 9, fontFamily: fonts.heading.semibold, textTransform: "uppercase" }}>Sr.</Text>
-            <Text style={{ flex: 1, color: colors.mutedForeground, fontSize: 9, fontFamily: fonts.heading.semibold, textTransform: "uppercase" }}>Description</Text>
-            <Text style={{ color: colors.mutedForeground, fontSize: 9, fontFamily: fonts.heading.semibold, textTransform: "uppercase" }}>Amount</Text>
+            <Text style={{ width: 28, color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.heading.semibold }}>Sr.</Text>
+            <Text style={{ flex: 1, color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.heading.semibold }}>Description</Text>
+            <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.heading.semibold }}>Amount</Text>
           </View>
           {bill.items.length === 0 ? (
             <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, textAlign: "center", paddingVertical: 20 }}>
@@ -242,7 +242,7 @@ export default function BillViewScreen({ route }: Props) {
 
           {/* Notes */}
           <View style={{ paddingVertical: 11, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: colors.border }}>
-            <Text style={{ color: colors.mutedForeground, fontSize: 8.5, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>
+            <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.heading.semibold, marginBottom: 4 }}>
               Notes
             </Text>
             <Text style={{ color: bill.Notes ? colors.foreground : colors.mutedForeground, fontSize: 11.5, fontFamily: fonts.body.regular, fontStyle: bill.Notes ? "normal" : "italic" }}>

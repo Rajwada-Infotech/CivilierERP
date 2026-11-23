@@ -194,14 +194,14 @@ export function ApprovalInboxDetailModal({
   };
 
   const foot = (children: React.ReactNode) => (
-    <View style={{ gap: 10, paddingHorizontal: 16, paddingTop: 10, paddingBottom: insets.bottom + 12, borderTopWidth: 1, borderTopColor: S.ink, backgroundColor: S.paper }}>{children}</View>
+    <View style={{ gap: 10, paddingHorizontal: 16, paddingTop: 10, paddingBottom: insets.bottom + 12, borderTopWidth: 1, borderTopColor: S.rule, backgroundColor: S.paper }}>{children}</View>
   );
 
   const footer = !pending ? null : engineerConfirm ? (
     foot(<Key tone="ink" label={acting === "confirm" ? "Confirming…" : "Confirm assignment"} icon={<CheckCircle2 size={13} color={S.paper} />} onPress={doConfirm} disabled={acting !== null} />)
   ) : notYourLevel ? (
     foot(
-      <View style={{ minHeight: 44, alignItems: "center", justifyContent: "center", borderWidth: 1, borderStyle: "dashed", borderColor: S.line40 }}>
+      <View style={{ minHeight: 48, alignItems: "center", justifyContent: "center", borderRadius: 14, backgroundColor: S.wash }}>
         <Label>{`Waiting on level ${item._currentLevel}${item._totalLevels ? ` of ${item._totalLevels}` : ""}`}</Label>
       </View>,
     )
