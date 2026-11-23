@@ -578,7 +578,11 @@ export function ApplicationFormScreen() {
   const custQ = useQuery({ queryKey: ["crm-customer-pick", custQuery], enabled: allowed && !editId,
     queryFn: () => crmGet<{ rows: Row[] }>(`/api/crm/customers?pageSize=30&page=1${custQuery ? `&search=${encodeURIComponent(custQuery)}` : ""}`) });
 
-  const [f, setF] = useState({ CompanyId: "", ProjectId: "", BlockId: "", FloorNo: "", UnitId: "", PlotIds: [] as string[], PaymentPlanId: "", RatePerSqFt: "", DateOfApply: new Date().toISOString().slice(0, 10) });
+  const [f, setF] = useState({ CompanyId: "", ProjectId: "", BlockId: "", FloorNo: "", UnitId: "", PlotIds: [] as string[], PaymentPlanId: "", RatePerSqFt: "", DateOfApply: new Date().toISOString().slice(0, 10),
+    ViaBroker: false, BrokerId: "", BrokerageRatePercent: "", BrokeragePaymentPlan: "OneTime" });
+  // The broker (the web's "Via Broker" block): Broker Master's own record, the deal's override % and payout plan.
+  const brokersQ = useQuery({ queryKey: ["account-head-br"], enabled: allowed && f.ViaBroker, staleTime: 5 * 60_000, queryFn: () => crmGet<Row[]>("/api/account-head?type=BR") });
+  const tiersQ = useQuery({ queryKey: ["crm-brokerage-rate-tiers"], enabled: allowed && f.ViaBroker, staleTime: 5 * 60_000, queryFn: () => crmGet<Row[]>("/api/crm/brokerage-rate-tiers") });
   const set = (patch: Partial<typeof f>) => setF((x) => ({ ...x, ...patch }));
   const loaded = useRef(false);
   useEffect(() => {
@@ -593,6 +597,8 @@ export function ApplicationFormScreen() {
       BlockId: "", FloorNo: "", UnitId: a.PreferredUnitId != null ? String(a.PreferredUnitId) : "", PlotIds: ids(a.PreferredPlotIdsCsv),
       PaymentPlanId: a.PaymentPlanId != null ? String(a.PaymentPlanId) : "", RatePerSqFt: a.RatePerSqFt != null ? String(a.RatePerSqFt) : "",
       DateOfApply: a.DateOfApply ? String(a.DateOfApply).slice(0, 10) : f.DateOfApply,
+      ViaBroker: a.BrokerId != null, BrokerId: a.BrokerId != null ? String(a.BrokerId) : "",
+      BrokerageRatePercent: a.BrokerageRatePercent != null ? String(a.BrokerageRatePercent) : "", BrokeragePaymentPlan: a.BrokeragePaymentPlan || "OneTime",
     });
   }, [existing.data]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -640,9 +646,12 @@ export function ApplicationFormScreen() {
       extraAmounts: extras.map((c) => Number(c.Amount) || 0),
     }),
   });
-  const quote = quoteQ.data;
+  // The last price worked out stays on screen if a newer request fails (a busy server), with the reason under it.
+  const lastQuote = useRef<Row | undefined>(undefined);
+  if (quoteQ.data) lastQuote.current = quoteQ.data;
+  const quote = quoteQ.data ?? lastQuote.current;
 
-  const [picker, setPicker] = useState<null | "customer" | "company" | "project" | "block" | "floor" | "unit" | "plot" | "plan" | "parkType" | "slot">(null);
+  const [picker, setPicker] = useState<null | "customer" | "company" | "project" | "block" | "floor" | "unit" | "plot" | "plan" | "parkType" | "slot" | "broker">(null);
   // Add parking: type, then slot, the master's price unless changed (an unrated type must be priced) — POST /parking/standalone.
   const [parkType, setParkType] = useState<Row | null>(null);
   const [slotId, setSlotId] = useState("");
@@ -770,6 +779,9 @@ export function ApplicationFormScreen() {
         CompanyId: f.CompanyId || null, ProjectId: f.ProjectId || null,
         PreferredUnitIds: f.UnitId ? [f.UnitId] : [], PreferredPlotIds: f.PlotIds,
         PaymentPlanId: isPlotSale ? null : f.PaymentPlanId || null, RatePerSqFt: f.RatePerSqFt || null, DateOfApply: f.DateOfApply || null,
+        BrokerId: f.ViaBroker && f.BrokerId ? Number(f.BrokerId) : null,
+        BrokerageRatePercent: f.ViaBroker && f.BrokerageRatePercent !== "" ? f.BrokerageRatePercent : null,
+        BrokeragePaymentPlan: f.ViaBroker ? f.BrokeragePaymentPlan : "OneTime",
       };
       if (editId) {
         const r = await crmSend<Row>(`/api/crm/applications/${editId}`, "PUT", body);
@@ -802,6 +814,7 @@ export function ApplicationFormScreen() {
     parkType: (freeParkingQ.data?.rates ?? []).map((r) => ({ key: r.ParkingType, label: r.ParkingType,
       sublabel: joinDot(r.NeedsRate ? "No master price" : money(r.Charge), r.HasSlots ? `${(r.AvailableSlots ?? []).length} available` : "No slots") })),
     slot: (parkType?.AvailableSlots ?? []).map((s: Row) => ({ key: String(s.Id), label: `Slot ${s.SlotNo}` })),
+    broker: (brokersQ.data ?? []).map((b) => ({ key: String(b.LHeadId), label: b.LHeadName, sublabel: b.LHeadPhone ?? undefined })),
   };
   const choose = (k: string | null) => {
     const kind = picker;
@@ -816,6 +829,7 @@ export function ApplicationFormScreen() {
     if (kind === "plan") set({ PaymentPlanId: k ?? "" });
     if (kind === "parkType") { const r = (freeParkingQ.data?.rates ?? []).find((x) => x.ParkingType === k) ?? null; setParkType(r); setSlotId(""); setParkRate(r?.Charge != null ? String(r.Charge) : ""); }
     if (kind === "slot") setSlotId(k ?? "");
+    if (kind === "broker") set({ BrokerId: k ?? "" });
   };
   const label = (kind: NonNullable<typeof picker>, key: string) => options[kind].find((o) => o.key === key)?.label ?? "";
 
@@ -915,6 +929,39 @@ export function ApplicationFormScreen() {
         <NumberField label="Rate (₹/sqft)" value={f.RatePerSqFt} onChangeText={(v) => set({ RatePerSqFt: v })} placeholder={picked?.RatePerSqFt ? String(picked.RatePerSqFt) : undefined} />
         {isPlotSale ? null : <PickerRow label="Payment Plan" required={!!picked} value={label("plan", f.PaymentPlanId)} disabled={!picked} onPress={() => setPicker("plan")} />}
       </FormSection>
+      <FormSection title="Broker">
+        <Chips label="Via Broker" options={["No", "Yes"] as const} value={f.ViaBroker ? "Yes" : "No"} labelOf={(v) => v}
+          onChange={(v) => set(v === "Yes" ? { ViaBroker: true } : { ViaBroker: false, BrokerId: "", BrokerageRatePercent: "" })} />
+        {f.ViaBroker ? (() => {
+          const br = (brokersQ.data ?? []).find((b) => String(b.LHeadId) === f.BrokerId);
+          const total = Number(quote?.grandTotal) || 0;
+          const tier = [...(tiersQ.data ?? []).filter((t) => t.IsActive !== false)].reverse()
+            .find((t) => total >= Number(t.MinDealValue) && (t.MaxDealValue == null || total < Number(t.MaxDealValue)));
+          const def = tier ? Number(tier.RatePercent) : 2;
+          return (
+            <>
+              <PickerRow label="Broker (from Broker Master)" value={br?.LHeadName ?? ""} placeholder="Select broker" onPress={() => setPicker("broker")} />
+              {br ? (
+                <View style={{ marginBottom: 10 }}>
+                  {br.LHeadPhone ? <Kv label="Phone" value={br.LHeadPhone} /> : null}
+                  {br.LHeadPan ? <Kv label="PAN" value={br.LHeadPan} /> : null}
+                  {br.LHeadRera ? <Kv label="RERA No." value={br.LHeadRera} /> : null}
+                  {br.LHeadPaymentTerms ? <Kv label="Payment Terms" value={br.LHeadPaymentTerms} /> : null}
+                </View>
+              ) : null}
+              <Kv label="Default Rate (Preview)" value={`${def}%`} />
+              <NumberField label="Commission Override %" value={f.BrokerageRatePercent} placeholder={String(def)} onChangeText={(v) => set({ BrokerageRatePercent: v })} />
+              <Chips label="Payout Plan" options={["OneTime", "TwoPart", "AgreementOnly"] as const} value={f.BrokeragePaymentPlan as "OneTime" | "TwoPart" | "AgreementOnly"}
+                onChange={(v) => set({ BrokeragePaymentPlan: v })} labelOf={(v) => (v === "OneTime" ? "One-time" : v === "TwoPart" ? "Two-part" : "Agreement-only")} />
+              <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginBottom: 8 }}>
+                {f.BrokeragePaymentPlan === "TwoPart" ? "Half the commission is released as soon as the Booking Amount is paid; the other half is held until the Agreement is Executed."
+                  : f.BrokeragePaymentPlan === "AgreementOnly" ? "The full commission is held until the Agreement is Executed — nothing is released at booking."
+                  : "The full commission is released as soon as the Booking Amount is paid — no further tranches."}
+              </Text>
+            </>
+          );
+        })() : null}
+      </FormSection>
         </>
       ) : null}
       {step === 1 || step === 7 ? (
@@ -929,7 +976,8 @@ export function ApplicationFormScreen() {
           <Kv label="Total Value" value={money(quote.grandTotal)} strong />
           {(quote.schedule ?? []).map((m: Row) => <Kv key={m.no} label={`${m.no}. ${m.name}${m.pct != null ? ` (${m.pct}%)` : ""}`} value={money(m.amount)} />)}
         </Section>
-      ) : quoteQ.error ? <Text style={{ color: colors.destructive, fontSize: 12.5, fontFamily: fonts.body.medium, marginBottom: 12 }}>{(quoteQ.error as Error).message}</Text> : null}
+      ) : null}
+      {quoteQ.error ? <Text style={{ color: colors.destructive, fontSize: 12.5, fontFamily: fonts.body.medium, marginBottom: 12 }}>{`The price could not be updated: ${(quoteQ.error as Error).message}`}</Text> : null}
         </>
       ) : null}
       {step === 2 && editId ? (
@@ -1056,12 +1104,12 @@ export function ApplicationFormScreen() {
           .then(() => { setCancelOpen(false); afterApp(); nav.goBack(); })}
         onClose={() => setCancelOpen(false)} />
       {error ? <Text style={{ color: colors.destructive, fontSize: 12.5, fontFamily: fonts.body.medium, marginBottom: 12 }}>{error}</Text> : null}
-      <OptionPickerModal visible={!!picker} title={picker === "plot" ? "Plots (tap to add or remove)" : picker ? ({ customer: "Customer", company: "Company", project: "Project", block: "Block / Tower", floor: "Floor", unit: "Unit", plan: "Payment Plan", parkType: "Parking type", slot: "Slot" } as Record<string, string>)[picker] : ""}
+      <OptionPickerModal visible={!!picker} title={picker === "plot" ? "Plots (tap to add or remove)" : picker ? ({ customer: "Customer", company: "Company", project: "Project", block: "Block / Tower", floor: "Floor", unit: "Unit", plan: "Payment Plan", parkType: "Parking type", slot: "Slot", broker: "Broker" } as Record<string, string>)[picker] : ""}
         searchable clearable={picker === "block" || picker === "floor"}
         loading={picker === "customer" ? custQ.isFetching : picker === "unit" ? unitsQ.isLoading : false}
         query={picker === "customer" ? custQuery : undefined} onQueryChange={picker === "customer" ? setCustQuery : undefined}
         options={picker ? options[picker] : []}
-        selectedKey={picker === "customer" ? (customer ? String(customer.Id) : null) : picker === "company" ? f.CompanyId : picker === "project" ? f.ProjectId : picker === "block" ? f.BlockId : picker === "floor" ? f.FloorNo : picker === "unit" ? f.UnitId : picker === "plan" ? f.PaymentPlanId : picker === "parkType" ? parkType?.ParkingType ?? null : picker === "slot" ? slotId : null}
+        selectedKey={picker === "customer" ? (customer ? String(customer.Id) : null) : picker === "company" ? f.CompanyId : picker === "project" ? f.ProjectId : picker === "block" ? f.BlockId : picker === "floor" ? f.FloorNo : picker === "unit" ? f.UnitId : picker === "plan" ? f.PaymentPlanId : picker === "parkType" ? parkType?.ParkingType ?? null : picker === "slot" ? slotId : picker === "broker" ? f.BrokerId : null}
         onSelect={choose} onClose={() => setPicker(null)} />
     </FormScaffold>
   );
