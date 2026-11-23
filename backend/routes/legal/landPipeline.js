@@ -349,7 +349,7 @@ async function moveStep(conn, req, landId, code, from, to, { remarks = null, ski
 
 // ── Routes ────────────────────────────────────────────────────────────────────────────────────────
 /** Legal dashboard counters along the whole flow (each part only once its migration has run). */
-async function pipelineCounters(pool) {
+async function pipelineCounters(pool, sc = (x) => x) {
   const has = (await pool.request().query(`SELECT OBJECT_ID('dbo.LegalDiligenceArea','U') AS dd, OBJECT_ID('dbo.LegalPropertyRestriction','U') AS pr,
     OBJECT_ID('dbo.LegalPostRegTask','U') AS pt, COL_LENGTH('dbo.LegalLand','DeedTargetDate') AS dt`)).recordset[0];
   const PRE = "l.IsActive = 1 AND ISNULL(l.IsCancelled, 0) = 0 AND ISNULL(l.WorkflowStatus, N'') NOT IN (N'Deed Process', N'Deed Completed', N'Deed Registration', N'Registered')";
@@ -384,12 +384,14 @@ async function pipelineCounters(pool) {
         WHERE p.IsActive = 1 AND (p.Status = N'Transfer prohibited' OR (p.Status = N'Pending' AND p.PermissionRequired <> N'No'))) AS restricted`);
   if (has.pt) parts.push(`(SELECT COUNT(*) FROM dbo.LegalPostRegTask t JOIN dbo.LegalLand l ON l.LandId = t.LandId AND l.IsActive = 1
         WHERE t.Task = N'Mutation application' AND t.Status <> N'Completed') AS pendingMutation`);
-  return (await pool.request().query(`SELECT ${parts.join(",\n")}`)).recordset[0];
+  return (await pool.request().query(sc(`SELECT ${parts.join(",\n")}`))).recordset[0];
 }
 
-router.get("/stats", requirePageRight(LAND_PAGE, "view"), async (_req, res) => {
+router.get("/stats", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
+  // The dashboard follows the project picked at the top (?project=) and the user's own project access.
+  const sc = (text) => projectGuard.scopeSqlText(text, String(req.query.project ?? "all"), req.legalScope);
   try {
-    const r = await getPool().request().query(`
+    const r = await getPool().request().query(sc(`
       SELECT
         (SELECT COUNT(*) FROM dbo.LegalLand WHERE IsActive = 1) AS totalLands,
         (SELECT COUNT(*) FROM dbo.LegalLand WHERE IsActive = 1 AND ISNULL(VerificationStatus, 'Draft') = 'Draft') AS pendingVerificationLands,
@@ -448,17 +450,17 @@ router.get("/stats", requirePageRight(LAND_PAGE, "view"), async (_req, res) => {
       LEFT JOIN dbo.LegalMouza m ON m.MouzaId = l.MouzaId
       LEFT JOIN dbo.LegalAreaUnit u ON u.AreaUnitId = l.AreaUnitId
       WHERE l.IsActive = 1
-      ORDER BY l.LandId DESC;`);
+      ORDER BY l.LandId DESC;`));
     const [counts, recent, approvals, awaitingApproval, payments, cases, transfers, more, allLands] = r.recordsets;
     // Deed Process: lands whose timeline has passed (highlighted on the dashboard).
     let deedOverdue = [];
     if (await deedReady(getPool())) {
-      deedOverdue = (await getPool().request().query(`
+      deedOverdue = (await getPool().request().query(sc(`
         SELECT LandId, LandCode, LandName, CONVERT(char(10), DeedTargetDate, 23) AS DeedTargetDate, DATEDIFF(day, DeedTargetDate, CAST(GETDATE() AS DATE)) AS DaysOver
         FROM dbo.LegalLand WHERE IsActive = 1 AND WorkflowStatus = N'Deed Process' AND DeedTargetDate < CAST(GETDATE() AS DATE)
-        ORDER BY DeedTargetDate`)).recordset;
+        ORDER BY DeedTargetDate`))).recordset;
     }
-    res.json({ ...counts[0], ...more[0], recent, approvals, awaitingApproval, payments, cases, transfers, allLands, deedOverdue, pipeline: await pipelineCounters(getPool()) });
+    res.json({ ...counts[0], ...more[0], recent, approvals, awaitingApproval, payments, cases, transfers, allLands, deedOverdue, pipeline: await pipelineCounters(getPool(), sc) });
   } catch (err) {
     console.error("[legal-land] stats:", err.message);
     res.status(500).json({ error: "Could not load land statistics" });

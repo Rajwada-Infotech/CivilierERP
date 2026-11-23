@@ -23,6 +23,8 @@ export default function LandRecordRegisterPage({ kind }: { kind: keyof typeof KI
           key={k.key}
           entry={{ key: k.key, label: k.title, pageKey: "legal-land-master" }}
           noAdd
+          // Follows the project picked at the top (records of that project's lands).
+          projectScoped
           rowActions={(raw) => (
             <button onClick={(e) => { e.stopPropagation(); navigate(`/legal/land/properties/${raw.LandId}?tab=records`); }} className="rounded-md border border-border px-2 py-1 text-xs hover:bg-muted">
               Open land

@@ -128,7 +128,8 @@ async function handle<T>(res: Response): Promise<T> {
 }
 const post = (body: unknown): RequestInit => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
-export const getLandStats = async () => handle<LandStats>(await fetchWithAuth(`${BASE}/stats`));
+/** Dashboard figures, for the project picked at the top ("all" | "none" | id). */
+export const getLandStats = async (project = "all") => handle<LandStats>(await fetchWithAuth(`${BASE}/stats?project=${encodeURIComponent(project)}`));
 export const getLandPipeline = async (id: number) => handle<LandPipeline>(await fetchWithAuth(`${BASE}/${id}`));
 export const getLandAudit = async (id: number) => handle<AuditEvent[]>(await fetchWithAuth(`${BASE}/${id}/audit`));
 

@@ -29,7 +29,7 @@ export default function LandReportsPage() {
   const [q, setQ] = useState("");
   const [landCode, setLandCode] = useState("");
   const landRights = useRights("legal-land-master");
-  const { data: stats } = useQuery({ queryKey: ["legal-land-stats"], queryFn: getLandStats, enabled: landRights.canView, staleTime: 60 * 1000 });
+  const { data: stats } = useQuery({ queryKey: ["legal-land-stats", "all"], queryFn: () => getLandStats("all"), enabled: landRights.canView, staleTime: 60 * 1000 });
   const { data: lands } = useQuery({ queryKey: ["legal-lookup", "land"], queryFn: () => getLegalLookup("land"), staleTime: 60 * 1000 });
   const layoutRef = useRef<HTMLDivElement>(null);
   const wide = useElementWidth(layoutRef) >= 820;

@@ -174,7 +174,7 @@ router.get("/find", requirePageRight(PAGE, "view"), pageable(null, { kinds: {
 });
 
 // GET /overdue — office searches still open past their due date (dashboard).
-router.get("/overdue", requirePageRight(PAGE, "view"), async (_req, res) => {
+router.get("/overdue", requirePageRight(PAGE, "view"), async (req, res) => {
   try {
     const pool = getPool();
     if (!(await ready(pool))) return res.json([]);
@@ -182,7 +182,10 @@ router.get("/overdue", requirePageRight(PAGE, "view"), async (_req, res) => {
       JOIN dbo.LegalLandEnquiry e ON e.EnquiryId = o.EnquiryId AND e.IsActive = 1 AND e.LandId IS NULL AND e.EnquiryStatus <> N'Rejected'
       LEFT JOIN dbo.enterprise p ON p.id = e.ProjectId
       WHERE o.Status = N'Pending' AND o.DueDate < CAST(GETDATE() AS DATE) ORDER BY o.DueDate, e.EnquiryNo`)).recordset;
-    res.json(rows);
+    // Follows the project picker (?project=) and the user's project access.
+    const pj = String(req.query.project ?? "all");
+    const scoped = (await projectGuard.filterRows(req, rows)).filter((r) => pj === "all" || (pj === "none" ? r.ProjectId == null : Number(r.ProjectId) === Number(pj)));
+    res.json(scoped);
   } catch (err) {
     console.error("[legal-enquiry-search] overdue:", err.message);
     res.status(500).json({ error: "Could not load overdue searches" });
