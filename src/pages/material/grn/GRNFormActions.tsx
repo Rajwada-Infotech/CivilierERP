@@ -56,7 +56,9 @@ export function GRNFormActions({ m }: { m: GRNState }) {
                 )}
                 {isSaving
                   ? "Saving…"
-                  : editingId
+                  : m.amend.amending
+                    ? "Review amendment"
+                    : editingId
                     ? "Update GRN"
                     : "Save GRN"}
               </button>

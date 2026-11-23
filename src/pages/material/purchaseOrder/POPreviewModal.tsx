@@ -7,7 +7,7 @@ import type { POState } from "./usePurchaseOrder";
 
 // One PO opened from the register: the document preview with its actions.
 export function POPreviewModal({ m }: { m: POState }) {
-  const { rights, viewingPO, setViewingPO, viewingPOSupplier, viewingPOCompany, viewingPOProject, viewingTab, setViewingTab, currentUser, lineItems, items, listData, handlePrintFromPreview, handleGeneratePdf, goToEdit } = m;
+  const { rights, viewingPO, setViewingPO, viewingPOSupplier, viewingPOCompany, viewingPOProject, viewingTab, setViewingTab, currentUser, lineItems, items, listData, handlePrintFromPreview, handleGeneratePdf, goToEdit, goToAmend } = m;
   return (
     <>
       {/* ── PO Preview Modal ─────────────────────────────────────────────── */}
@@ -46,7 +46,7 @@ export function POPreviewModal({ m }: { m: POState }) {
                 >
                   <FileDown size={13} /><span className="hidden sm:inline">Generate PDF</span>
                 </button>
-                {rights.canEdit && viewingPO.Status !== "Short Closed" && (
+                {rights.canEdit && (["Draft", "Pending", "Rejected"].includes(viewingPO.Status || "Draft") || viewingPO.Status === "Approved") && (
                   <button
                     onClick={() => {
                       const item = listData.find(
@@ -55,11 +55,12 @@ export function POPreviewModal({ m }: { m: POState }) {
                           String(viewingPO.PurchaseOrderID ?? viewingPO._id),
                       );
                       setViewingPO(null);
-                      if (item) goToEdit(item);
+                      // Draft / Pending / Rejected are edited; an approved PO changes only through Amend.
+                      if (item) void (viewingPO.Status === "Approved" ? goToAmend(item) : goToEdit(item));
                     }}
                     className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 text-xs font-semibold bg-foreground text-card border border-foreground transition"
                   >
-                    <FilePenLine size={13} /><span className="hidden sm:inline">Edit</span>
+                    <FilePenLine size={13} /><span className="hidden sm:inline">{viewingPO.Status === "Approved" ? "Amend" : "Edit"}</span>
                   </button>
                 )}
                 <button

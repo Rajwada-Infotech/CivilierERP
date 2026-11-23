@@ -1006,7 +1006,73 @@ const ENGINEERING_ADAPTERS = {
   }),
 };
 
+// Material documents other than the PO: amended through their own edit route, like finance (routeAdapter). The
+// edit route refuses an Approved document; routeAdapter sets it to Draft for the edit and back to Approved after.
+const MATERIAL_ADAPTERS = {
+  "material-request": routeAdapter({
+    module: "material",
+    label: "Material Request",
+    pageKey: "material-request",
+    table: "dbo.MaterialRequests",
+    pk: "MRId",
+    status: "Status",
+    docNoCols: ["DocNo"],
+    projectCol: "ProjectId",
+    companyCol: "CompanyId",
+    valueOf: async () => null,
+    proposedValueOf: () => null,
+    routeFile: "../routes/materialRequests",
+    blockers: async (pool, id) => {
+      const { poExistsForMR } = require("../utils/materialChainGuard");
+      const po = await poExistsForMR(pool, id);
+      return po ? [`${po} is raised on this Material Request, so it can't be amended. Amend or delete the order instead.`] : [];
+    },
+  }),
+  "vehicle-in-out": routeAdapter({
+    module: "material",
+    label: "Vehicle In/Out",
+    pageKey: "vehicle-in-out",
+    table: "dbo.VehicleInOut",
+    pk: "VehicleInOutID",
+    status: "Status",
+    docNoCols: ["DocNo"],
+    projectCol: "ProjectID",
+    companyCol: "CompanyID",
+    valueOf: async () => null,
+    proposedValueOf: () => null,
+    routeFile: "../routes/vehicleInOut",
+    blockers: async (pool, id) => {
+      const r = await pool.request().input("id", sql.Int, id)
+        .query(`SELECT TOP 1 GRNID, DocNo FROM dbo.GoodsReceiptNotes WHERE VehicleInOutID = @id AND ISNULL(Status, '') <> 'Rejected'`);
+      const g = r.recordset[0];
+      return g ? [`GRN ${g.DocNo || `#${g.GRNID}`} is raised on this entry, so it can't be amended. Amend the GRN instead.`] : [];
+    },
+  }),
+  grn: routeAdapter({
+    module: "material",
+    label: "GRN",
+    pageKey: "grn-master",
+    approvalModule: "goods-receipt",
+    table: "dbo.GoodsReceiptNotes",
+    pk: "GRNID",
+    status: "Status",
+    docNoCols: ["DocNo", "GRNNo"],
+    valueCols: ["TotalAmount"],
+    // Approval is what posts a GRN: its stock (delete-then-insert) and its ledger entry. The amendment reverses the
+    // ledger entry, edits it as Draft, and approval posts both again at the new figures.
+    glSources: ["GRN", "GRNPosting"],
+    poster: (...a) => gl().postGRNApproval(...a),
+    routeFile: "../routes/grns",
+    blockers: async (pool, id) => {
+      const { downstreamOfGRN } = require("../utils/materialChainGuard");
+      const by = await downstreamOfGRN(pool, id);
+      return by ? [`This GRN already has ${by}, so it can't be amended.`] : [];
+    },
+  }),
+};
+
 const ADAPTERS = {
+  ...MATERIAL_ADAPTERS,
   "purchase-order": {
     module: "material",
     label: "Purchase Order",

@@ -11,7 +11,8 @@ import { type WorkOrderMRPrefill, type BoqMRPrefill } from "@/api/workOrderApi";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ItemPicker } from "../ItemPicker";
-import { Save, Eye, Trash2, Edit3 } from "lucide-react";
+import { Save, Eye, Trash2, Edit3, FilePenLine } from "lucide-react";
+import { useAmendMode } from "@/components/amendment/useAmendMode";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { useAuth } from "@/contexts/AuthContext";
 import { isPrivilegedRole } from "@/contexts/auth.utils";
@@ -26,6 +27,10 @@ import { planImport, type PlannedRequest } from "./mrImport";
 import { getAllItemUomAlternates } from "@/api/itemUomAlternatesApi";
 import { MR_TEMPLATE_COLUMNS, CartItem, FormHeader, defaultHeader, blankCartItem, PRIORITY_COLOR, fmtDate, TAG, ACT } from "./config";
 import { SheetMark, statusTone } from "@/components/sheet/Sheet";
+
+// Only these are edited; an approved request changes through Amend.
+const isEditableStatus = (s: string | null | undefined) => ["Draft", "Pending", "Rejected"].includes(s || "Draft");
+export { isEditableStatus };
 
 export function useMaterialRequest() {
   const rights = usePageRights("material-request");
@@ -438,12 +443,15 @@ export function useMaterialRequest() {
       toast.error(err.message || "Failed to delete request"),
   });
 
+  // Approved requests aren't edited: Amend opens the form and saving raises an amendment for approval instead.
+  const amend = useAmendMode("material-request", "Material Request", { onRaised: () => { invalidate(); goToList(); } });
   const isSaving = createMutation.isPending || updateMutation.isPending;
   const [saved, setSaved] = useState(false);
 
   // ── Navigation helpers ───────────────────────────────────────────────────────
 
   const goToList = () => {
+    amend.stop();
     setViewMode("list");
     setEditingId(null);
     setViewingRecord(null);
@@ -572,7 +580,7 @@ export function useMaterialRequest() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const onSave = () => {
+  const onSave = async () => {
     if (!canSave) {
       if (!headerIsValid) toast.error("Fill all required header fields");
       else toast.error("Each item needs item, UOM, and a valid quantity");
@@ -599,10 +607,16 @@ export function useMaterialRequest() {
       })),
     };
     if (editingId != null) {
+      if (await amend.intercept(editingId, payload)) return;
       updateMutation.mutate(payload);
     } else {
       createMutation.mutate(payload);
     }
+  };
+
+  const handleAmend = async (record: any) => {
+    amend.start(record.MRId);
+    await handleEdit(record);
   };
 
   // ── Columns ───────────────────────────────────────────────────────────────────
@@ -754,26 +768,28 @@ export function useMaterialRequest() {
               <Eye size={14} />
             </button>
 
-            {/* Update — Draft or Approved (post-approval edits get logged
-                as amendments), Rejected (saving re-submits it from level 1),
-                or any status for admins */}
-            {rights.canEdit && status !== "Short Closed" && (status === "Draft" || status === "Approved" || status === "Rejected" || isAdmin) && (
+            {/* Edit — Draft, Pending (approval restarts) or Rejected (saving re-submits it from level 1). An approved
+                request is changed only through Amend. */}
+            {rights.canEdit && isEditableStatus(status) && (
               <button
                 type="button"
                 onClick={() => handleEdit(row.original)}
                 className={`${ACT} hover:text-foreground hover:border-foreground`}
                 aria-label="Edit"
-                title={
-                  status === "Draft"
-                    ? "Edit this request"
-                    : status === "Approved"
-                      ? "Edit (will be logged as an amendment)"
-                      : status === "Rejected"
-                        ? "Edit and re-submit for approval"
-                        : "Edit (admin override)"
-                }
+                title={status === "Rejected" ? "Edit and re-submit for approval" : "Edit this request"}
               >
                 <Edit3 size={14} />
+              </button>
+            )}
+            {rights.canEdit && status === "Approved" && (
+              <button
+                type="button"
+                onClick={() => void handleAmend(row.original)}
+                className={`${ACT} hover:text-foreground hover:border-foreground`}
+                aria-label="Amend"
+                title="Amend — any change, with a reason; applied once the amendment is approved"
+              >
+                <FilePenLine size={14} />
               </button>
             )}
 
@@ -909,6 +925,8 @@ export function useMaterialRequest() {
     createMutation,
     updateMutation,
     deleteMutation,
+    amend,
+    handleAmend,
     isSaving,
     saved,
     setSaved,

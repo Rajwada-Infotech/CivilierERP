@@ -12,6 +12,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
 import { Camera, Upload } from "lucide-react";
+import { useAmendMode } from "@/components/amendment/useAmendMode";
 import { printVehicleInOut, downloadVehicleInOutPdf } from "@/utils/vehicleInOutDocument";
 import { exportToCsv, parseCsv } from "@/lib/export";
 import { type VehicleInOutPayload } from "@/api/vehicleInOutApi";
@@ -36,6 +37,17 @@ export function useVehicleInOut() {
   const [importing, setImporting] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  // Approved entries aren't edited: Amend opens the form and saving raises an amendment for approval instead.
+  const amend = useAmendMode("vehicle-in-out", "Vehicle In/Out", {
+    onRaised: () => {
+      qc.invalidateQueries({ queryKey: ["vehicle-in-out"] });
+      resetForm();
+    },
+  });
+  useEffect(() => {
+    if (editingId == null) amend.stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingId]);
   const [viewingRec, setViewingRec] = useState<any | null>(null);
   const [viewTab, setViewTab] = useState<"details" | "supplier">("details");
   const [showPODetails, setShowPODetails] = useState(false);
@@ -444,8 +456,9 @@ export function useVehicleInOut() {
     items: itemsPayload,
   });
 
-  const onSubmit = () => {
+  const onSubmit = async () => {
     if (!validate()) return;
+    if (editingId != null && (await amend.intercept(editingId, buildPayload()))) return;
     if (editingId != null) updateMut.mutate(buildPayload());
     else createMut.mutate(buildPayload());
   };
@@ -554,6 +567,10 @@ export function useVehicleInOut() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  bridge.onAmend = async (rec: any) => {
+    await bridge.onEdit(rec);
+    amend.start(rec.VehicleInOutID);
+  };
   bridge.onDelete = (id: number) => setDeleteId(id);
 
   // ── File upload (supports multiple files — appends, doesn't replace) ────────
@@ -722,6 +739,7 @@ export function useVehicleInOut() {
 
 
   return {
+    amend,
     isLoading,
     isFetching,
     rights,
