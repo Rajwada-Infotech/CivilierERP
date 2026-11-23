@@ -4,7 +4,10 @@ import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tansta
 import { ServerPager } from "@/components/ServerPager";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
-import { SalesShell } from "@/components/sales/SalesShell";
+import { SheetShell, SheetMark, type MarkTone } from "@/components/sheet/Sheet";
+import { KEY_INK } from "@/components/sheet/sheetParts";
+import { HR_NUM } from "@/components/hrpayroll/HrUi";
+import { SheetBox, TH, TD, ICON_ACT, TAG } from "@/components/maintenance/maintParts";
 import {
   IndianRupee,
   CreditCard,
@@ -14,16 +17,11 @@ import {
   Smartphone,
   FileText,
   Building2,
-  CheckCircle2,
-  Clock,
-  AlertCircle,
   Search,
   Eye,
   X,
   Send,
   Landmark,
-  Receipt,
-  Hash,
 } from "lucide-react";
 import { toast } from "sonner";
 import { getSaleOrders, type SaleOrder } from "@/api/saleOrdersApi";
@@ -65,46 +63,13 @@ const PAYMENT_MODES: {
   label: string;
   icon: React.ReactNode;
 }[] = [
-  {
-    value: "Cash",
-    label: "Cash",
-    icon: <Banknote size={14} className="text-emerald-500" />,
-  },
-  {
-    value: "UPI",
-    label: "UPI",
-    icon: <Smartphone size={14} className="text-violet-500" />,
-  },
-  {
-    value: "NEFT",
-    label: "NEFT",
-    icon: <Building2 size={14} className="text-sky-500" />,
-  },
-  {
-    value: "RTGS",
-    label: "RTGS",
-    icon: <Building2 size={14} className="text-cyan-500" />,
-  },
-  {
-    value: "Check",
-    label: "Cheque",
-    icon: <FileText size={14} className="text-blue-500" />,
-  },
-  {
-    value: "Card",
-    label: "Card",
-    icon: <CreditCard size={14} className="text-orange-500" />,
-  },
+  { value: "Cash", label: "Cash", icon: <Banknote size={13} /> },
+  { value: "UPI", label: "UPI", icon: <Smartphone size={13} /> },
+  { value: "NEFT", label: "NEFT", icon: <Building2 size={13} /> },
+  { value: "RTGS", label: "RTGS", icon: <Building2 size={13} /> },
+  { value: "Check", label: "Cheque", icon: <FileText size={13} /> },
+  { value: "Card", label: "Card", icon: <CreditCard size={13} /> },
 ];
-
-const MODE_COLOR: Record<string, string> = {
-  Cash: "bg-emerald-500/10 text-emerald-600",
-  UPI: "bg-violet-500/10 text-violet-600",
-  NEFT: "bg-sky-500/10 text-sky-600",
-  RTGS: "bg-cyan-500/10 text-cyan-600",
-  Check: "bg-blue-500/10 text-blue-600",
-  Card: "bg-orange-500/10 text-orange-600",
-};
 
 // The stored PaymentMode value is still literally "Check" (renaming it
 // would mean a DB migration for every historical row's RPMode) — the
@@ -117,31 +82,18 @@ const MODE_LABEL: Record<string, string> = Object.fromEntries(
   PAYMENT_MODES.map((m) => [m.value, m.label]),
 );
 
-const STATUS_CONFIG: Record<
-  string,
-  { cls: string; icon: React.ReactNode; label: string }
-> = {
-  Draft: {
-    cls: "bg-slate-500/10 text-slate-600",
-    icon: <Clock size={11} />,
-    label: "Draft",
-  },
-  Pending: {
-    cls: "bg-[#ffe2021a] text-amber-600",
-    icon: <Clock size={11} />,
-    label: "Pending",
-  },
-  Approved: {
-    cls: "bg-emerald-500/10 text-emerald-600",
-    icon: <CheckCircle2 size={11} />,
-    label: "Approved",
-  },
-  Rejected: {
-    cls: "bg-red-500/10 text-red-600",
-    icon: <AlertCircle size={11} />,
-    label: "Rejected",
-  },
+// Status as a sheet mark: empty = draft, hatched = waiting, solid = approved, red = rejected.
+const STATUS_CONFIG: Record<string, { tone: MarkTone; label: string }> = {
+  Draft: { tone: "draft", label: "Draft" },
+  Pending: { tone: "waiting", label: "Pending" },
+  Approved: { tone: "done", label: "Approved" },
+  Rejected: { tone: "stopped", label: "Rejected" },
 };
+
+// ─── Sheet styles (docs/DESIGN.md) ────────────────────────────────────────────
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const INPUT =
+  "w-full h-9 px-3 border border-foreground/30 bg-card text-sm text-foreground outline-none focus:border-foreground disabled:opacity-50 rounded-none";
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -153,7 +105,7 @@ function FieldLabel({
   required?: boolean;
 }) {
   return (
-    <label className="block text-[0.6875rem] uppercase tracking-widest font-semibold text-muted-foreground mb-1.5">
+    <label className={`block ${LBL} mb-1.5`}>
       {children}
       {required && <span className="text-destructive ml-0.5">*</span>}
     </label>
@@ -177,8 +129,7 @@ function SelectBox({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
-        className="w-full px-3 pr-9 py-2.5 rounded-xl border border-border bg-background text-sm text-foreground outline-none appearance-none transition-colors focus:ring-2 focus:ring-violet-500/30 disabled:opacity-50"
-        style={{ colorScheme: "dark" }}
+        className={`${INPUT} pr-9 appearance-none`}
       >
         {children}
       </select>
@@ -220,14 +171,11 @@ function SaleOrderPicker({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl border border-border bg-background text-sm outline-none transition-colors hover:border-violet-400/50 focus:ring-2 focus:ring-violet-500/30"
+        className={`${INPUT} flex items-center justify-between gap-2 text-left`}
       >
         {selected ? (
           <div className="flex items-center gap-2 min-w-0">
-            <Hash size={13} className="text-violet-500 shrink-0" />
-            <span className="font-mono font-semibold text-foreground">
-              {selected.DocNo}
-            </span>
+            <span className={`${HR_NUM} font-semibold text-foreground`}>{selected.DocNo}</span>
             <span className="text-muted-foreground text-xs truncate">
               · {selected.FromProjectName} → {selected.ToProjectName}
             </span>
@@ -239,9 +187,9 @@ function SaleOrderPicker({
       </button>
 
       {open && (
-        <div className="absolute z-50 mt-1 w-full rounded-xl border border-border bg-popover shadow-xl overflow-hidden">
-          <div className="p-2 border-b border-border">
-            <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-muted/50">
+        <div className="absolute z-50 mt-1 w-full border border-foreground bg-card overflow-hidden">
+          <div className="p-2 border-b border-foreground/20">
+            <div className="flex items-center gap-2 px-2 h-8 border border-foreground/30">
               <Search size={13} className="text-muted-foreground" />
               <input
                 autoFocus
@@ -259,9 +207,7 @@ function SaleOrderPicker({
           </div>
           <div className="max-h-64 overflow-y-auto">
             {filtered.length === 0 ? (
-              <p className="text-xs text-muted-foreground text-center py-6">
-                No orders found
-              </p>
+              <p className="text-xs text-muted-foreground text-center py-6">No orders found</p>
             ) : (
               filtered.map((o) => (
                 <button
@@ -272,25 +218,18 @@ function SaleOrderPicker({
                     setOpen(false);
                     setSearch("");
                   }}
-                  className={`w-full text-left px-4 py-3 hover:bg-muted transition-colors border-b border-border/40 last:border-0 ${selected?.SaleOrderID === o.SaleOrderID ? "bg-violet-500/5" : ""}`}
+                  className={`w-full text-left px-4 py-3 hover:bg-primary/10 transition-colors border-b border-foreground/10 last:border-0 ${selected?.SaleOrderID === o.SaleOrderID ? "bg-primary/10" : ""}`}
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="font-mono text-sm font-semibold text-foreground">
-                        {o.DocNo}
-                      </p>
+                      <p className={`${HR_NUM} text-sm font-semibold text-foreground`}>{o.DocNo}</p>
                       <p className="text-xs text-muted-foreground truncate mt-0.5">
-                        {o.FromProjectName} · {o.FromGodownName} →{" "}
-                        {o.ToProjectName} · {o.ToGodownName}
+                        {o.FromProjectName} · {o.FromGodownName} → {o.ToProjectName} · {o.ToGodownName}
                       </p>
                     </div>
                     <div className="text-right shrink-0">
-                      <p className="text-sm font-bold text-foreground">
-                        {fmtAmt(o.TotalAmount)}
-                      </p>
-                      <p className="text-[0.625rem] text-muted-foreground mt-0.5">
-                        {fmtDate(o.OrderDate)}
-                      </p>
+                      <p className={`${HR_NUM} text-sm font-bold text-foreground`}>{fmtAmt(o.TotalAmount)}</p>
+                      <p className={`${HR_NUM} text-[0.625rem] text-muted-foreground mt-0.5`}>{fmtDate(o.OrderDate)}</p>
                     </div>
                   </div>
                 </button>
@@ -321,38 +260,21 @@ function PaymentHistoryTable({
 
   if (salePayments.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed border-border bg-muted/20 py-16 text-center">
-        <Receipt size={32} className="text-muted-foreground/30 mx-auto mb-3" />
-        <p className="text-sm text-muted-foreground">
-          No payments recorded yet
-        </p>
-        <p className="text-xs text-muted-foreground/60 mt-1">
-          Payments against sale orders will appear here
-        </p>
+      <div className="m-4 border border-dashed border-foreground/30 py-14 text-center">
+        <p className="text-sm text-foreground">No payments recorded yet</p>
+        <p className="text-xs text-muted-foreground mt-1">Payments against sale orders will appear here</p>
       </div>
     );
   }
 
   return (
     <>
-      <div className="overflow-x-auto rounded-xl border border-border">
-        <table className="w-full text-sm">
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
           <thead>
-            <tr className="border-b border-border bg-muted/30">
-              {[
-                "Doc No",
-                "Sale Order",
-                "Date",
-                "Bank",
-                "Mode",
-                "Amount",
-                "Status",
-                "",
-              ].map((h) => (
-                <th
-                  key={h}
-                  className="px-4 py-3 text-left text-[0.6875rem] uppercase tracking-wider font-semibold text-muted-foreground whitespace-nowrap"
-                >
+            <tr>
+              {["Doc No", "Sale Order", "Date", "Bank", "Mode", "Amount", "Status", ""].map((h) => (
+                <th key={h} className={`${TH} ${h === "Amount" ? "text-right" : ""}`}>
                   {h}
                 </th>
               ))}
@@ -362,49 +284,24 @@ function PaymentHistoryTable({
             {salePayments.map((r) => {
               const cfg = STATUS_CONFIG[r.RPStatus] ?? STATUS_CONFIG["Draft"];
               return (
-                <tr
-                  key={r.RPPaymentID}
-                  className="border-b border-border/50 hover:bg-muted/20 transition-colors"
-                >
-                  <td className="px-4 py-3 font-mono text-xs text-violet-600 font-semibold whitespace-nowrap">
-                    {r.RPDocNo || (
-                      <span className="text-muted-foreground/50 text-[0.625rem] italic">
-                        No doc no
-                      </span>
-                    )}
+                <tr key={r.RPPaymentID} className="hover:bg-primary/5 transition-colors">
+                  <td className={`${TD} ${HR_NUM} font-semibold text-foreground whitespace-nowrap`}>
+                    {r.RPDocNo || <span className="text-muted-foreground text-[0.625rem] italic">No doc no</span>}
                   </td>
-                  <td className="px-4 py-3 font-mono text-xs font-semibold text-foreground whitespace-nowrap">
-                    {r.RPReceivedFrom}
+                  <td className={`${TD} ${HR_NUM} text-foreground whitespace-nowrap`}>{r.RPReceivedFrom}</td>
+                  <td className={`${TD} ${HR_NUM} text-muted-foreground whitespace-nowrap`}>{fmtDate(r.RPDocDate)}</td>
+                  <td className={`${TD} text-foreground`}>{r.RPDepositBankName || r.RPBankName || "—"}</td>
+                  <td className={TD}>
+                    <span className={TAG}>{MODE_LABEL[r.RPMode] ?? r.RPMode}</span>
                   </td>
-                  <td className="px-4 py-3 text-muted-foreground whitespace-nowrap text-xs">
-                    {fmtDate(r.RPDocDate)}
-                  </td>
-                  <td className="px-4 py-3 text-xs text-foreground">
-                    {r.RPDepositBankName || r.RPBankName || "—"}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.6875rem] font-medium ${MODE_COLOR[r.RPMode] ?? "bg-muted text-muted-foreground"}`}
-                    >
-                      {MODE_LABEL[r.RPMode] ?? r.RPMode}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 font-semibold text-foreground whitespace-nowrap">
+                  <td className={`${TD} ${HR_NUM} font-semibold text-foreground whitespace-nowrap text-right`}>
                     {fmtAmt(r.RPAmount)}
                   </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.6875rem] font-medium ${cfg.cls}`}
-                    >
-                      {cfg.icon} {cfg.label}
-                    </span>
+                  <td className={TD}>
+                    <SheetMark text={cfg.label} tone={cfg.tone} />
                   </td>
-                  <td className="px-4 py-3">
-                    <button data-row-view
-                      onClick={() => setViewing(r)}
-                      className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors"
-                      title="View"
-                    >
+                  <td className={TD}>
+                    <button data-row-view onClick={() => setViewing(r)} className={ICON_ACT} title="View">
                       <Eye size={14} />
                     </button>
                   </td>
@@ -417,98 +314,52 @@ function PaymentHistoryTable({
 
       {/* View Modal */}
       {viewing && (
-        <BodyPortal><div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-              <div>
-                <p className="text-xs text-muted-foreground uppercase tracking-widest mb-0.5">
-                  Payment Receipt
-                </p>
-                <p className="font-mono font-bold text-foreground">
-                  {viewing.RPDocNo || (
-                    <span className="text-muted-foreground italic text-sm">
-                      No doc no
-                    </span>
-                  )}
-                </p>
+        <BodyPortal>
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-foreground/40 p-4">
+            <div role="dialog" className="bg-card border border-foreground w-full max-w-md">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-foreground">
+                <div>
+                  <p className={`${LBL} mb-0.5`}>Payment Receipt</p>
+                  <p className={`${HR_NUM} font-bold text-lg tracking-tight text-foreground`}>
+                    {viewing.RPDocNo || <span className="text-muted-foreground italic text-sm">No doc no</span>}
+                  </p>
+                </div>
+                <button onClick={() => setViewing(null)} className={ICON_ACT} title="Close">
+                  <X size={16} />
+                </button>
               </div>
-              <button
-                onClick={() => setViewing(null)}
-                className="p-2 rounded-lg hover:bg-muted transition-colors"
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <div className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mb-0.5">
-                    Sale Order
-                  </p>
-                  <p className="font-mono font-semibold">
-                    {viewing.RPReceivedFrom}
-                  </p>
+              <div className="p-6 space-y-4">
+                <div className="grid grid-cols-2 border-t border-l border-foreground/20 text-sm">
+                  {[
+                    { label: "Sale Order", value: viewing.RPReceivedFrom, num: true },
+                    { label: "Date", value: fmtDate(viewing.RPDocDate), num: true },
+                    { label: "Bank", value: viewing.RPDepositBankName || viewing.RPBankName || "—" },
+                    { label: "Mode", value: MODE_LABEL[viewing.RPMode] ?? viewing.RPMode },
+                    ...(viewing.RPTransactionID
+                      ? [{ label: "Transaction / UTR", value: viewing.RPTransactionID, num: true, wide: true }]
+                      : []),
+                    ...(viewing.RPCheckNumber ? [{ label: "Cheque No.", value: viewing.RPCheckNumber, num: true }] : []),
+                    ...(viewing.RPRemarks
+                      ? [{ label: "Remarks", value: viewing.RPRemarks.replace("[SalePayment] ", ""), wide: true }]
+                      : []),
+                  ].map((c: { label: string; value: React.ReactNode; num?: boolean; wide?: boolean }) => (
+                    <div
+                      key={c.label}
+                      className={`px-3 py-2.5 border-r border-b border-foreground/20 min-w-0 ${c.wide ? "col-span-2" : ""}`}
+                    >
+                      <p className={`${LBL} mb-0.5`}>{c.label}</p>
+                      <p className={`text-xs font-semibold text-foreground break-words ${c.num ? HR_NUM : ""}`}>{c.value}</p>
+                    </div>
+                  ))}
                 </div>
-                <div>
-                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mb-0.5">
-                    Date
-                  </p>
-                  <p>{fmtDate(viewing.RPDocDate)}</p>
+                <div className="border-t border-foreground pt-3 flex items-baseline justify-between">
+                  <span className={LBL}>Amount Received</span>
+                  <span className={`text-xl font-bold text-foreground ${HR_NUM}`}>{fmtAmt(viewing.RPAmount)}</span>
                 </div>
-                <div>
-                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mb-0.5">
-                    Bank
-                  </p>
-                  <p>
-                    {viewing.RPDepositBankName || viewing.RPBankName || "—"}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mb-0.5">
-                    Mode
-                  </p>
-                  <p>{MODE_LABEL[viewing.RPMode] ?? viewing.RPMode}</p>
-                </div>
-                {viewing.RPTransactionID && (
-                  <div className="col-span-2">
-                    <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mb-0.5">
-                      Transaction / UTR
-                    </p>
-                    <p className="font-mono text-xs">
-                      {viewing.RPTransactionID}
-                    </p>
-                  </div>
-                )}
-                {viewing.RPCheckNumber && (
-                  <div>
-                    <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mb-0.5">
-                      Cheque No.
-                    </p>
-                    <p>{viewing.RPCheckNumber}</p>
-                  </div>
-                )}
-                {viewing.RPRemarks && (
-                  <div className="col-span-2">
-                    <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mb-0.5">
-                      Remarks
-                    </p>
-                    <p className="text-muted-foreground text-xs">
-                      {viewing.RPRemarks.replace("[SalePayment] ", "")}
-                    </p>
-                  </div>
-                )}
-              </div>
-              <div className="rounded-xl bg-violet-500/5 border border-violet-400/20 px-4 py-3 flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">
-                  Amount Received
-                </span>
-                <span className="text-lg font-bold text-foreground">
-                  {fmtAmt(viewing.RPAmount)}
-                </span>
               </div>
             </div>
           </div>
-        </div></BodyPortal>
+        </BodyPortal>
       )}
     </>
   );
@@ -672,349 +523,267 @@ export default function Payment() {
     <>
       <Breadcrumbs items={["Dashboard", "Sales Module", "Received Payment"]} />
 
-      <SalesShell
+      <SheetShell
+        eyebrow="CivilierERP · Sales"
         title="Received Payment"
         subtitle="Record payment against a sale order — posts directly to bank ledger in Trial Balance"
-        icon={CreditCard}
       >
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-        {/* ── Left: Form ────────────────────────────────────────────────────── */}
-        <div className="lg:col-span-3 space-y-5">
-          <div className="rounded-2xl border border-border bg-card shadow-sm">
-            {/* Header */}
-            <div className="px-6 py-4 border-b border-border flex items-center gap-2">
-              <Receipt size={15} className="text-violet-500" />
-              <p className="font-heading font-semibold text-sm text-foreground">
-                New Payment Entry
-              </p>
-            </div>
-
-            <div className="p-6 space-y-5">
-              {/* Sale Order picker */}
-              {soLoading ? (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <RefreshCw size={13} className="animate-spin" /> Loading sale
-                  orders…
-                </div>
-              ) : (
-                <SaleOrderPicker
-                  orders={eligibleOrders}
-                  selected={selectedOrder}
-                  onSelect={setSelectedOrder}
-                />
-              )}
-
-              {/* Order summary card */}
-              {selectedOrder && (
-                <div className="rounded-xl bg-violet-500/5 border border-violet-400/20 px-4 py-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-                  <div>
-                    <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mb-0.5">
-                      From
-                    </p>
-                    <p className="font-medium text-foreground text-xs">
-                      {selectedOrder.FromProjectName}
-                    </p>
-                    <p className="text-[0.625rem] text-muted-foreground">
-                      {selectedOrder.FromGodownName}
-                    </p>
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
+          {/* ── Left: Form ────────────────────────────────────────────────────── */}
+          <div className="lg:col-span-3">
+            <SheetBox title="New Payment Entry">
+              <div className="space-y-5">
+                {/* Sale Order picker */}
+                {soLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <RefreshCw size={13} className="animate-spin" /> Loading sale orders…
                   </div>
-                  <div>
-                    <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mb-0.5">
-                      To
-                    </p>
-                    <p className="font-medium text-foreground text-xs">
-                      {selectedOrder.ToProjectName}
-                    </p>
-                    <p className="text-[0.625rem] text-muted-foreground">
-                      {selectedOrder.ToGodownName}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mb-0.5">
-                      Order Date
-                    </p>
-                    <p className="font-medium text-foreground text-xs">
-                      {fmtDate(selectedOrder.OrderDate)}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mb-0.5">
-                      Order Value
-                    </p>
-                    <p className="font-bold text-foreground">
-                      {fmtAmt(selectedOrder.TotalAmount)}
-                    </p>
-                  </div>
-                </div>
-              )}
+                ) : (
+                  <SaleOrderPicker orders={eligibleOrders} selected={selectedOrder} onSelect={setSelectedOrder} />
+                )}
 
-              {/* Bank + Payment Mode */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <FieldLabel required>Deposit Bank</FieldLabel>
-                  {banksLoading ? (
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
-                      <RefreshCw size={12} className="animate-spin" /> Loading
-                      banks…
-                    </div>
-                  ) : (
-                    <SelectBox value={bankId} onChange={setBankId}>
-                      <option value="">Select bank…</option>
-                      {banks.map((b) => (
-                        <option key={b.BId} value={String(b.BId)}>
-                          {b.BName}
-                          {b.BBranch ? ` — ${b.BBranch}` : ""}
-                          {b.BAccountNumber
-                            ? ` (${b.BAccountNumber.slice(-4)})`
-                            : ""}
-                        </option>
-                      ))}
-                    </SelectBox>
-                  )}
-                  {/* Account group badge */}
-                  {selectedBank && (
-                    <div className="mt-1.5 flex items-center gap-1.5">
-                      <Landmark size={11} className="text-muted-foreground" />
-                      <span className="text-[0.6875rem] text-muted-foreground">
-                        {accountGroupLabel
-                          ? `Linked to ${accountGroupLabel} · posts to Trial Balance`
-                          : "No account group linked — won't appear in Trial Balance"}
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <FieldLabel required>Payment Mode</FieldLabel>
-                  <div className="grid grid-cols-3 gap-1.5">
-                    {PAYMENT_MODES.map((m) => (
-                      <button
-                        key={m.value}
-                        type="button"
-                        onClick={() => setMode(m.value)}
-                        className={`flex items-center gap-1.5 px-2.5 py-2 rounded-lg border text-xs font-medium transition-colors ${
-                          mode === m.value
-                            ? "border-violet-500 bg-violet-500/10 text-violet-700"
-                            : "border-border bg-background text-muted-foreground hover:border-border/80 hover:bg-muted/50"
-                        }`}
-                      >
-                        {m.icon}
-                        {m.label}
-                      </button>
+                {/* Order summary */}
+                {selectedOrder && (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 border-t border-l border-foreground/20">
+                    {[
+                      { label: "From", value: selectedOrder.FromProjectName, sub: selectedOrder.FromGodownName },
+                      { label: "To", value: selectedOrder.ToProjectName, sub: selectedOrder.ToGodownName },
+                      { label: "Order Date", value: fmtDate(selectedOrder.OrderDate), num: true },
+                      { label: "Order Value", value: fmtAmt(selectedOrder.TotalAmount), num: true, big: true },
+                    ].map((c) => (
+                      <div key={c.label} className="px-3 py-2.5 border-r border-b border-foreground/20 min-w-0">
+                        <p className={`${LBL} mb-0.5`}>{c.label}</p>
+                        <p className={`text-foreground ${c.big ? "text-sm font-bold" : "text-xs font-medium"} ${c.num ? HR_NUM : ""}`}>
+                          {c.value}
+                        </p>
+                        {c.sub && <p className="text-[0.625rem] text-muted-foreground">{c.sub}</p>}
+                      </div>
                     ))}
                   </div>
-                </div>
-              </div>
+                )}
 
-              {/* Amount + Date */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <FieldLabel required>Amount (₹)</FieldLabel>
-                  <div className="relative">
-                    <IndianRupee
-                      size={13}
-                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={amount}
-                      onChange={(e) => setAmount(e.target.value)}
-                      placeholder="0.00"
-                      className="w-full pl-8 pr-4 py-2.5 rounded-xl border border-border bg-background text-sm text-foreground outline-none focus:ring-2 focus:ring-violet-500/30 transition-colors"
-                    />
+                {/* Bank + Payment Mode */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <FieldLabel required>Deposit Bank</FieldLabel>
+                    {banksLoading ? (
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
+                        <RefreshCw size={12} className="animate-spin" /> Loading banks…
+                      </div>
+                    ) : (
+                      <SelectBox value={bankId} onChange={setBankId}>
+                        <option value="">Select bank…</option>
+                        {banks.map((b) => (
+                          <option key={b.BId} value={String(b.BId)}>
+                            {b.BName}
+                            {b.BBranch ? ` — ${b.BBranch}` : ""}
+                            {b.BAccountNumber ? ` (${b.BAccountNumber.slice(-4)})` : ""}
+                          </option>
+                        ))}
+                      </SelectBox>
+                    )}
+                    {selectedBank && (
+                      <div className="mt-1.5 flex items-center gap-1.5">
+                        <Landmark size={11} className="text-muted-foreground" />
+                        <span className={`text-[0.6875rem] ${accountGroupLabel ? "text-muted-foreground" : "text-destructive"}`}>
+                          {accountGroupLabel
+                            ? `Linked to ${accountGroupLabel} · posts to Trial Balance`
+                            : "No account group linked — won't appear in Trial Balance"}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <FieldLabel required>Payment Mode</FieldLabel>
+                    <div className="grid grid-cols-3 border-t border-l border-foreground/30">
+                      {PAYMENT_MODES.map((m) => {
+                        const on = mode === m.value;
+                        return (
+                          <button
+                            key={m.value}
+                            type="button"
+                            onClick={() => setMode(m.value)}
+                            aria-pressed={on}
+                            className={`flex items-center justify-center gap-1.5 h-9 px-2 border-r border-b border-foreground/30 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] transition-colors ${
+                              on ? "bg-primary/10 text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-primary/5"
+                            }`}
+                            style={on ? { boxShadow: "inset 0 -2px 0 hsl(var(--foreground))" } : undefined}
+                          >
+                            {m.icon}
+                            {m.label}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
 
+                {/* Amount + Date */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <FieldLabel required>Amount (₹)</FieldLabel>
+                    <div className="relative">
+                      <IndianRupee
+                        size={13}
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                      />
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={amount}
+                        onChange={(e) => setAmount(e.target.value)}
+                        placeholder="0.00"
+                        className={`${INPUT} pl-8 ${HR_NUM}`}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <FieldLabel required>Payment Date</FieldLabel>
+                    <DateInput value={payDate} onChange={(e) => setPayDate(e.target.value)} className={INPUT} />
+                  </div>
+                </div>
+
+                {/* Mode-specific fields */}
+                {needsTxn && (
+                  <div>
+                    <FieldLabel>Transaction / UTR Reference</FieldLabel>
+                    <input
+                      type="text"
+                      value={txnRef}
+                      onChange={(e) => setTxnRef(e.target.value)}
+                      placeholder="e.g. UTR123456789012"
+                      className={INPUT}
+                    />
+                  </div>
+                )}
+
+                {needsCheque && (
+                  <div>
+                    <FieldLabel>Cheque Number</FieldLabel>
+                    <input
+                      type="text"
+                      value={chequeNo}
+                      onChange={(e) => setChequeNo(e.target.value)}
+                      placeholder="Cheque number"
+                      className={INPUT}
+                    />
+                  </div>
+                )}
+
+                {/* Remarks */}
                 <div>
-                  <FieldLabel required>Payment Date</FieldLabel>
-                  <DateInput
-                    value={payDate}
-                    onChange={(e) => setPayDate(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-xl border border-border bg-background text-sm text-foreground outline-none focus:ring-2 focus:ring-violet-500/30 transition-colors"
-                    style={{ colorScheme: "dark" }}
+                  <FieldLabel>Remarks</FieldLabel>
+                  <textarea
+                    value={remarks}
+                    onChange={(e) => setRemarks(e.target.value)}
+                    rows={2}
+                    placeholder="Optional notes about this payment"
+                    className="w-full px-3 py-2 border border-foreground/30 bg-card text-sm text-foreground placeholder:text-muted-foreground outline-none resize-none focus:border-foreground rounded-none"
                   />
                 </div>
-              </div>
 
-              {/* Mode-specific fields */}
-              {needsTxn && (
-                <div>
-                  <FieldLabel>Transaction / UTR Reference</FieldLabel>
-                  <input
-                    type="text"
-                    value={txnRef}
-                    onChange={(e) => setTxnRef(e.target.value)}
-                    placeholder="e.g. UTR123456789012"
-                    className="w-full px-3 py-2.5 rounded-xl border border-border bg-background text-sm text-foreground outline-none focus:ring-2 focus:ring-violet-500/30 transition-colors"
-                  />
-                </div>
-              )}
-
-              {needsCheque && (
-                <div>
-                  <FieldLabel>Cheque Number</FieldLabel>
-                  <input
-                    type="text"
-                    value={chequeNo}
-                    onChange={(e) => setChequeNo(e.target.value)}
-                    placeholder="Cheque number"
-                    className="w-full px-3 py-2.5 rounded-xl border border-border bg-background text-sm text-foreground outline-none focus:ring-2 focus:ring-violet-500/30 transition-colors"
-                  />
-                </div>
-              )}
-
-              {/* Remarks */}
-              <div>
-                <FieldLabel>Remarks</FieldLabel>
-                <textarea
-                  value={remarks}
-                  onChange={(e) => setRemarks(e.target.value)}
-                  rows={2}
-                  placeholder="Optional notes about this payment"
-                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none resize-none focus:ring-2 focus:ring-violet-500/30 transition-colors"
-                />
-              </div>
-
-              {/* Submit */}
-              <div className="flex items-center justify-between pt-1">
-                <p className="text-xs text-muted-foreground">
-                  Amount will credit the selected bank account in Trial Balance
-                </p>
-                <button
-                  onClick={handleSubmit}
-                  disabled={!canSubmit}
-                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module text-white disabled:opacity-50 transition-colors shadow-sm"
-                >
-                  {mutation.isPending ? (
-                    <>
-                      <RefreshCw size={13} className="animate-spin" />{" "}
-                      Recording…
-                    </>
-                  ) : (
-                    <>
-                      <Send size={13} /> Record Payment
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* ── Right: Quick summary ────────────────────────────────────────── */}
-        <div className="lg:col-span-2 space-y-4">
-          {/* How it works */}
-          <div className="rounded-2xl border border-border bg-card shadow-sm p-5">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest mb-3">
-              How it works
-            </p>
-            <ol className="space-y-3">
-              {[
-                {
-                  n: "1",
-                  text: "Pick an approved sale order — its doc number and value are pulled automatically.",
-                },
-                {
-                  n: "2",
-                  text: "Choose the bank account where you received the payment. The bank's account group drives the Trial Balance entry.",
-                },
-                {
-                  n: "3",
-                  text: "Set the mode, amount, and any transaction reference.",
-                },
-                {
-                  n: "4",
-                  text: "Recording creates a Received Payment entry. Once approved, the amount credits that bank's ledger in Trial Balance.",
-                },
-              ].map(({ n, text }) => (
-                <li
-                  key={n}
-                  className="flex gap-3 text-xs text-muted-foreground"
-                >
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-violet-500/10 text-violet-600 text-[0.625rem] font-bold">
-                    {n}
-                  </span>
-                  <span>{text}</span>
-                </li>
-              ))}
-            </ol>
-          </div>
-
-          {/* Eligible orders quick count */}
-          <div className="rounded-2xl border border-border bg-card shadow-sm p-5">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest mb-3">
-              Eligible Sale Orders
-            </p>
-            {soLoading ? (
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <RefreshCw size={12} className="animate-spin" /> Loading…
-              </div>
-            ) : (
-              <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                {eligibleOrders.length === 0 ? (
+                {/* Submit */}
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-foreground/20">
                   <p className="text-xs text-muted-foreground">
-                    No approved sale orders found.
+                    Amount will credit the selected bank account in Trial Balance
                   </p>
-                ) : (
-                  eligibleOrders.map((o) => (
+                  <button onClick={handleSubmit} disabled={!canSubmit} className={`${KEY_INK} h-9 px-5`}>
+                    {mutation.isPending ? (
+                      <>
+                        <RefreshCw size={13} className="animate-spin" /> Recording…
+                      </>
+                    ) : (
+                      <>
+                        <Send size={13} /> Record Payment
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </SheetBox>
+          </div>
+
+          {/* ── Right: Quick summary ────────────────────────────────────────── */}
+          <div className="lg:col-span-2 space-y-5">
+            <SheetBox title="How it works">
+              <ol className="space-y-3">
+                {[
+                  "Pick an approved sale order — its doc number and value are pulled automatically.",
+                  "Choose the bank account where you received the payment. The bank's account group drives the Trial Balance entry.",
+                  "Set the mode, amount, and any transaction reference.",
+                  "Recording creates a Received Payment entry. Once approved, the amount credits that bank's ledger in Trial Balance.",
+                ].map((text, i) => (
+                  <li key={i} className="flex gap-3 text-xs text-muted-foreground">
+                    <span
+                      className={`flex h-5 w-5 shrink-0 items-center justify-center border border-foreground text-[0.625rem] font-bold text-foreground ${HR_NUM}`}
+                    >
+                      {i + 1}
+                    </span>
+                    <span>{text}</span>
+                  </li>
+                ))}
+              </ol>
+            </SheetBox>
+
+            <SheetBox title="Eligible Sale Orders" note={soLoading ? undefined : eligibleOrders.length}>
+              {soLoading ? (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <RefreshCw size={12} className="animate-spin" /> Loading…
+                </div>
+              ) : eligibleOrders.length === 0 ? (
+                <p className="text-xs text-muted-foreground">No approved sale orders found.</p>
+              ) : (
+                <div className="max-h-56 overflow-y-auto -mx-4 -my-4">
+                  {eligibleOrders.map((o) => (
                     <button
                       key={o.SaleOrderID}
                       onClick={() => setSelectedOrder(o)}
-                      className={`w-full text-left px-3 py-2.5 rounded-xl border transition-colors text-xs ${
-                        selectedOrder?.SaleOrderID === o.SaleOrderID
-                          ? "border-violet-500 bg-violet-500/5"
-                          : "border-border hover:bg-muted/50"
+                      className={`w-full text-left px-4 py-2.5 border-b border-foreground/10 last:border-0 transition-colors text-xs ${
+                        selectedOrder?.SaleOrderID === o.SaleOrderID ? "bg-primary/10" : "hover:bg-primary/5"
                       }`}
                     >
                       <div className="flex items-center justify-between">
-                        <span className="font-mono font-semibold text-foreground">
-                          {o.DocNo}
-                        </span>
-                        <span className="font-bold text-foreground">
-                          {fmtAmt(o.TotalAmount)}
-                        </span>
+                        <span className={`${HR_NUM} font-semibold text-foreground`}>{o.DocNo}</span>
+                        <span className={`${HR_NUM} font-bold text-foreground`}>{fmtAmt(o.TotalAmount)}</span>
                       </div>
                       <p className="text-muted-foreground mt-0.5 truncate">
                         {o.FromProjectName} → {o.ToProjectName}
                       </p>
                     </button>
-                  ))
-                )}
-              </div>
-            )}
+                  ))}
+                </div>
+              )}
+            </SheetBox>
           </div>
         </div>
-      </div>
 
-      {/* ── History ──────────────────────────────────────────────────────────── */}
-      <div className="mt-8">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h2 className="font-heading font-semibold text-foreground">
-              Payment History
-            </h2>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              All payments recorded against sale orders
-            </p>
-          </div>
-          {paymentsLoading && (
-            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <RefreshCw size={12} className="animate-spin" /> Refreshing…
-            </span>
-          )}
-        </div>
-        <PaymentHistoryTable records={paymentHistory} />
-        <ServerPager
-          page={historyPage}
-          pageSize={historyPageSize}
-          total={paymentTotal}
-          onPageChange={setHistoryPage}
-          onPageSizeChange={setHistoryPageSize}
-        />
-      </div>
-      </SalesShell>
+        {/* ── History ──────────────────────────────────────────────────────────── */}
+        <SheetBox
+          title="Payment History"
+          note={paymentTotal ? `${paymentTotal.toLocaleString("en-IN")} payments` : undefined}
+          flush
+          action={
+            paymentsLoading ? (
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <RefreshCw size={12} className="animate-spin" /> Refreshing…
+              </span>
+            ) : undefined
+          }
+        >
+          <p className="px-4 pt-3 pb-2 text-xs text-muted-foreground">All payments recorded against sale orders</p>
+          <PaymentHistoryTable records={paymentHistory} />
+          <ServerPager
+            page={historyPage}
+            pageSize={historyPageSize}
+            total={paymentTotal}
+            onPageChange={setHistoryPage}
+            onPageSizeChange={setHistoryPageSize}
+          />
+        </SheetBox>
+      </SheetShell>
     </>
   );
 }

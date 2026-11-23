@@ -4,9 +4,11 @@ import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { SalesShell } from "@/components/sales/SalesShell";
+import { SheetShell, SheetMark, type MarkTone } from "@/components/sheet/Sheet";
+import { KEY_INK, KEY_LINE } from "@/components/sheet/sheetParts";
+import { HR_NUM } from "@/components/hrpayroll/HrUi";
+import { SheetBox, SheetTabs, TH, TD, ICON_ACT } from "@/components/maintenance/maintParts";
 import {
-  Receipt,
   FileText,
   Banknote,
   Send,
@@ -17,11 +19,9 @@ import {
   RefreshCw,
   AlertCircle,
   CheckCircle2,
-  Clock,
   IndianRupee,
   Eye,
   Printer,
-  Hash,
   Landmark,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -55,21 +55,21 @@ const fmtDate = (d: string) =>
       })
     : "—";
 
-const STATUS_CONFIG: Record<
-  string,
-  { cls: string; icon: React.ReactNode; label: string }
-> = {
-  "Pending Payment": {
-    cls: "bg-[#ffe2021a] text-amber-600",
-    icon: <Clock size={11} />,
-    label: "Pending Payment",
-  },
-  Paid: {
-    cls: "bg-emerald-500/10 text-emerald-600",
-    icon: <CheckCircle2 size={11} />,
-    label: "Paid",
-  },
+// Payment status as a sheet mark: solid blue = settled, hatched = waiting.
+const STATUS_CONFIG: Record<string, { tone: MarkTone; label: string }> = {
+  "Pending Payment": { tone: "waiting", label: "Pending Payment" },
+  Paid: { tone: "done", label: "Paid" },
 };
+const statusMark = (s: string) => {
+  const cfg = STATUS_CONFIG[s] ?? STATUS_CONFIG["Pending Payment"];
+  return <SheetMark text={cfg.label} tone={cfg.tone} />;
+};
+
+// ─── Sheet styles (docs/DESIGN.md) ────────────────────────────────────────────
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const INPUT =
+  "w-full h-9 px-3 border border-foreground/30 bg-card text-sm text-foreground outline-none focus:border-foreground disabled:opacity-50 rounded-none";
+const OVERLAY = "fixed inset-0 z-[70] flex items-stretch sm:items-center justify-center bg-foreground/40 p-0 sm:p-4";
 
 // ─── Field label ──────────────────────────────────────────────────────────────
 
@@ -81,7 +81,7 @@ function FieldLabel({
   required?: boolean;
 }) {
   return (
-    <label className="block text-[0.6875rem] uppercase tracking-widest font-semibold text-muted-foreground mb-1.5">
+    <label className={`block ${LBL} mb-1.5`}>
       {children}
       {required && <span className="text-destructive ml-0.5">*</span>}
     </label>
@@ -119,30 +119,23 @@ function EligibleOrderPicker({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl border border-border bg-background text-sm outline-none transition-colors hover:border-violet-400/50 focus:ring-2 focus:ring-violet-500/30"
+        className={`${INPUT} flex items-center justify-between gap-2 text-left`}
       >
         {selected ? (
           <div className="flex items-center gap-2 min-w-0">
-            <Hash size={13} className="text-violet-500 shrink-0" />
-            <span className="font-mono font-semibold text-foreground">
-              {selected.DocNo}
-            </span>
-            <span className="text-muted-foreground text-xs truncate">
-              · {selected.ToCompanyName}
-            </span>
+            <span className={`${HR_NUM} font-semibold text-foreground`}>{selected.DocNo}</span>
+            <span className="text-muted-foreground text-xs truncate">· {selected.ToCompanyName}</span>
           </div>
         ) : (
-          <span className="text-muted-foreground">
-            Select an approved sale order…
-          </span>
+          <span className="text-muted-foreground">Select an approved sale order…</span>
         )}
         <ChevronDown size={13} className="text-muted-foreground shrink-0" />
       </button>
 
       {open && (
-        <div className="absolute z-50 mt-1 w-full rounded-xl border border-border bg-popover shadow-xl overflow-hidden">
-          <div className="p-2 border-b border-border">
-            <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-muted/50">
+        <div className="absolute z-50 mt-1 w-full border border-foreground bg-card overflow-hidden">
+          <div className="p-2 border-b border-foreground/20">
+            <div className="flex items-center gap-2 px-2 h-8 border border-foreground/30">
               <Search size={13} className="text-muted-foreground" />
               <input
                 autoFocus
@@ -160,9 +153,7 @@ function EligibleOrderPicker({
           </div>
           <div className="max-h-64 overflow-y-auto">
             {filtered.length === 0 ? (
-              <p className="text-xs text-muted-foreground text-center py-6">
-                No eligible sale orders found
-              </p>
+              <p className="text-xs text-muted-foreground text-center py-6">No eligible sale orders found</p>
             ) : (
               filtered.map((o) => (
                 <button
@@ -173,25 +164,18 @@ function EligibleOrderPicker({
                     setOpen(false);
                     setSearch("");
                   }}
-                  className={`w-full text-left px-4 py-3 hover:bg-muted transition-colors border-b border-border/40 last:border-0 ${selected?.SaleOrderID === o.SaleOrderID ? "bg-violet-500/5" : ""}`}
+                  className={`w-full text-left px-4 py-3 hover:bg-primary/10 transition-colors border-b border-foreground/10 last:border-0 ${selected?.SaleOrderID === o.SaleOrderID ? "bg-primary/10" : ""}`}
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="font-mono text-sm font-semibold text-foreground">
-                        {o.DocNo}
-                      </p>
+                      <p className={`${HR_NUM} text-sm font-semibold text-foreground`}>{o.DocNo}</p>
                       <p className="text-xs text-muted-foreground truncate mt-0.5">
-                        {o.ToCompanyName} · {o.FromProjectName} →{" "}
-                        {o.ToProjectName}
+                        {o.ToCompanyName} · {o.FromProjectName} → {o.ToProjectName}
                       </p>
                     </div>
                     <div className="text-right shrink-0">
-                      <p className="text-sm font-bold text-foreground">
-                        {fmtAmt(o.TotalAmount)}
-                      </p>
-                      <p className="text-[0.625rem] text-muted-foreground mt-0.5">
-                        {fmtDate(o.OrderDate)}
-                      </p>
+                      <p className={`${HR_NUM} text-sm font-bold text-foreground`}>{fmtAmt(o.TotalAmount)}</p>
+                      <p className={`${HR_NUM} text-[0.625rem] text-muted-foreground mt-0.5`}>{fmtDate(o.OrderDate)}</p>
                     </div>
                   </div>
                 </button>
@@ -285,29 +269,25 @@ function CollectPaymentModal({
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[70] flex items-stretch sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
-      <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-md h-[100dvh] max-h-[100dvh] sm:h-auto sm:max-h-[92vh] overflow-y-auto">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+    <div className={OVERLAY}>
+      <div
+        role="dialog"
+        className="bg-card border border-foreground w-full max-w-md h-[100dvh] max-h-[100dvh] sm:h-auto sm:max-h-[92vh] overflow-y-auto"
+      >
+        <div className="flex items-center justify-between px-6 py-4 border-b border-foreground">
           <div>
-            <p className="text-xs text-muted-foreground uppercase tracking-widest mb-0.5">
-              Collect Payment
-            </p>
-            <p className="font-mono font-bold text-foreground">
-              {invoice.DocNo}
-            </p>
+            <p className={`${LBL} mb-0.5`}>Collect Payment</p>
+            <p className={`${HR_NUM} font-bold text-lg tracking-tight text-foreground`}>{invoice.DocNo}</p>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 rounded-lg hover:bg-muted transition-colors"
-          >
+          <button onClick={onClose} className={ICON_ACT} title="Close">
             <X size={16} />
           </button>
         </div>
 
         <div className="p-6 space-y-5">
-          <div className="rounded-xl bg-amber-500/5 border border-amber-400/20 px-4 py-3 flex items-start gap-2">
-            <Banknote size={15} className="text-amber-600 mt-0.5 shrink-0" />
-            <p className="text-xs text-amber-700">
+          <div className="border border-foreground/20 bg-foreground/5 px-4 py-3 flex items-start gap-2">
+            <Banknote size={15} className="text-muted-foreground mt-0.5 shrink-0" />
+            <p className="text-xs text-foreground">
               Sale invoice payments are cash only and settle through the
               Dummy Bank account — all other modes are disabled for this
               workflow.
@@ -316,27 +296,19 @@ function CollectPaymentModal({
 
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div>
-              <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mb-0.5">
-                Customer
-              </p>
-              <p className="font-medium text-foreground text-xs">
-                {invoice.ToCompanyName}
-              </p>
+              <p className={`${LBL} mb-0.5`}>Customer</p>
+              <p className="font-medium text-foreground text-xs">{invoice.ToCompanyName}</p>
             </div>
             <div>
-              <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mb-0.5">
-                Invoice Amount
-              </p>
-              <p className="font-bold text-foreground text-xs">
-                {fmtAmt(invoice.TotalAmount)}
-              </p>
+              <p className={`${LBL} mb-0.5`}>Invoice Amount</p>
+              <p className={`${HR_NUM} font-bold text-foreground text-sm`}>{fmtAmt(invoice.TotalAmount)}</p>
             </div>
           </div>
 
           <div>
             <FieldLabel>Deposit Account</FieldLabel>
-            <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl border-2 border-dashed border-emerald-400/40 bg-emerald-500/5">
-              <Landmark size={14} className="text-emerald-600 shrink-0" />
+            <div className="flex items-center gap-2 h-9 px-3 border border-dashed border-foreground/30">
+              <Landmark size={13} className="text-muted-foreground shrink-0" />
               <span className="text-xs font-semibold text-foreground">
                 {dummyBank?.BName ?? "Dummy Bank"} (auto-selected)
               </span>
@@ -357,7 +329,7 @@ function CollectPaymentModal({
                   step="0.01"
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
-                  className="w-full pl-8 pr-4 py-2.5 rounded-xl border border-border bg-background text-sm text-foreground outline-none focus:ring-2 focus:ring-violet-500/30 transition-colors"
+                  className={`${INPUT} pl-8 ${HR_NUM}`}
                 />
               </div>
             </div>
@@ -366,8 +338,7 @@ function CollectPaymentModal({
               <DateInput
                 value={payDate}
                 onChange={(e) => setPayDate(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-xl border border-border bg-background text-sm text-foreground outline-none focus:ring-2 focus:ring-violet-500/30 transition-colors"
-                style={{ colorScheme: "dark" }}
+                className={INPUT}
               />
             </div>
           </div>
@@ -379,29 +350,22 @@ function CollectPaymentModal({
               onChange={(e) => setRemarks(e.target.value)}
               rows={2}
               placeholder="Optional notes about this receipt"
-              className="w-full px-3 py-2.5 rounded-xl border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none resize-none focus:ring-2 focus:ring-violet-500/30 transition-colors"
+              className="w-full px-3 py-2 border border-foreground/30 bg-card text-sm text-foreground placeholder:text-muted-foreground outline-none resize-none focus:border-foreground rounded-none"
             />
           </div>
 
-          <div className="flex items-center justify-end gap-3 pt-1">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors"
-            >
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <button onClick={onClose} className={`${KEY_LINE} h-9 px-4 flex-1 sm:flex-none`}>
               Cancel
             </button>
-            <button
-              onClick={handleSubmit}
-              disabled={!canSubmit}
-              className="flex items-center gap-2 px-6 py-2.5 rounded-xl btn-module text-white text-sm font-semibold disabled:opacity-50 transition-colors shadow-sm"
-            >
+            <button onClick={handleSubmit} disabled={!canSubmit} className={`${KEY_INK} h-9 px-5 flex-1 sm:flex-none`}>
               {mutation.isPending ? (
                 <>
-                  <RefreshCw size={14} className="animate-spin" /> Recording…
+                  <RefreshCw size={13} className="animate-spin" /> Recording…
                 </>
               ) : (
                 <>
-                  <Banknote size={14} /> Record Cash Receipt
+                  <Banknote size={13} /> Record Cash Receipt
                 </>
               )}
             </button>
@@ -473,7 +437,7 @@ function GenerateInvoiceTab() {
   return (
     <div className="space-y-4">
       {successMsg && (
-        <div className="px-4 py-3 rounded-lg bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 flex items-center gap-2 text-sm">
+        <div className="px-4 py-3 bg-primary/10 text-primary border border-primary/30 flex items-center gap-2 text-sm">
           <CheckCircle2 size={15} /> {successMsg}
           <button onClick={() => setSuccessMsg("")} className="ml-auto">
             <X size={14} />
@@ -481,7 +445,7 @@ function GenerateInvoiceTab() {
         </div>
       )}
       {errorMsg && (
-        <div className="px-4 py-3 rounded-lg bg-red-500/10 text-red-600 border border-red-500/20 flex items-center gap-2 text-sm">
+        <div className="px-4 py-3 bg-destructive/10 text-destructive border border-destructive/30 flex items-center gap-2 text-sm">
           <AlertCircle size={15} /> {errorMsg}
           <button onClick={() => setErrorMsg("")} className="ml-auto">
             <X size={14} />
@@ -489,93 +453,55 @@ function GenerateInvoiceTab() {
         </div>
       )}
 
-      <div className="rounded-xl border border-border bg-card p-5 space-y-4">
-        {loading ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <RefreshCw size={13} className="animate-spin" /> Loading sale
-            orders…
-          </div>
-        ) : eligibleOrders.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border bg-muted/20 py-16 text-center">
-            <FileText
-              size={32}
-              className="text-muted-foreground/30 mx-auto mb-3"
-            />
-            <p className="text-sm text-muted-foreground">
-              No approved sale orders awaiting invoicing.
-            </p>
-            <p className="text-xs text-muted-foreground/60 mt-1">
-              Approve a sale order first, or check History for invoices
-              already generated.
-            </p>
-          </div>
-        ) : (
-          <>
-            <EligibleOrderPicker
-              orders={eligibleOrders}
-              selected={selectedOrder}
-              onSelect={setSelectedOrder}
-            />
-
-            {selectedOrder && (
-              <div className="rounded-xl bg-violet-500/5 border border-violet-400/20 px-4 py-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-                <div>
-                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mb-0.5">
-                    Customer
-                  </p>
-                  <p className="font-medium text-foreground text-xs">
-                    {selectedOrder.ToCompanyName}
-                  </p>
-                  <p className="text-[0.625rem] text-muted-foreground">
-                    {selectedOrder.ToProjectName}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mb-0.5">
-                    From
-                  </p>
-                  <p className="font-medium text-foreground text-xs">
-                    {selectedOrder.FromCompanyName}
-                  </p>
-                  <p className="text-[0.625rem] text-muted-foreground">
-                    {selectedOrder.FromProjectName}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mb-0.5">
-                    Order Date
-                  </p>
-                  <p className="font-medium text-foreground text-xs">
-                    {fmtDate(selectedOrder.OrderDate)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mb-0.5">
-                    Invoice Amount
-                  </p>
-                  <p className="font-bold text-foreground">
-                    {fmtAmt(selectedOrder.TotalAmount)}
-                  </p>
-                </div>
-              </div>
-            )}
-
-            <div className="flex items-center justify-between pt-1 border-t border-border">
-              <p className="text-xs text-muted-foreground pt-3">
-                Amount is locked to the sale order total. The invoice starts
-                as Pending Payment.
+      <SheetBox title="Generate Sale Invoice">
+        <div className="space-y-4">
+          {loading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <RefreshCw size={13} className="animate-spin" /> Loading sale orders…
+            </div>
+          ) : eligibleOrders.length === 0 ? (
+            <div className="border border-dashed border-foreground/30 py-14 text-center">
+              <p className="text-sm text-foreground">No approved sale orders awaiting invoicing.</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Approve a sale order first, or check History for invoices already generated.
               </p>
-              <div className="pt-3">
+            </div>
+          ) : (
+            <>
+              <EligibleOrderPicker orders={eligibleOrders} selected={selectedOrder} onSelect={setSelectedOrder} />
+
+              {selectedOrder && (
+                <div className="grid grid-cols-2 sm:grid-cols-4 border-t border-l border-foreground/20">
+                  {[
+                    { label: "Customer", value: selectedOrder.ToCompanyName, sub: selectedOrder.ToProjectName },
+                    { label: "From", value: selectedOrder.FromCompanyName, sub: selectedOrder.FromProjectName },
+                    { label: "Order Date", value: fmtDate(selectedOrder.OrderDate), num: true },
+                    { label: "Invoice Amount", value: fmtAmt(selectedOrder.TotalAmount), num: true, big: true },
+                  ].map((c) => (
+                    <div key={c.label} className="px-3 py-2.5 border-r border-b border-foreground/20 min-w-0">
+                      <p className={`${LBL} mb-0.5`}>{c.label}</p>
+                      <p className={`text-foreground ${c.big ? "text-sm font-bold" : "text-xs font-medium"} ${c.num ? HR_NUM : ""}`}>
+                        {c.value}
+                      </p>
+                      {c.sub && <p className="text-[0.625rem] text-muted-foreground">{c.sub}</p>}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-foreground/20">
+                <p className="text-xs text-muted-foreground">
+                  Amount is locked to the sale order total. The invoice starts as Pending Payment.
+                </p>
                 {rights.canCreate && (
                   <button
                     onClick={handleSubmit}
                     disabled={!selectedOrder || createMut.isPending}
-                    className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module text-white disabled:opacity-50 transition-colors shadow-sm"
+                    className={`${KEY_INK} h-9 px-5`}
                   >
                     {createMut.isPending ? (
                       <>
-                        <RefreshCw size={13} className="animate-spin" />{" "}
-                        Generating…
+                        <RefreshCw size={13} className="animate-spin" /> Generating…
                       </>
                     ) : (
                       <>
@@ -585,10 +511,10 @@ function GenerateInvoiceTab() {
                   </button>
                 )}
               </div>
-            </div>
-          </>
-        )}
-      </div>
+            </>
+          )}
+        </div>
+      </SheetBox>
     </div>
   );
 }
@@ -620,45 +546,23 @@ function SaleInvoiceHistory({ dummyBank }: { dummyBank: BankRecord | null }) {
   );
 
   return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden">
-      <div className="px-5 py-3 border-b border-border flex items-center justify-between">
-        <div>
-          <p className="text-sm font-heading font-semibold text-foreground">
-            Sale Invoice History
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Invoices generated from approved sale orders
-          </p>
-        </div>
-        <button
-          onClick={() => refetch()}
-          disabled={isFetching}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
-        >
-          <RefreshCw size={12} className={isFetching ? "animate-spin" : ""} />{" "}
-          Refresh
+    <SheetBox
+      title="Sale Invoice History"
+      note={total ? `${total.toLocaleString("en-IN")} invoices` : undefined}
+      flush
+      action={
+        <button onClick={() => refetch()} disabled={isFetching} className={`${KEY_LINE} h-8 px-3`}>
+          <RefreshCw size={12} className={isFetching ? "animate-spin" : ""} /> Refresh
         </button>
-      </div>
-
-      <div className="overflow-x-auto">
+      }
+    >
+      <p className="px-4 pt-3 text-xs text-muted-foreground">Invoices generated from approved sale orders</p>
+      <div className="overflow-x-auto mt-2">
         <table className="w-full text-xs">
-          <thead className="border-b border-border bg-muted/40">
+          <thead>
             <tr>
-              {[
-                "Doc No",
-                "Sale Order",
-                "Customer",
-                "Date",
-                "Amount",
-                "Received",
-                "Status",
-                "By",
-                "",
-              ].map((h) => (
-                <th
-                  key={h}
-                  className="px-4 py-3 text-left font-semibold text-muted-foreground whitespace-nowrap"
-                >
+              {["Doc No", "Sale Order", "Customer", "Date", "Amount", "Received", "Status", "By", ""].map((h) => (
+                <th key={h} className={`${TH} ${h === "Amount" || h === "Received" ? "text-right" : ""}`}>
                   {h}
                 </th>
               ))}
@@ -667,84 +571,51 @@ function SaleInvoiceHistory({ dummyBank }: { dummyBank: BankRecord | null }) {
           <tbody>
             {isLoading ? (
               Array.from({ length: 5 }).map((_, i) => (
-                <tr key={i} className="border-b border-border">
+                <tr key={i}>
                   {Array.from({ length: 9 }).map((_, j) => (
-                    <td key={j} className="px-4 py-3">
-                      <div className="h-3 bg-muted rounded animate-pulse" />
+                    <td key={j} className={TD}>
+                      <div className="h-3 bg-foreground/10 animate-pulse" />
                     </td>
                   ))}
                 </tr>
               ))
             ) : invoices.length === 0 ? (
               <tr>
-                <td
-                  colSpan={9}
-                  className="px-4 py-12 text-center text-muted-foreground"
-                >
+                <td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">
                   No sale invoices yet.
                 </td>
               </tr>
             ) : (
-              invoices.map((inv) => {
-                const cfg =
-                  STATUS_CONFIG[inv.PaymentStatus] ??
-                  STATUS_CONFIG["Pending Payment"];
-                return (
-                  <tr
-                    key={inv.SaleInvoiceID}
-                    className="border-b border-border hover:bg-muted/20 transition-colors"
-                  >
-                    <td className="px-4 py-3 font-mono text-primary font-semibold whitespace-nowrap">
-                      {inv.DocNo}
-                    </td>
-                    <td className="px-4 py-3 font-mono text-muted-foreground whitespace-nowrap">
-                      {inv.SaleOrderDocNo}
-                    </td>
-                    <td className="px-4 py-3 text-foreground whitespace-nowrap">
-                      {inv.ToCompanyName}
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
-                      {fmtDate(inv.InvoiceDate)}
-                    </td>
-                    <td className="px-4 py-3 font-semibold text-foreground whitespace-nowrap">
-                      {fmtAmt(inv.TotalAmount)}
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
-                      {fmtAmt(inv.AmountReceived || 0)}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.6875rem] font-medium whitespace-nowrap ${cfg.cls}`}
-                      >
-                        {cfg.icon} {cfg.label}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground truncate max-w-[120px]">
-                      {inv.CreatedBy?.split("@")[0] || "—"}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1">
-                        <button data-row-view
-                          onClick={() => setViewingInvoice(inv)}
-                          className="text-muted-foreground hover:bg-muted p-2 rounded-lg transition-colors"
-                          title="View"
-                        >
-                          <Eye size={15} />
+              invoices.map((inv) => (
+                <tr key={inv.SaleInvoiceID} className="hover:bg-primary/5 transition-colors">
+                  <td className={`${TD} ${HR_NUM} font-semibold text-foreground whitespace-nowrap`}>{inv.DocNo}</td>
+                  <td className={`${TD} ${HR_NUM} text-muted-foreground whitespace-nowrap`}>{inv.SaleOrderDocNo}</td>
+                  <td className={`${TD} text-foreground whitespace-nowrap`}>{inv.ToCompanyName}</td>
+                  <td className={`${TD} ${HR_NUM} text-muted-foreground whitespace-nowrap`}>{fmtDate(inv.InvoiceDate)}</td>
+                  <td className={`${TD} ${HR_NUM} font-semibold text-foreground whitespace-nowrap text-right`}>
+                    {fmtAmt(inv.TotalAmount)}
+                  </td>
+                  <td className={`${TD} ${HR_NUM} text-muted-foreground whitespace-nowrap text-right`}>
+                    {fmtAmt(inv.AmountReceived || 0)}
+                  </td>
+                  <td className={`${TD} whitespace-nowrap`}>{statusMark(inv.PaymentStatus)}</td>
+                  <td className={`${TD} text-muted-foreground truncate max-w-[120px]`}>
+                    {inv.CreatedBy?.split("@")[0] || "—"}
+                  </td>
+                  <td className={TD}>
+                    <div className="flex items-center gap-1">
+                      <button data-row-view onClick={() => setViewingInvoice(inv)} className={ICON_ACT} title="View">
+                        <Eye size={14} />
+                      </button>
+                      {inv.PaymentStatus === "Pending Payment" && (
+                        <button onClick={() => setPayingInvoice(inv)} className={ICON_ACT} title="Collect Payment">
+                          <Banknote size={14} />
                         </button>
-                        {inv.PaymentStatus === "Pending Payment" && (
-                          <button
-                            onClick={() => setPayingInvoice(inv)}
-                            className="text-emerald-600 hover:bg-emerald-500/10 p-2 rounded-lg transition-colors"
-                            title="Collect Payment"
-                          >
-                            <Banknote size={15} />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))
             )}
           </tbody>
         </table>
@@ -754,7 +625,7 @@ function SaleInvoiceHistory({ dummyBank }: { dummyBank: BankRecord | null }) {
 
       {/* ── View modal ────────────────────────────────────────────────────── */}
       {viewingInvoice && createPortal(
-        <div className="fixed inset-0 z-[70] flex items-stretch sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
+        <div className={OVERLAY}>
           <style>{`
             @media print {
               body * { visibility: hidden; }
@@ -775,94 +646,53 @@ function SaleInvoiceHistory({ dummyBank }: { dummyBank: BankRecord | null }) {
               .si-print-modal .sticky { position: static !important; }
             }
           `}</style>
-          <div className="si-print-modal bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-lg h-[100dvh] max-h-[100dvh] sm:h-auto sm:max-h-[88vh] overflow-y-auto">
-            <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-6 py-4 border-b border-border">
+          <div
+            role="dialog"
+            className="si-print-modal bg-card border border-foreground w-full max-w-lg h-[100dvh] max-h-[100dvh] sm:h-auto sm:max-h-[88vh] overflow-y-auto"
+          >
+            <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-6 py-4 border-b border-foreground">
               <div>
-                <h2 className="font-heading font-bold text-base">
-                  {viewingInvoice.DocNo}
-                </h2>
-                <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mt-0.5">
-                  Sale Invoice
-                </p>
+                <p className={LBL}>Sale Invoice</p>
+                <h2 className={`font-heading font-bold text-lg tracking-tight mt-0.5 ${HR_NUM}`}>{viewingInvoice.DocNo}</h2>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 print:hidden">
                 {rights.canPrint && (
-                  <button
-                    onClick={() => window.print()}
-                    title="Print Invoice"
-                    className="p-2 hover:bg-muted rounded-lg transition-colors text-muted-foreground hover:text-foreground print:hidden"
-                  >
-                    <Printer size={18} />
+                  <button onClick={() => window.print()} title="Print Invoice" className={`${KEY_LINE} h-8 px-3`}>
+                    <Printer size={12} /> Print
                   </button>
                 )}
-                <button
-                  onClick={() => setViewingInvoice(null)}
-                  className="p-2 hover:bg-muted rounded-lg transition-colors print:hidden"
-                >
-                  <X size={18} />
+                <button onClick={() => setViewingInvoice(null)} className={ICON_ACT} title="Close">
+                  <X size={16} />
                 </button>
               </div>
             </div>
 
             <div className="p-5 sm:p-6 space-y-5">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 border-t border-l border-foreground/20">
                 {[
-                  { label: "Doc No", value: viewingInvoice.DocNo, mono: true },
-                  { label: "Date", value: fmtDate(viewingInvoice.InvoiceDate) },
+                  { label: "Doc No", value: viewingInvoice.DocNo, num: true },
+                  { label: "Date", value: fmtDate(viewingInvoice.InvoiceDate), num: true },
                   { label: "Created By", value: viewingInvoice.CreatedByName || viewingInvoice.CreatedBy },
-                  {
-                    label: "Sale Order",
-                    value: viewingInvoice.SaleOrderDocNo,
-                    mono: true,
-                  },
+                  { label: "Sale Order", value: viewingInvoice.SaleOrderDocNo, num: true },
                   { label: "Customer", value: viewingInvoice.ToCompanyName },
                   { label: "From Company", value: viewingInvoice.FromCompanyName },
-                  {
-                    label: "Created By",
-                    value: viewingInvoice.CreatedBy?.split("@")[0] || "—",
-                  },
-                ].map(({ label, value, mono }) => (
-                  <div
-                    key={label}
-                    className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50"
-                  >
-                    <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
-                      {label}
-                    </p>
-                    <p
-                      className={`text-xs font-semibold ${mono ? "font-mono" : ""} text-foreground`}
-                    >
-                      {value}
-                    </p>
+                ].map(({ label, value, num }) => (
+                  <div key={label} className="px-3 py-2.5 border-r border-b border-foreground/20 min-w-0">
+                    <p className={`${LBL} mb-0.5`}>{label}</p>
+                    <p className={`text-xs font-semibold text-foreground break-words ${num ? HR_NUM : ""}`}>{value}</p>
                   </div>
                 ))}
               </div>
 
-              <div className="rounded-xl bg-violet-500/5 border border-violet-400/20 px-4 py-3 flex items-center justify-between">
+              <div className="border-t border-foreground pt-3 flex items-end justify-between gap-3">
                 <div>
-                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
-                    Status
-                  </p>
-                  {(() => {
-                    const cfg =
-                      STATUS_CONFIG[viewingInvoice.PaymentStatus] ??
-                      STATUS_CONFIG["Pending Payment"];
-                    return (
-                      <span
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.6875rem] font-medium whitespace-nowrap ${cfg.cls}`}
-                      >
-                        {cfg.icon} {cfg.label}
-                      </span>
-                    );
-                  })()}
+                  <p className={`${LBL} mb-1`}>Status</p>
+                  {statusMark(viewingInvoice.PaymentStatus)}
                 </div>
                 <div className="text-right">
-                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
-                    Received / Total
-                  </p>
-                  <p className="text-sm font-bold text-foreground">
-                    {fmtAmt(viewingInvoice.AmountReceived || 0)} /{" "}
-                    {fmtAmt(viewingInvoice.TotalAmount)}
+                  <p className={`${LBL} mb-0.5`}>Received / Total</p>
+                  <p className={`text-base font-bold text-foreground ${HR_NUM}`}>
+                    {fmtAmt(viewingInvoice.AmountReceived || 0)} / {fmtAmt(viewingInvoice.TotalAmount)}
                   </p>
                 </div>
               </div>
@@ -873,9 +703,9 @@ function SaleInvoiceHistory({ dummyBank }: { dummyBank: BankRecord | null }) {
                     setPayingInvoice(viewingInvoice);
                     setViewingInvoice(null);
                   }}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl btn-module text-white text-sm font-semibold transition-colors shadow-sm print:hidden"
+                  className={`${KEY_INK} h-9 px-5 w-full print:hidden`}
                 >
-                  <Banknote size={14} /> Collect Cash Payment
+                  <Banknote size={13} /> Collect Cash Payment
                 </button>
               )}
             </div>
@@ -892,7 +722,7 @@ function SaleInvoiceHistory({ dummyBank }: { dummyBank: BankRecord | null }) {
           onClose={() => setPayingInvoice(null)}
         />
       )}
-    </div>
+    </SheetBox>
   );
 }
 
@@ -914,43 +744,24 @@ export default function SaleInvoice() {
     [banksRaw],
   );
 
+  const tabs = [
+    ...(rights.canCreate ? [{ value: "generate" as const, label: <><FileText size={12} /> Generate</> }] : []),
+    { value: "history" as const, label: <><ClipboardList size={12} /> History</> },
+  ];
+
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Sales Module", "Sale Invoice"]} />
 
-      <SalesShell
+      <SheetShell
+        eyebrow="CivilierERP · Sales"
         title="Sale Invoice"
         subtitle="Generate invoices from approved sale orders and collect cash payment against them"
-        icon={Receipt}
-        action={
-          <div className="flex items-center gap-1 p-1 rounded-xl bg-muted border border-border">
-            {rights.canCreate && (
-              <button
-                onClick={() => setActiveTab("generate")}
-                className={`inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg transition-colors ${
-                  activeTab === "generate"
-                    ? "btn-module text-white shadow-sm"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                }`}
-              >
-                <FileText size={13} /> Generate
-              </button>
-            )}
-            <button
-              onClick={() => setActiveTab("history")}
-              className={`inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg transition-colors ${
-                activeTab === "history"
-                  ? "btn-module text-white shadow-sm"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
-              }`}
-            >
-              <ClipboardList size={13} /> History
-            </button>
-          </div>
-        }
       >
+        <SheetTabs<"generate" | "history"> tabs={tabs} value={activeTab} onChange={setActiveTab} />
+
         {!dummyBank && (
-          <div className="px-4 py-3 rounded-lg bg-[#ffe2021a] text-amber-700 border border-amber-500/20 flex items-center gap-2 text-sm">
+          <div className="px-4 py-3 bg-destructive/10 text-destructive border border-destructive/30 flex items-center gap-2 text-sm">
             <AlertCircle size={15} /> No "Dummy Bank" account found in Bank
             Master — payments will still post since the server enforces the
             deposit account, but it can't be named here for display.
@@ -958,10 +769,8 @@ export default function SaleInvoice() {
         )}
 
         {activeTab === "generate" && <GenerateInvoiceTab />}
-        {activeTab === "history" && (
-          <SaleInvoiceHistory dummyBank={dummyBank} />
-        )}
-      </SalesShell>
+        {activeTab === "history" && <SaleInvoiceHistory dummyBank={dummyBank} />}
+      </SheetShell>
     </>
   );
 }
