@@ -24,7 +24,7 @@ export async function crmSend<T = any>(path: string, method: "POST" | "PUT" | "P
 
 /** One booking: unit, buyer, milestones, welcome calls, agreement, stage (crmBookings.js GET /:id). */
 export const getBooking = (id: number) => crmGet<{
-  booking: Row; milestones: Row[]; welcomeCalls: Row[]; agreement: Row | null; customer: Row | null;
+  booking: Row; milestones: Row[]; welcomeCalls: Row[]; agreement: Row | null; customer: Row | null; coApplicants?: Row[];
   paymentSummary: { totalDue: number; totalPaid: number; balance: number } | null; stageState: Row | null;
 }>(`/api/crm/bookings/${id}`);
 
@@ -37,7 +37,7 @@ export const getBookingPayments = (id: number) => crmGet<{
 
 /** The booking's journey, step by step (crmBookings.js GET /:id/lifecycle). */
 export const getBookingLifecycle = (id: number) => crmGet<{
-  steps: { key: string; label: string; status: string; date: string | null; blockedBy?: string | null }[];
+  steps: { key: string; label: string; status: string; date: string | null; blockedBy?: string | null; todo?: string | null }[];
   current: string | null; closed: boolean;
 }>(`/api/crm/bookings/${id}/lifecycle`);
 

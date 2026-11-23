@@ -13,10 +13,11 @@ import { fetchWithAuth } from "@/services/fetchWithAuth";
 import { useRoute, type RouteProp } from "@react-navigation/native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { CheckCircle2, Circle, FileText, Lock, PhoneCall, Ticket, Wallet } from "lucide-react-native";
+import { ArrowLeftRight, Banknote, Check, CheckCircle2, ChevronRight, FileText, KeyRound, Landmark, PhoneCall, Smartphone, Ticket, Wallet } from "lucide-react-native";
 import { useAuth } from "@/auth/AuthContext";
 import { crmGet, crmSend, getBooking, getBookingLifecycle, getBookingPayments, type Row } from "@/api/crmApi";
 import { toast } from "@/components/Toast";
+import { formatCompactINR } from "@/utils/formatCurrency";
 import { getTicketsForBooking } from "@/api/serviceTicketApi";
 import type { MainStackParamList } from "@/navigation/MainStack";
 import { colors } from "@/theme/colors";
@@ -29,12 +30,9 @@ import { ApplyOnAccountPrompt, ChangeUnitDialog, GenerateInvoiceDialog, Chips, N
 const CLOSED = ["Cancelled", "UnitChanged", "Rejected"];
 const kb = (n: unknown) => { const b = Number(n) || 0; return b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : b ? `${Math.max(1, Math.round(b / 1024))} KB` : ""; };
 
-const STEP_ICON = { done: CheckCircle2, active: Circle, locked: Lock } as const;
-const STEP_TONE: Record<string, string> = { done: "#10b981", active: CRM, locked: colors.mutedForeground };
 
-const BOOKING_TABS = [
-  { key: "overview", label: "Overview" }, { key: "payments", label: "Payments" }, { key: "papers", label: "Papers" }, { key: "after", label: "After-sales" },
-] as const;
+const APPROVAL_PATH = ["Review", "MarketingHeadApproval", "DirectorApproval"] as const;
+const initials = (n?: string | null) => (n || "?").trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
 
 export default function BookingDetailScreen() {
   const { params } = useRoute<RouteProp<MainStackParamList, "CrmBooking">>();
@@ -212,12 +210,141 @@ export default function BookingDetailScreen() {
   // The milestone showing its keys: the one tapped, else the next one due (-1 = none open).
   const [openMs, setOpenMs] = useState<number | null>(null);
   const shownMs = openMs ?? nextOpenId;
-  const [tab, setTab] = useState<(typeof BOOKING_TABS)[number]["key"]>("overview");
   const receipts = receiptsQ.data ?? [];
   const invoices = invoicesQ.data ?? [];
   const docs = docsQ.data ?? [];
   const tickets = ticketsQ.data ?? [];
 
+
+  // The Data Review items, and the facts each one asks the verifier to check (from the booking, buyer and papers on file).
+  const checkItems = checklistQ.data?.items ?? [];
+  const checkedN = checkItems.filter((x) => x.CheckStatus === "Checked").length;
+  const coApps: Row[] = bookingQ.data?.coApplicants ?? [];
+  const reviewFacts = (key: string): [string, string | null][] => {
+    const c = customer;
+    switch (key) {
+      case "ApplicantKyc": return [["Name", c?.CustomerName ?? head.ApplicantName ?? null], ["Mobile", c?.Mobile ?? null], ["Email", c?.Email ?? null], ["PAN", c?.PanNo ?? null],
+        ["Address", joinDot(c?.Address, c?.City, c?.State, c?.Pincode) || null], ["Co-applicants", coApps.length ? coApps.map((x) => x.Name).join(", ") : "None"]];
+      case "ProjectUnitRate": return [["Project", head.ProjectName ?? null], ["Unit", joinDot([b?.BlockName, b?.UnitNo].filter(Boolean).join(" / "), b?.FloorName, b?.UnitType) || null],
+        ["Area", b?.AreaSqFt ? `${b.AreaSqFt} sq ft` : null], ["Rate", b?.RatePerSqFt ? `${money(b.RatePerSqFt)}/sq ft${b.ListRatePerSqFt && Number(b.ListRatePerSqFt) !== Number(b.RatePerSqFt) ? ` (list ${money(b.ListRatePerSqFt)})` : ""}` : null],
+        ["Unit value", money(b?.TotalValue)], ["Price (incl. GST)", money(price)]];
+      case "PaymentPlanAmounts": return [["Plan", b?.PaymentPlanName ?? (b?.IsPlotSale ? "Booking, then balance" : null)], ["Booking amount", money(b?.BookingAmount)], ["Milestones", String(milestones.length)]];
+      case "BankDepositMode": return [["Payment mode", b?.PaymentMode ?? null], ["Bank/KYC on file", b?.BankDetailsComplete ? "Complete" : null]];
+      case "SourceAssignment": return [["Salesperson", b?.AssigneeName ?? null], ["Came from", b?.LeadId ? "A converted lead" : "Direct"]];
+      case "Documents": return [["Papers on file", docs.length ? `${docs.length}: ${docs.map((d) => d.Label || d.DocumentType || d.FileName).slice(0, 4).join(", ")}${docs.length > 4 ? "…" : ""}` : null]];
+      default: return [];
+    }
+  };
+  // ── The page's parts ──
+  const steps = lifeQ.data?.steps ?? [];
+  const stepIndex = Math.max(0, steps.findIndex((s) => s.status === "active"));
+  const nextStep = steps.find((s) => s.status === "active") ?? null;
+  const doneCount = steps.filter((s) => s.status === "done").length;
+  const nextKeys = [
+    nextStep?.key === "welcome_call" && canCall && { label: "Log welcome call", go: () => nav.navigate("CrmWelcomeCall", { bookingId: id, title }) },
+    nextStep?.key === "welcome_call" && canAccessPage("crm-welcome-calls") && { label: "Checklist", go: () => nav.navigate("CrmWelcomeChecklist", { bookingId: id, title }) },
+    nextStep?.key === "handover" && ["crm-pre-possession", "crm-possession-notice", "crm-handover"].some((pg) => canAccessPage(pg)) && { label: "Possession & Handover", go: () => nav.navigate("CrmPossession", { bookingId: id, title }) },
+  ].filter((k): k is { label: string; go: () => void } => !!k);
+  const quick = [
+    canPay && nextOpenId != null && { key: "pay", label: "Payment", icon: Banknote, go: () => nav.navigate("CrmPayment", { bookingId: id, milestoneId: nextOpenId, title }) },
+    canDeposit && { key: "deposit", label: "On account", icon: Wallet, go: () => nav.navigate("CrmPayment", { bookingId: id, title }) },
+    canInvoice && { key: "invoice", label: "Invoice", icon: FileText, go: () => setGenInvoice(true) },
+    canTicket && { key: "ticket", label: "Ticket", icon: Ticket, go: () => nav.navigate("CrmTicketNew", { bookingId: id, title }) },
+  ].filter((a): a is { key: string; label: string; icon: typeof Ticket; go: () => void } => !!a);
+  const pct = (n: unknown) => `${price ? Math.min(100, (Number(n) || 0) / price * 100) : 0}%` as `${number}%`;
+  const demanded = milestones.filter((m) => m.DemandStatus && m.DemandStatus !== "Pending").reduce((t, m) => t + (Number(m.AmountDue) || 0), 0);
+  const paidCount = milestones.filter((m) => m.Status === "Paid").length;
+  // The schedule shows what is done, the next one due and two after it; the rest fold into "+ n more" until asked for.
+  const [allMs, setAllMs] = useState(false);
+  const nextIdx = Math.max(0, milestones.findIndex((m) => m.Id === nextOpenId));
+  const shownList = allMs ? milestones : milestones.filter((m, i) => i <= nextIdx + 2 || shownMs === m.Id);
+  const hiddenCount = milestones.length - shownList.length;
+  const hiddenTotal = milestones.filter((m) => !shownList.includes(m)).reduce((t, m) => t + (Number(m.AmountDue) || 0), 0);
+  const [afterOpen, setAfterOpen] = useState<string | null>(null);
+  const call = bookingQ.data?.welcomeCalls?.[0];
+  const openTickets = tickets.filter((t) => !["Closed", "Resolved"].includes(t.Status)).length;
+  const afterRows: { key: string; label: string; icon: typeof Ticket; badge?: string; tone?: string; go?: () => void; body?: React.ReactNode }[] = [
+    bookingQ.data && { key: "welcome", label: "Welcome call and agreement", icon: PhoneCall, badge: call ? words(call.Outcome) : "Not done", tone: call?.Outcome === "Welcomed" ? "#10b981" : undefined,
+      body: <>
+              {bookingQ.data.welcomeCalls?.[0] ? (
+                <Kv label="Welcome call" value={joinDot(bookingQ.data.welcomeCalls[0].Outcome, fmtDate(bookingQ.data.welcomeCalls[0].CallDate))} />
+              ) : <Kv label="Welcome call" value="Not done yet" />}
+              {canAccessPage("crm-welcome-calls") ? (
+                <LinkRow icon={CheckCircle2} title="Welcome checklist" sub="Verify each fact confirmed on the call, then submit"
+                  onPress={() => nav.navigate("CrmWelcomeChecklist", { bookingId: id, title })} />
+              ) : null}
+              {bookingQ.data.agreement ? (
+                <>
+                  <Kv label="Agreement" value={joinDot(bookingQ.data.agreement.AgreementNo, bookingQ.data.agreement.Status)} />
+                  <Kv label="Agreement date" value={fmtDate(bookingQ.data.agreement.AgreementDate)} />
+                </>
+              ) : <Kv label="Agreement" value="Not drafted yet" />}
+      </> },
+    seesLoan && loanQ.data && { key: "loan", label: "Home loan", icon: Landmark, badge: !loan?.SanctionStatus || loan.SanctionStatus === "NotApplied" ? "Not applied" : loan.SanctionStatus,
+      tone: loan?.SanctionStatus === "Sanctioned" || loan?.SanctionStatus === "Disbursed" ? "#10b981" : loan?.SanctionStatus === "Applied" ? "#f59e0b" : undefined,
+      body: <>
+              <Kv label="Status" value={!loan?.SanctionStatus || loan.SanctionStatus === "NotApplied" ? "Not applied" : loan.SanctionStatus} />
+              {loan?.BankName ? <Kv label="Bank" value={joinDot(loan.BankName, loan.BranchName)} /> : null}
+              {Number(loan?.LoanAmount) > 0 ? <Kv label="Loan amount" value={money(loan?.LoanAmount)} /> : null}
+              {loan?.SanctionDate ? <Kv label="Sanction date" value={fmtDate(loan.SanctionDate)} /> : null}
+              {Number(loan?.DisbursedAmount) > 0 ? <Kv label="Disbursed (home-loan receipts)" value={money(loan?.DisbursedAmount)} /> : null}
+              {live && canDoAction("crm-loan-details", "edit") ? (
+                <View style={{ flexDirection: "row", marginTop: 8 }}><ActionKey outline label={loan?.LoanId != null ? "Edit loan" : "Record loan"} onPress={openLoan} /></View>
+              ) : null}
+      </> },
+    ["crm-pre-possession", "crm-possession-notice", "crm-handover"].some((pg) => canAccessPage(pg)) && status === "Approved" &&
+      { key: "possession", label: "Possession and handover", icon: KeyRound, go: () => nav.navigate("CrmPossession", { bookingId: id, title }) },
+    seesTickets && { key: "tickets", label: "Service tickets", icon: Ticket, badge: `${openTickets} open`, tone: openTickets ? "#f59e0b" : undefined,
+      body: <>
+              {tickets.length === 0 ? <Empty text="No service tickets." /> : tickets.map((t) => (
+                <LinkRow key={t.Id} title={t.Subject || t.TicketNo} sub={joinDot(t.TicketNo, t.Category, fmtDate(t.CreatedAt), t.AssigneeName)}
+                  right={<Pill label={t.Status} />} onPress={() => open({ to: "ticket", ticketId: t.Id })} />
+              ))}
+      </> },
+    portal && { key: "home", label: "Civilier Home", icon: Smartphone, badge: portal.hasPortal ? (portal.isActive ? "Active" : "Deactivated") : "Not set up",
+      tone: portal.hasPortal && portal.isActive ? "#10b981" : undefined,
+      body: <>
+              {portal.hasPortal ? (
+                <>
+                  <Kv label="Access" value={portal.isActive ? "Access Active" : "Access Deactivated"} />
+                  <Kv label="Mobile login" value={portal.loginMobile || "No 10-digit mobile on file"} />
+                  <Kv label="Password" value={portal.mustChangePassword ? "First password" : "Own password"} />
+                  <Kv label="Last sign-in" value={portal.lastLoginAt ? fmtDate(portal.lastLoginAt) : "Never"} />
+                  {portal.firstPassword ? <Kv label="First password" value={`${portal.firstPassword} (${portal.passwordRule})`} /> : null}
+                  {canEditBooking ? (
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
+                      <ActionKey half outline tone={portal.isActive ? colors.destructive : undefined}
+                        label={busyPortal && !confirmReset ? "Updating\u2026" : portal.isActive ? "Deactivate Access" : "Reactivate Access"}
+                        onPress={() => portalAction(() => crmSend(`/api/crm/bookings/${id}/portal/${portal.isActive ? "deactivate" : "reactivate"}`, "PUT"),
+                          () => (portal.isActive ? "Portal access deactivated" : "Portal access reactivated"))} />
+                      {portal.isActive ? (
+                        <ActionKey half outline tone={confirmReset ? colors.destructive : undefined}
+                          label={confirmReset ? (busyPortal ? "Resetting\u2026" : "Confirm reset") : "Reset password"}
+                          onPress={() => confirmReset
+                            ? portalAction(() => crmSend("/api/crm-portal/admin/reset-password", "POST", { customerId: portal.customerId }), (r) => r?.message || "Password reset")
+                            : setConfirmReset(true)} />
+                      ) : null}
+                    </View>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <Text style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>
+                    {portal.workflowStage !== "Confirmed"
+                      ? "Civilier Home access is set up automatically once this booking reaches Confirmed status."
+                      : "This booking is Confirmed but has no Civilier Home account yet. Set it up below."}
+                  </Text>
+                  {canEditBooking && portal.workflowStage === "Confirmed" ? (
+                    <View style={{ flexDirection: "row", marginTop: 10 }}>
+                      <ActionKey label={busyPortal ? "Setting up\u2026" : "Set up Civilier Home"}
+                        onPress={() => portalAction(() => crmSend(`/api/crm/bookings/${id}/provision-portal`, "POST"), () => "Civilier Home access created")} />
+                    </View>
+                  ) : null}
+                </>
+              )}
+      </> },
+    canEditBooking && b && !b.IsPlotSale && { key: "unit", label: "Change unit", icon: ArrowLeftRight, go: () => setChangeUnit(true) },
+  ].filter(Boolean) as never;
   if (!seesBooking && !seesMoney) {
     return <View style={{ flex: 1, backgroundColor: colors.background, padding: 16 }}><Empty text="You don't have a right on Bookings or Payment Milestones." /></View>;
   }
@@ -234,255 +361,301 @@ export default function BookingDetailScreen() {
         <Text style={{ color: colors.destructive, fontSize: 12, fontFamily: fonts.body.regular }}>{error.message}</Text>
       ) : (
         <>
-          {/* Who, what, and the money — the booking number is the header's, so it isn't repeated here */}
+          {/* 1. Who and the money at a glance */}
           <View style={{ marginBottom: 12 }}>
-            <HeroSurface padding={20}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                {status ? (
-                  <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: ON_HERO.glass }}>
-                    <Text style={{ fontSize: 12, fontFamily: fonts.heading.semibold, color: ON_HERO.primary }}>{words(status)}</Text>
-                  </View>
-                ) : null}
-                {overdue > 0 ? (
-                  <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: "rgba(248,113,113,0.24)" }}>
-                    <Text style={{ fontSize: 12, fontFamily: fonts.heading.semibold, color: "#FECACA" }}>{overdue} overdue</Text>
-                  </View>
-                ) : null}
+            <HeroSurface padding={18}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+                <View style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: ON_HERO.glass, alignItems: "center", justifyContent: "center" }}>
+                  <Text style={{ fontSize: 16, fontFamily: fonts.heading.semibold, color: ON_HERO.primary }}>{initials(customer?.CustomerName || head.ApplicantName)}</Text>
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text numberOfLines={1} style={{ fontSize: 18, fontFamily: fonts.heading.semibold, color: ON_HERO.primary }}>{customer?.CustomerName || head.ApplicantName || "—"}</Text>
+                  <Text numberOfLines={2} style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: ON_HERO.secondary, marginTop: 2 }}>
+                    {joinDot([head.BlockName, head.UnitNo].filter(Boolean).join(" / "), head.UnitType, head.ProjectName)}
+                  </Text>
+                </View>
               </View>
-              <Text numberOfLines={1} style={{ fontSize: 22, fontFamily: fonts.heading.semibold, color: ON_HERO.primary, letterSpacing: -0.3, marginTop: 14 }}>
-                {customer?.CustomerName || head.ApplicantName || "—"}
-              </Text>
-              <Text style={{ fontSize: 13, lineHeight: 18, fontFamily: fonts.body.regular, color: ON_HERO.secondary, marginTop: 3 }}>
-                {joinDot(head.ProjectName, [head.BlockName, head.FloorName, head.UnitNo].filter(Boolean).join(" / "), head.UnitType, head.BookingDate && `Booked ${fmtDate(head.BookingDate)}`)}
-              </Text>
-              {sum ? (
-                <View style={{ marginTop: 18, gap: 8 }}>
-                  <Text style={{ fontSize: 12.5, fontFamily: fonts.body.medium, color: ON_HERO.secondary }}>Balance</Text>
-                  <Text style={{ fontSize: 30, fontFamily: fonts.heading.semibold, color: ON_HERO.primary, letterSpacing: -0.6, marginTop: -4 }}>{money(sum.balance)}</Text>
-                  <View style={{ height: 6, borderRadius: 3, backgroundColor: ON_HERO.glass, overflow: "hidden" }}>
-                    <View style={{ height: 6, borderRadius: 3, width: `${price ? Math.min(100, (Number(sum.totalPaid) / price) * 100) : 0}%`, backgroundColor: "#34D399" }} />
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 12 }}>
+                {[status && words(status), head.BookingDate && `Booked ${fmtDate(head.BookingDate)}`, customer?.InvoiceMode && (customer.InvoiceMode === "NonInvoice" ? "Non-invoice customer" : "Invoice customer"),
+                  overdue > 0 ? `${overdue} overdue` : "No overdue"].filter(Boolean).map((t) => (
+                  <View key={String(t)} style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: String(t).includes(" overdue") && overdue > 0 ? "rgba(248,113,113,0.28)" : ON_HERO.glass }}>
+                    <Text style={{ fontSize: 11.5, fontFamily: fonts.heading.semibold, color: ON_HERO.primary }}>{t}</Text>
                   </View>
-                  <Text style={{ fontSize: 12.5, fontFamily: fonts.body.medium, color: ON_HERO.secondary }}>Paid {money(sum.totalPaid)} of {money(price)}</Text>
+                ))}
+              </View>
+              {sum ? (
+                <View style={{ flexDirection: "row", gap: 8, marginTop: 14 }}>
+                  {[
+                    { label: "Price", value: `₹${formatCompactINR(price)}` },
+                    { label: "Collected", value: `₹${formatCompactINR(sum.totalPaid)}`, sub: `${price ? Math.round((Number(sum.totalPaid) / price) * 100) : 0}%` },
+                    { label: "Balance", value: `₹${formatCompactINR(moneyInfo?.toCollect ?? sum.balance)}`, strong: true },
+                  ].map((f) => (
+                    <View key={f.label} style={{ flex: 1, borderRadius: 12, padding: 10, backgroundColor: f.strong ? "rgba(255,255,255,0.18)" : ON_HERO.glass }}>
+                      <Text style={{ fontSize: 11, fontFamily: fonts.body.medium, color: ON_HERO.secondary }}>{f.label}</Text>
+                      <Text numberOfLines={1} adjustsFontSizeToFit style={{ fontSize: 15, fontFamily: fonts.heading.semibold, color: ON_HERO.primary, marginTop: 2 }}>{f.value}</Text>
+                      {f.sub ? <Text style={{ fontSize: 11, fontFamily: fonts.body.regular, color: ON_HERO.secondary }}>{f.sub}</Text> : null}
+                    </View>
+                  ))}
                 </View>
               ) : null}
-              <View style={{ marginTop: 16 }}><ContactKeys mobile={customer?.Mobile || head.Mobile} /></View>
+              <View style={{ marginTop: 14 }}><ContactKeys mobile={customer?.Mobile || head.Mobile} /></View>
             </HeroSurface>
           </View>
 
-          {canCall || canDeposit || canTicket ? (
-            <View style={{ flexDirection: "row", gap: 10, marginBottom: 12 }}>
-              {[
-                canCall && { key: "call", label: "Log welcome call", icon: PhoneCall, go: () => nav.navigate("CrmWelcomeCall", { bookingId: id, title }) },
-                canDeposit && { key: "deposit", label: "Deposit on account", icon: Wallet, go: () => nav.navigate("CrmPayment", { bookingId: id, title }) },
-                canTicket && { key: "ticket", label: "Raise ticket", icon: Ticket, go: () => nav.navigate("CrmTicketNew", { bookingId: id, title }) },
-              ].filter((a): a is { key: string; label: string; icon: typeof Ticket; go: () => void } => !!a).map((a) => (
-                <Tap key={a.key} onPress={a.go} accessibilityRole="button" accessibilityLabel={a.label}
-                  style={({ pressed }) => ({ ...card, flex: 1, alignItems: "center", gap: 8, paddingVertical: 14, paddingHorizontal: 6, opacity: pressed ? 0.75 : 1 })}>
-                  <View style={{ width: 40, height: 40, borderRadius: 13, backgroundColor: `${CRM}24`, alignItems: "center", justifyContent: "center" }}>
-                    <a.icon size={19} color={CRM} />
+          {/* 2. Where it stands: the journey's current step, in the server's own words, with its key */}
+          {nextStep && live && !inApproval ? (
+            <View style={{ ...card, padding: 14, marginBottom: 12, borderColor: `${CRM}66`, backgroundColor: `${CRM}14` }}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                <Text style={{ fontSize: 11.5, fontFamily: fonts.heading.semibold, color: CRM }}>Next step</Text>
+                <Text style={{ fontSize: 11.5, fontFamily: fonts.body.medium, color: CRM }}>{`Step ${stepIndex + 1} of ${steps.length}`}</Text>
+              </View>
+              <Text style={{ fontSize: 16.5, fontFamily: fonts.heading.semibold, color: colors.foreground, marginTop: 3 }}>{nextStep.label}</Text>
+              {nextStep.todo || nextStep.blockedBy ? (
+                <Text style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 3 }}>{nextStep.todo || nextStep.blockedBy}</Text>
+              ) : null}
+              {nextKeys.length ? (
+                <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
+                  {nextKeys.map((k, i) => <ActionKey key={k.label} label={k.label} outline={i > 0} onPress={k.go} />)}
+                </View>
+              ) : null}
+            </View>
+          ) : null}
+
+          {/* Booking approval: the path (Data review → Marketing Head → Director), and at Data review each item with the
+              facts it asks to check, so the verifier compares them with the papers right here. */}
+          {inApproval && live ? (
+            <View style={{ ...card, padding: 14, marginBottom: 12 }}>
+              <Text style={{ fontSize: 15, fontFamily: fonts.heading.semibold, color: colors.foreground }}>Booking approval</Text>
+              <View style={{ flexDirection: "row", alignItems: "center", marginTop: 12, marginBottom: 4 }}>
+                {APPROVAL_PATH.map((st, i) => {
+                  const at = APPROVAL_PATH.indexOf(stage as (typeof APPROVAL_PATH)[number]);
+                  const done = i < at;
+                  const now = i === at;
+                  return (
+                    <View key={st} style={{ flex: 1, alignItems: "center" }}>
+                      <View style={{ flexDirection: "row", alignItems: "center", width: "100%" }}>
+                        <View style={{ flex: 1, height: 2, backgroundColor: i === 0 ? "transparent" : done || now ? CRM : colors.border }} />
+                        <View style={{ width: 24, height: 24, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: done ? CRM : now ? `${CRM}26` : colors.background, borderWidth: now ? 1.5 : 0, borderColor: CRM }}>
+                          {done ? <Check size={13} color="#fff" /> : <Text style={{ fontSize: 11.5, fontFamily: fonts.heading.semibold, color: now ? CRM : colors.mutedForeground }}>{i + 1}</Text>}
+                        </View>
+                        <View style={{ flex: 1, height: 2, backgroundColor: i === APPROVAL_PATH.length - 1 ? "transparent" : done ? CRM : colors.border }} />
+                      </View>
+                      <Text style={{ fontSize: 11.5, fontFamily: now ? fonts.heading.semibold : fonts.body.medium, color: now ? colors.foreground : colors.mutedForeground, marginTop: 5, textAlign: "center" }}>{st === "Review" ? "Data review" : words(st).replace(/ Approval$/, "")}</Text>
+                    </View>
+                  );
+                })}
+              </View>
+              {stageState?.StageRemarks && stageState?.RejectedFromStage ? (
+                <View style={{ marginTop: 10, padding: 10, borderRadius: 10, backgroundColor: `${colors.destructive}14` }}>
+                  <Text style={{ fontSize: 12, fontFamily: fonts.heading.semibold, color: colors.destructive }}>{`Sent back by the ${words(stageState.RejectedFromStage).replace(/ Approval$/, "")}`}</Text>
+                  <Text style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: colors.foreground, marginTop: 2 }}>{stageState.StageRemarks}</Text>
+                </View>
+              ) : null}
+
+              {stage === "Review" ? (
+                <>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 14 }}>
+                    <Text style={{ fontSize: 12.5, fontFamily: fonts.body.medium, color: colors.mutedForeground }}>Check each item against the papers</Text>
+                    <Text style={{ fontSize: 12.5, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{`${checkedN} of ${checkItems.length} verified`}</Text>
                   </View>
-                  <Text numberOfLines={2} style={{ fontSize: 12.5, lineHeight: 16, textAlign: "center", fontFamily: fonts.heading.semibold, color: colors.foreground }}>{a.label}</Text>
+                  <View style={{ height: 6, borderRadius: 3, backgroundColor: colors.border, overflow: "hidden", marginTop: 6, marginBottom: 6 }}>
+                    <View style={{ width: `${checkItems.length ? (checkedN / checkItems.length) * 100 : 0}%`, height: 6, backgroundColor: "#10b981" }} />
+                  </View>
+                  {checkItems.map((it, n) => {
+                    const st = it.CheckStatus;
+                    const ok = st === "Checked";
+                    const flagged = st === "NeedsRecheck";
+                    const facts = reviewFacts(it.ItemKey);
+                    return (
+                      <View key={it.ItemKey} style={{ marginTop: 10, borderRadius: 12, borderWidth: 1, borderColor: flagged ? `${colors.destructive}66` : ok ? "#10b98155" : colors.border, padding: 12,
+                        backgroundColor: flagged ? `${colors.destructive}0d` : ok ? "#10b9810d" : "transparent" }}>
+                        <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
+                          <View style={{ width: 22, height: 22, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: ok ? "#10b981" : flagged ? colors.destructive : colors.background, marginTop: 1 }}>
+                            {ok ? <Check size={13} color="#fff" /> : <Text style={{ fontSize: 11, fontFamily: fonts.heading.semibold, color: flagged ? "#fff" : colors.mutedForeground }}>{flagged ? "!" : n + 1}</Text>}
+                          </View>
+                          <Text style={{ flex: 1, fontSize: 13.5, lineHeight: 19, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{it.ItemLabel}</Text>
+                        </View>
+                        {facts.length ? (
+                          <View style={{ marginTop: 8, marginLeft: 32, padding: 10, borderRadius: 10, backgroundColor: colors.background, gap: 4 }}>
+                            {facts.map(([k, v]) => (
+                              <View key={k} style={{ flexDirection: "row", gap: 10 }}>
+                                <Text style={{ width: 92, fontSize: 12, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>{k}</Text>
+                                <Text style={{ flex: 1, fontSize: 12.5, fontFamily: fonts.body.medium, color: v ? colors.foreground : colors.destructive }}>{v || "Not on file"}</Text>
+                              </View>
+                            ))}
+                          </View>
+                        ) : null}
+                        {it.Remarks ? <Text style={{ marginTop: 8, marginLeft: 32, fontSize: 12, fontFamily: fonts.body.regular, color: flagged ? colors.destructive : colors.mutedForeground }}>{flagged ? "Flagged: " : "Remark: "}{it.Remarks}</Text> : null}
+                        {canVerify && !flagged ? (
+                          <View style={{ flexDirection: "row", alignItems: "center", gap: 14, marginTop: 10, marginLeft: 32 }}>
+                            <View style={{ flex: 1, flexDirection: "row" }}>
+                              <ActionKey label={busyStage === it.ItemKey ? "Saving\u2026" : ok ? "Untick" : "Verify"} outline={ok} onPress={() => checkItem(it, ok ? "uncheck" : "check")} />
+                            </View>
+                            {!ok ? (
+                              <Tap onPress={() => setFlagItem(it)} accessibilityRole="button" style={{ paddingVertical: 6 }}>
+                                <Text style={{ fontSize: 12.5, fontFamily: fonts.heading.semibold, color: colors.destructive, textDecorationLine: "underline" }}>Flag for Recheck</Text>
+                              </Tap>
+                            ) : null}
+                          </View>
+                        ) : null}
+                        {canEditBooking && flagged ? (
+                          <View style={{ flexDirection: "row", marginTop: 10, marginLeft: 32 }}>
+                            <ActionKey label={busyStage === it.ItemKey ? "Sending\u2026" : "I\u2019ve revised this \u2014 resend for recheck"} outline onPress={() => checkItem(it, "resubmit")} />
+                          </View>
+                        ) : null}
+                      </View>
+                    );
+                  })}
+                  {canVerify ? (
+                    <View style={{ flexDirection: "row", marginTop: 14 }}>
+                      <ActionKey label={busyStage === "verify" ? "Submitting\u2026" : "Verify & Send for Approval"} outline={checkedN < checkItems.length}
+                        onPress={() => stageAction("verify", () => crmSend(`/api/crm/bookings/${id}/ready-for-approval`, "PUT"), (r) => `Data review complete — sent to ${r?.label || "Marketing Head Approval"}`)} />
+                    </View>
+                  ) : canEditBooking ? (
+                    <Text style={{ marginTop: 12, fontSize: 12.5, fontFamily: fonts.body.medium, color: colors.mutedForeground }}>Waiting for data verification</Text>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <Text style={{ marginTop: 12, fontSize: 12.5, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>
+                    {canActOnStage ? `Data review is complete. Approve, or send it back with what needs correcting.` : `Waiting for the ${words(stage).replace(/ Approval$/, "")}`}
+                  </Text>
+                  {canActOnStage && sendBackChoices.length > 1 ? (
+                    <Chips label="If sent back, it goes" options={sendBackChoices} value={sendBackTo ?? sendBackChoices[0]} onChange={setSendBackTo}
+                      labelOf={(c) => (c === "Review" ? "To Data Review" : `To the ${words(c).replace(/ Approval$/, "")}`)} />
+                  ) : null}
+                  {canActOnStage ? (
+                    <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>
+                      <ActionKey label="Reject" outline tone={colors.destructive} onPress={() => { if (!sendBackTo) setSendBackTo(sendBackChoices[0] ?? null); setSendBack(true); }} />
+                      <ActionKey label={busyStage === "approve" ? "Approving\u2026" : stage === "DirectorApproval" ? "Final Approve" : "Approve"}
+                        onPress={() => stageAction("approve", () => crmSend(`/api/crm/bookings/${id}/approve`, "PUT"), (r) => r?.confirmed ? "Booking confirmed" : `Approved - moved to ${r?.label || "next stage"}`)} />
+                    </View>
+                  ) : null}
+                </>
+              )}
+            </View>
+          ) : null}
+
+          {/* 3. Quick actions */}
+          {quick.length ? (
+            <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
+              {quick.map((a) => (
+                <Tap key={a.key} onPress={a.go} accessibilityRole="button" accessibilityLabel={a.label} style={({ pressed }) => ({ flex: 1, alignItems: "center", gap: 5, opacity: pressed ? 0.7 : 1 })}>
+                  <View style={{ ...card, width: "100%", height: 48, alignItems: "center", justifyContent: "center", padding: 0 }}>
+                    <a.icon size={20} color={CRM} />
+                  </View>
+                  <Text numberOfLines={1} style={{ fontSize: 11.5, fontFamily: fonts.body.medium, color: colors.foreground }}>{a.label}</Text>
                 </Tap>
               ))}
             </View>
           ) : null}
 
-          {inApproval && live ? (
-            <Section title={`Approval · ${words(stage)}`}>
-              {stage === "Review" ? (checklistQ.data?.items ?? []).map((it) => {
-                const st = it.CheckStatus;
-                const tone = st === "Checked" ? colors.primary : st === "NeedsRecheck" ? colors.destructive : colors.mutedForeground;
-                return (
-                  <View key={it.ItemKey} style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 6 }}>
-                    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                      <Text style={{ flex: 1, fontSize: 13.5, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{it.ItemLabel}</Text>
-                      <Pill label={st === "Checked" ? "Verified" : st === "NeedsRecheck" ? "Flagged \u2014 fix needed" : "To verify"} tone={tone} />
-                    </View>
-                    {it.Remarks ? <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>{st === "NeedsRecheck" ? "Flagged: " : "Remark: "}{it.Remarks}</Text> : null}
-                    {canVerify && st !== "NeedsRecheck" ? (
-                      <View style={{ flexDirection: "row", gap: 8 }}>
-                        <ActionKey label={busyStage === it.ItemKey ? "Saving\u2026" : st === "Checked" ? "Untick" : "Verify"} outline={st === "Checked"}
-                          onPress={() => checkItem(it, st === "Checked" ? "uncheck" : "check")} />
-                        <ActionKey label="Flag for Recheck" outline tone={colors.destructive} onPress={() => setFlagItem(it)} />
-                      </View>
-                    ) : null}
-                    {canEditBooking && st === "NeedsRecheck" ? (
-                      <View style={{ flexDirection: "row" }}>
-                        <ActionKey label={busyStage === it.ItemKey ? "Sending\u2026" : "I\u2019ve revised this \u2014 resend for recheck"} outline onPress={() => checkItem(it, "resubmit")} />
-                      </View>
-                    ) : null}
+          {/* 4. Account, in accounting terms */}
+          {moneyInfo && sum ? (
+            <Section title="Account">
+              <View style={{ flexDirection: "row", height: 10, borderRadius: 5, overflow: "hidden", backgroundColor: colors.border, marginBottom: 6 }}>
+                <View style={{ width: pct(moneyInfo.collected ?? sum.totalPaid), backgroundColor: "#10b981" }} />
+                <View style={{ width: pct(moneyInfo.inVerification), backgroundColor: "#f59e0b" }} />
+              </View>
+              <View style={{ flexDirection: "row", gap: 12, marginBottom: 8 }}>
+                {[["#10b981", "Cleared"], ["#f59e0b", "With Finance"], [colors.border, "To collect"]].map(([c, t]) => (
+                  <View key={t} style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+                    <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: c }} />
+                    <Text style={{ fontSize: 11, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>{t}</Text>
                   </View>
-                );
-              }) : null}
-              {stage === "Review" && canVerify ? (
-                <View style={{ flexDirection: "row", marginTop: 12 }}>
-                  <ActionKey label={busyStage === "verify" ? "Submitting\u2026" : "Verify & Send for Approval"}
-                    onPress={() => stageAction("verify", () => crmSend(`/api/crm/bookings/${id}/ready-for-approval`, "PUT"), (r) => `Data review complete — sent to ${r?.label || "Marketing Head Approval"}`)} />
-                </View>
-              ) : stage === "Review" && canEditBooking ? (
-                <Text style={{ marginTop: 10, fontSize: 12.5, fontFamily: fonts.body.medium, color: colors.mutedForeground }}>Waiting for data verification</Text>
-              ) : null}
-              {stage !== "Review" && canActOnStage ? (
-                <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
-                  <ActionKey label="Reject" outline tone={colors.destructive} onPress={() => { if (!sendBackTo) setSendBackTo(sendBackChoices[0] ?? null); setSendBack(true); }} />
-                  <ActionKey label={busyStage === "approve" ? "Approving\u2026" : stage === "DirectorApproval" ? "Final Approve" : "Approve"}
-                    onPress={() => stageAction("approve", () => crmSend(`/api/crm/bookings/${id}/approve`, "PUT"), (r) => r?.confirmed ? "Booking confirmed" : `Approved - moved to ${r?.label || "next stage"}`)} />
-                </View>
-              ) : null}
-              {stage !== "Review" && canActOnStage && sendBackChoices.length > 1 ? (
-                <Chips label="If sent back, it goes" options={sendBackChoices} value={sendBackTo ?? sendBackChoices[0]} onChange={setSendBackTo}
-                  labelOf={(c) => (c === "Review" ? "To Data Review" : `To the ${words(c).replace(/ Approval$/, "")}`)} />
-              ) : null}
-            </Section>
-          ) : null}
-
-          {/* The booking's parts, one at a time (the web booking page's tabs): what it is, its money, its papers, after-sales. */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 12 }}>
-            {BOOKING_TABS.map((t) => {
-              const on = tab === t.key;
-              return (
-                <Tap key={t.key} onPress={() => setTab(t.key)} accessibilityRole="tab" accessibilityState={{ selected: on }}
-                  style={{ paddingHorizontal: 16, paddingVertical: 9, borderRadius: 999, borderWidth: 1, borderColor: on ? CRM : colors.border, backgroundColor: on ? CRM : colors.card }}>
-                  <Text style={{ fontSize: 13, fontFamily: fonts.heading.semibold, color: on ? "#fff" : colors.foreground }}>{t.label}</Text>
-                </Tap>
-              );
-            })}
-          </ScrollView>
-          {tab === "overview" ? (
-            <>
-          {moneyInfo ? (
-            <Section title="Money">
-              <Kv label="On account (available)" value={money(pb?.OnAccountAvailable)} />
-              <Kv label="With Finance for approval" value={Number(moneyInfo.inVerification) > 0 ? `${money(moneyInfo.inVerification)} (${moneyInfo.inVerificationCount})` : money(0)} />
-              <Kv label="Still to collect" value={money(moneyInfo.toCollect)} strong />
-              {Number(moneyInfo.excess) > 0 ? <Kv label="Paid over the price" value={money(moneyInfo.excess)} tone="#f59e0b" /> : null}
+                ))}
+              </View>
+              <Kv label="Sale value (incl. GST)" value={money(price)} />
+              <Kv label="Demanded so far" value={money(demanded)} />
+              <Kv label="Received and cleared" value={money(sum.totalPaid)} />
+              <Kv label="With Finance for approval" value={Number(moneyInfo.inVerification) > 0 ? `${money(moneyInfo.inVerification)} (${moneyInfo.inVerificationCount})` : money(0)} tone={Number(moneyInfo.inVerification) > 0 ? "#f59e0b" : undefined} />
+              <Kv label="On account, unapplied" value={money(pb?.OnAccountAvailable)} />
               {Number(payQ.data?.summary?.waivedDue) > 0 ? <Kv label={`Waived (${payQ.data?.summary?.waivedCount})`} value={money(payQ.data?.summary?.waivedDue)} /> : null}
+              {Number(moneyInfo.excess) > 0 ? <Kv label="Paid over the price" value={money(moneyInfo.excess)} tone="#f59e0b" /> : null}
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderTopWidth: 1, borderTopColor: colors.border, marginTop: 6, paddingTop: 10 }}>
+                <Text style={{ fontSize: 14, fontFamily: fonts.heading.semibold, color: colors.foreground }}>Balance receivable</Text>
+                <Text style={{ fontSize: 17, fontFamily: fonts.heading.semibold, color: colors.foreground, fontVariant: ["tabular-nums"] }}>{money(moneyInfo.toCollect)}</Text>
+              </View>
             </Section>
           ) : null}
 
-          {/* The journey */}
-          {lifeQ.data?.steps?.length ? (
-            <Section title="Journey">
-              {lifeQ.data.steps.map((s) => {
-                const Icon = STEP_ICON[s.status as keyof typeof STEP_ICON] ?? Circle;
-                const tone = STEP_TONE[s.status] ?? colors.mutedForeground;
-                return (
-                  <View key={s.key} style={{ flexDirection: "row", alignItems: "flex-start", gap: 10, paddingVertical: 7 }}>
-                    <Icon size={15} color={tone} style={{ marginTop: 1 }} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 12.5, fontFamily: s.status === "active" ? fonts.heading.semibold : fonts.body.medium, color: s.status === "locked" ? colors.mutedForeground : colors.foreground }}>{s.label}</Text>
-                      {s.blockedBy ? <Text style={{ fontSize: 10.5, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 1 }}>{s.blockedBy}</Text> : null}
+          {/* 5. Payment schedule: a timeline; the next one due (or the one tapped) shows its keys */}
+          <Section title="Payment schedule" right={<Text style={{ fontSize: 12, fontFamily: fonts.body.medium, color: colors.mutedForeground }}>{`${paidCount} of ${milestones.length} paid`}</Text>}>
+            {milestones.length === 0 ? <Empty text="No milestones." /> : (
+              <View style={{ paddingLeft: 18 }}>
+                <View style={{ position: "absolute", left: 5, top: 10, bottom: 10, width: 1, backgroundColor: colors.border }} />
+                {shownList.map((m) => {
+                  const isOpen = shownMs === m.Id;
+                  const paid = m.Status === "Paid" || m.Status === "Waived";
+                  const dot = paid ? "#10b981" : Number(m.PendingVerificationAmount) > 0 ? "#f59e0b" : m.IsOverdue ? colors.destructive : m.Id === nextOpenId ? CRM : null;
+                  const state = m.Status === "Waived" ? "Waived" : m.Status === "Paid" ? "Paid" : m.IsOverdue ? "Overdue"
+                    : Number(m.PendingVerificationAmount) > 0 ? `${money(m.PendingVerificationAmount)} with Finance`
+                    : m.DemandStatus === "Demanded" ? `Demanded${m.DemandNo ? ` · ${m.DemandNo}` : ""}` : "Demand not raised";
+                  return (
+                    <View key={m.Id} style={{ marginBottom: 6, marginLeft: isOpen ? -8 : 0, padding: isOpen ? 10 : 0, paddingVertical: isOpen ? 10 : 6, borderRadius: 12, backgroundColor: isOpen ? colors.background : "transparent" }}>
+                      <View style={{ position: "absolute", left: isOpen ? -12 : -18 + 0, top: isOpen ? 15 : 11, width: 11, height: 11, borderRadius: 6, backgroundColor: dot ?? colors.card, borderWidth: dot ? 0 : 1, borderColor: colors.mutedForeground }} />
+                      <Tap onPress={() => setOpenMs(isOpen ? -1 : m.Id)} accessibilityRole="button" accessibilityLabel={`${m.MilestoneName}, actions`}>
+                        <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 8 }}>
+                          <Text numberOfLines={1} style={{ flex: 1, fontSize: 13, fontFamily: isOpen || m.Id === nextOpenId ? fonts.heading.semibold : fonts.body.medium, color: paid ? colors.mutedForeground : colors.foreground }}>
+                            {`${m.MilestoneNo}. ${m.MilestoneName}${m.Percent ? ` · ${m.Percent}%` : ""}`}
+                          </Text>
+                          <Text style={{ fontSize: 13, fontFamily: fonts.heading.semibold, color: paid ? colors.mutedForeground : colors.foreground, fontVariant: ["tabular-nums"] }}>{money(m.AmountDue)}</Text>
+                        </View>
+                        <Text style={{ fontSize: 11.5, fontFamily: fonts.body.regular, color: m.IsOverdue && !paid ? colors.destructive : colors.mutedForeground, marginTop: 2 }}>
+                          {joinDot(m.DueDate && `Due ${fmtDate(m.DueDate)}`, state, Number(m.AmountPaid) > 0 && !paid && `${money(m.AmountPaid)} paid`)}
+                        </Text>
+                      </Tap>
+                      {isOpen && canPay && payQ.data && !paid && milestoneMissing(m) > 0 ? (
+                        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
+                          {m.DemandStatus === "Pending" ? (
+                            <ActionKey half label={busyMs === m.Id ? "Raising\u2026" : "Raise demand"}
+                              onPress={() => msAction(m, () => crmSend(`/api/crm/payments/${m.Id}/demand`, "POST", {}), (r) => `Demand ${r?.DemandNo ?? ""} raised`)} />
+                          ) : null}
+                          <ActionKey half label="Record payment" outline={m.DemandStatus === "Pending"} onPress={() => nav.navigate("CrmPayment", { bookingId: id, milestoneId: m.Id, title })} />
+                          {applyTarget?.Id === m.Id && deposits.length > 0 ? <ActionKey half label="Apply on account" outline onPress={() => setApplyTo(m)} /> : null}
+                          {m.DemandStatus === "Demanded" ? (
+                            <ActionKey half label={busyMs === m.Id ? "Undoing\u2026" : "Undo demand"} outline tone={colors.mutedForeground}
+                              onPress={() => msAction(m, () => crmSend(`/api/crm/payments/${m.Id}/demand/undo`, "PATCH"), () => "Demand reverted to Not Raised")} />
+                          ) : null}
+                          <ActionKey half label="Waive" outline tone={colors.mutedForeground} onPress={() => setWaiveFor(m)} />
+                        </View>
+                      ) : null}
                     </View>
-                    {s.date ? <Text style={{ fontSize: 10.5, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>{fmtDate(s.date)}</Text> : null}
-                  </View>
-                );
-              })}
-            </Section>
-          ) : null}
-
-          {/* Buyer */}
-          {customer ? (
-            <Section title="Buyer">
-              <LinkRow
-                title={customer.CustomerNo || customer.CustomerName}
-                sub={joinDot(customer.Mobile, customer.Email)}
-                onPress={canAccessPage("crm-customer-360") ? () => open({ to: "customer", customerId: Number(customer.Id), title: customer.CustomerName }) : undefined}
-              />
-              <Kv label="PAN" value={customer.PanNo} />
-              <Kv label="Address" value={joinDot(customer.Address, customer.City, customer.State, customer.Pincode)} />
-              {customer.CoApplicantName ? <Kv label="Co-applicant" value={joinDot(customer.CoApplicantName, customer.CoApplicantRelation)} /> : null}
-            </Section>
-          ) : null}
-
-          {/* Unit and price */}
-          {b ? (
-            <Section title="Unit & Price">
-              <Kv label="Area" value={b.AreaSqFt ? `${b.AreaSqFt} sq ft` : null} />
-              <Kv label="Carpet area" value={b.CarpetAreaSqFt ? `${b.CarpetAreaSqFt} sq ft` : null} />
-              <Kv label="Rate" value={b.RatePerSqFt ? `${money(b.RatePerSqFt)} / sq ft` : null} />
-              <Kv label="Unit value" value={money(b.TotalValue)} />
-              {pb ? <Kv label="Parking" value={money(pb.ParkingTotal)} /> : null}
-              {pb ? <Kv label="Extra charges" value={money(pb.ExtraChargesTotal)} /> : null}
-              <Kv label="Booking amount" value={money(b.BookingAmount)} />
-            </Section>
-          ) : null}
-
-            </>
-          ) : null}
-          {tab === "payments" ? (
-            <>
-          {/* Milestones */}
-          <Section title={`Payment Milestones (${milestones.length})`}>
-            {canPay && milestones.length ? <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginBottom: 2 }}>Tap a milestone for its actions.</Text> : null}
-            {milestones.length === 0 ? <Empty text="No milestones." /> : milestones.map((m) => {
-              const status = m.IsOverdue ? "Overdue" : m.DemandStatus || m.Status;
-              return (
-                <View key={m.Id} style={{ paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: colors.border }}>
-                  <Tap onPress={() => setOpenMs(shownMs === m.Id ? -1 : m.Id)} accessibilityRole="button" accessibilityLabel={`${m.MilestoneName}, actions`}>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                    <Text numberOfLines={2} style={{ flex: 1, fontSize: 12.5, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{`${m.MilestoneNo}. ${m.MilestoneName}`}</Text>
-                    {status ? <Pill label={status} /> : null}
-                  </View>
-                  <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 4 }}>
-                    <Text style={{ fontSize: 11, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>
-                      {joinDot(m.Percent && `${m.Percent}%`, m.DueDate && `Due ${fmtDate(m.DueDate)}`, m.DemandNo)}
-                    </Text>
-                    <Text style={{ fontSize: 11.5, fontFamily: fonts.body.medium, color: colors.foreground, fontVariant: ["tabular-nums"] }}>
-                      {money(m.AmountPaid)} / {money(m.AmountDue)}
-                    </Text>
-                  </View>
-                  <View style={{ height: 4, borderRadius: 2, backgroundColor: colors.border, overflow: "hidden", marginTop: 8 }}>
-                    <View style={{ width: `${Math.min(100, (Number(m.AmountPaid) / (Number(m.AmountDue) || 1)) * 100)}%`, height: 4, backgroundColor: m.Status === "Paid" ? "#10b981" : CRM }} />
-                  </View>
+                  );
+                })}
+                {hiddenCount > 0 ? (
+                  <Tap onPress={() => setAllMs(true)} accessibilityRole="button" style={{ paddingVertical: 8 }}>
+                    <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                      <Text style={{ fontSize: 12.5, fontFamily: fonts.heading.semibold, color: CRM }}>{`+ ${hiddenCount} more`}</Text>
+                      <Text style={{ fontSize: 12.5, fontFamily: fonts.body.medium, color: colors.mutedForeground }}>{money(hiddenTotal)}</Text>
+                    </View>
                   </Tap>
-                  {Number(m.PendingVerificationAmount) > 0 ? (
-                    <Text style={{ fontSize: 10.5, fontFamily: fonts.body.regular, color: "#f59e0b", marginTop: 2 }}>{money(m.PendingVerificationAmount)} with Finance for approval</Text>
-                  ) : null}
-                  {shownMs === m.Id && canPay && payQ.data && m.Status !== "Waived" && m.Status !== "Paid" && milestoneMissing(m) > 0 ? (
-                    <View style={{ gap: 8, marginTop: 10 }}>
-                      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-                        <Text style={{ fontSize: 12, fontFamily: fonts.body.medium, color: colors.mutedForeground }}>Balance {money(milestoneMissing(m))}</Text>
-                        <Tap onPress={() => setWaiveFor(m)} accessibilityRole="button" style={{ paddingVertical: 4, paddingLeft: 12 }}>
-                          <Text style={{ fontSize: 12.5, fontFamily: fonts.heading.semibold, color: colors.mutedForeground, textDecorationLine: "underline" }}>Waive</Text>
-                        </Tap>
-                      </View>
-                      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                        <ActionKey half label="Pay" outline={m.Id !== nextOpenId} onPress={() => nav.navigate("CrmPayment", { bookingId: id, milestoneId: m.Id, title })} />
-                        {m.DemandStatus === "Pending" ? (
-                          <ActionKey half label={busyMs === m.Id ? "Raising…" : "Raise demand"} outline
-                            onPress={() => msAction(m, () => crmSend(`/api/crm/payments/${m.Id}/demand`, "POST", {}), (r) => `Demand ${r?.DemandNo ?? ""} raised`)} />
-                        ) : m.DemandStatus === "Demanded" ? (
-                          <ActionKey half label={busyMs === m.Id ? "Undoing…" : "Undo demand"} outline tone={colors.mutedForeground}
-                            onPress={() => msAction(m, () => crmSend(`/api/crm/payments/${m.Id}/demand/undo`, "PATCH"), () => "Demand reverted to Not Raised")} />
-                        ) : null}
-                        {applyTarget?.Id === m.Id && deposits.length > 0 ? (
-                          <ActionKey half label="Apply on account" outline onPress={() => setApplyTo(m)} />
-                        ) : null}
-                      </View>
-                    </View>
-                  ) : null}
-                </View>
-              );
-            })}
+                ) : null}
+              </View>
+            )}
           </Section>
 
-          {seesLoan && loanQ.data ? (
-            <Section title="Home Loan">
-              <Kv label="Status" value={!loan?.SanctionStatus || loan.SanctionStatus === "NotApplied" ? "Not applied" : loan.SanctionStatus} />
-              {loan?.BankName ? <Kv label="Bank" value={joinDot(loan.BankName, loan.BranchName)} /> : null}
-              {Number(loan?.LoanAmount) > 0 ? <Kv label="Loan amount" value={money(loan?.LoanAmount)} /> : null}
-              {loan?.SanctionDate ? <Kv label="Sanction date" value={fmtDate(loan.SanctionDate)} /> : null}
-              {Number(loan?.DisbursedAmount) > 0 ? <Kv label="Disbursed (home-loan receipts)" value={money(loan?.DisbursedAmount)} /> : null}
-              {live && canDoAction("crm-loan-details", "edit") ? (
-                <View style={{ flexDirection: "row", marginTop: 8 }}><ActionKey outline label={loan?.LoanId != null ? "Edit loan" : "Record loan"} onPress={openLoan} /></View>
-              ) : null}
+          {/* 6. Journey: steps as chips — done, now, then the rest */}
+          {steps.length ? (
+            <Section title="Journey" right={<Text style={{ fontSize: 12, fontFamily: fonts.body.medium, color: colors.mutedForeground }}>{`${doneCount} of ${steps.length} done`}</Text>}>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                {steps.map((s) => {
+                  const done = s.status === "done";
+                  const now = s.status === "active";
+                  return (
+                    <View key={s.key} style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999,
+                      backgroundColor: done ? "#10b98122" : now ? `${CRM}22` : colors.background, borderWidth: now ? 1 : 0, borderColor: CRM }}>
+                      {done ? <Check size={12} color="#10b981" /> : null}
+                      <Text style={{ fontSize: 12, fontFamily: now ? fonts.heading.semibold : fonts.body.medium, color: done ? "#10b981" : now ? CRM : colors.mutedForeground }}>{s.label}</Text>
+                      {done && s.date ? <Text style={{ fontSize: 11, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>{s.date}</Text> : null}
+                    </View>
+                  );
+                })}
+              </View>
             </Section>
           ) : null}
-            </>
-          ) : null}
-          {tab === "papers" ? (
-            <>
-          {/* Papers */}
+
+          {/* 7. Papers */}
           {seesReceipts || seesInvoices || seesBooking ? (
             <Section title="Papers">
               {seesReceipts ? receipts.map((r) => (
@@ -537,96 +710,43 @@ export default function BookingDetailScreen() {
             </Section>
           ) : null}
 
-            </>
-          ) : null}
-          {tab === "after" ? (
-            <>
-          {/* Welcome call and agreement */}
-          {bookingQ.data ? (
-            <Section title="Welcome Call & Agreement">
-              {bookingQ.data.welcomeCalls?.[0] ? (
-                <Kv label="Welcome call" value={joinDot(bookingQ.data.welcomeCalls[0].Outcome, fmtDate(bookingQ.data.welcomeCalls[0].CallDate))} />
-              ) : <Kv label="Welcome call" value="Not done yet" />}
-              {canAccessPage("crm-welcome-calls") ? (
-                <LinkRow icon={CheckCircle2} title="Welcome checklist" sub="Verify each fact confirmed on the call, then submit"
-                  onPress={() => nav.navigate("CrmWelcomeChecklist", { bookingId: id, title })} />
+          {/* 8. Buyer and unit */}
+          {customer || b ? (
+            <Section title="Buyer and unit">
+              {customer ? (
+                <LinkRow title={customer.CustomerName || customer.CustomerNo} sub={joinDot(customer.CustomerNo, customer.Mobile, customer.Email)}
+                  onPress={canAccessPage("crm-customer-360") ? () => open({ to: "customer", customerId: Number(customer.Id), title: customer.CustomerName }) : undefined} />
               ) : null}
-              {bookingQ.data.agreement ? (
-                <>
-                  <Kv label="Agreement" value={joinDot(bookingQ.data.agreement.AgreementNo, bookingQ.data.agreement.Status)} />
-                  <Kv label="Agreement date" value={fmtDate(bookingQ.data.agreement.AgreementDate)} />
-                </>
-              ) : <Kv label="Agreement" value="Not drafted yet" />}
+              {customer?.PanNo ? <Kv label="PAN" value={customer.PanNo} /> : null}
+              {customer ? <Kv label="Address" value={joinDot(customer.Address, customer.City, customer.State, customer.Pincode)} /> : null}
+              {customer ? <Kv label="Co-applicant" value={customer.CoApplicantName ? joinDot(customer.CoApplicantName, customer.CoApplicantRelation) : "None"} /> : null}
+              {b ? <Kv label="Area · rate" value={joinDot(b.AreaSqFt && `${b.AreaSqFt} sq ft`, b.RatePerSqFt && `${money(b.RatePerSqFt)}/sq ft`)} /> : null}
+              {b?.CarpetAreaSqFt ? <Kv label="Carpet area" value={`${b.CarpetAreaSqFt} sq ft`} /> : null}
+              {b ? <Kv label="Unit value" value={money(b.TotalValue)} /> : null}
+              {pb ? <Kv label="Parking · extras" value={`${money(pb.ParkingTotal)} · ${money(pb.ExtraChargesTotal)}`} /> : null}
+              {b ? <Kv label="Booking amount" value={money(b.BookingAmount)} /> : null}
             </Section>
           ) : null}
-          {["crm-pre-possession", "crm-possession-notice", "crm-handover"].some((pg) => canAccessPage(pg)) && status === "Approved" ? (
-            <Section title="Possession">
-              <LinkRow icon={FileText} title="Possession & Handover" sub="Checklist, notice, handover and snags" onPress={() => nav.navigate("CrmPossession", { bookingId: id, title })} />
-            </Section>
-          ) : null}
-          {/* Service tickets */}
-          {seesTickets && (tickets.length || canTicket) ? (
-            <Section title={`Service Tickets (${tickets.length})`}>
-              {tickets.length === 0 ? <Empty text="No service tickets." /> : tickets.map((t) => (
-                <LinkRow key={t.Id} title={t.Subject || t.TicketNo} sub={joinDot(t.TicketNo, t.Category, fmtDate(t.CreatedAt), t.AssigneeName)}
-                  right={<Pill label={t.Status} />} onPress={() => open({ to: "ticket", ticketId: t.Id })} />
+
+          {/* 9. After-sales: one list, each line its status; tap to open */}
+          {afterRows.length ? (
+            <Section title="After-sales">
+              {afterRows.map((r) => (
+                <View key={r.key} style={{ borderTopWidth: 1, borderTopColor: colors.border }}>
+                  <Tap onPress={r.go ?? (() => setAfterOpen(afterOpen === r.key ? null : r.key))} accessibilityRole="button" accessibilityLabel={r.label}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 12 }}>
+                      <r.icon size={17} color={colors.mutedForeground} />
+                      <Text style={{ flex: 1, fontSize: 13.5, fontFamily: fonts.body.medium, color: colors.foreground }}>{r.label}</Text>
+                      {r.badge ? <Pill label={r.badge} tone={r.tone} /> : null}
+                      <ChevronRight size={16} color={colors.mutedForeground} style={{ transform: [{ rotate: !r.go && afterOpen === r.key ? "90deg" : "0deg" }] }} />
+                    </View>
+                  </Tap>
+                  {!r.go && afterOpen === r.key ? <View style={{ paddingBottom: 12 }}>{r.body}</View> : null}
+                </View>
               ))}
             </Section>
           ) : null}
-
-          {/* Civilier Home */}
-          {portal ? (
-            <Section title="Civilier Home">
-              {portal.hasPortal ? (
-                <>
-                  <Kv label="Access" value={portal.isActive ? "Access Active" : "Access Deactivated"} />
-                  <Kv label="Mobile login" value={portal.loginMobile || "No 10-digit mobile on file"} />
-                  <Kv label="Password" value={portal.mustChangePassword ? "First password" : "Own password"} />
-                  <Kv label="Last sign-in" value={portal.lastLoginAt ? fmtDate(portal.lastLoginAt) : "Never"} />
-                  {portal.firstPassword ? <Kv label="First password" value={`${portal.firstPassword} (${portal.passwordRule})`} /> : null}
-                  {canEditBooking ? (
-                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
-                      <ActionKey half outline tone={portal.isActive ? colors.destructive : undefined}
-                        label={busyPortal && !confirmReset ? "Updating\u2026" : portal.isActive ? "Deactivate Access" : "Reactivate Access"}
-                        onPress={() => portalAction(() => crmSend(`/api/crm/bookings/${id}/portal/${portal.isActive ? "deactivate" : "reactivate"}`, "PUT"),
-                          () => (portal.isActive ? "Portal access deactivated" : "Portal access reactivated"))} />
-                      {portal.isActive ? (
-                        <ActionKey half outline tone={confirmReset ? colors.destructive : undefined}
-                          label={confirmReset ? (busyPortal ? "Resetting\u2026" : "Confirm reset") : "Reset password"}
-                          onPress={() => confirmReset
-                            ? portalAction(() => crmSend("/api/crm-portal/admin/reset-password", "POST", { customerId: portal.customerId }), (r) => r?.message || "Password reset")
-                            : setConfirmReset(true)} />
-                      ) : null}
-                    </View>
-                  ) : null}
-                </>
-              ) : (
-                <>
-                  <Text style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>
-                    {portal.workflowStage !== "Confirmed"
-                      ? "Civilier Home access is set up automatically once this booking reaches Confirmed status."
-                      : "This booking is Confirmed but has no Civilier Home account yet. Set it up below."}
-                  </Text>
-                  {canEditBooking && portal.workflowStage === "Confirmed" ? (
-                    <View style={{ flexDirection: "row", marginTop: 10 }}>
-                      <ActionKey label={busyPortal ? "Setting up\u2026" : "Set up Civilier Home"}
-                        onPress={() => portalAction(() => crmSend(`/api/crm/bookings/${id}/provision-portal`, "POST"), () => "Civilier Home access created")} />
-                    </View>
-                  ) : null}
-                </>
-              )}
-            </Section>
-          ) : null}
-
-          {canEditBooking && b && !b.IsPlotSale ? (
-            <Section title="Unit">
-              <LinkRow icon={FileText} title="Change unit" sub="Move this booking to another unit; it goes for approval" onPress={() => setChangeUnit(true)} />
-            </Section>
-          ) : null}
           {changeUnit && b ? <ChangeUnitDialog booking={{ ...pb, ...b }} onClose={() => setChangeUnit(false)} /> : null}
-
-            </>
-          ) : null}
         </>
       )}
       <ApplyOnAccountPrompt milestone={applyTo} deposits={deposits} busy={busyMs != null} onClose={() => setApplyTo(null)}
