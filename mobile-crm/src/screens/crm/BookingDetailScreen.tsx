@@ -309,9 +309,7 @@ export default function BookingDetailScreen() {
               {stage === "Review" && canVerify ? (
                 <View style={{ flexDirection: "row", marginTop: 12 }}>
                   <ActionKey label={busyStage === "verify" ? "Submitting\u2026" : "Verify & Send for Approval"}
-                    onPress={() => checklistQ.data?.allChecked
-                      ? stageAction("verify", () => crmSend(`/api/crm/bookings/${id}/ready-for-approval`, "PUT"), (r) => `Data review complete \u2014 sent to ${r?.label || "Marketing Head Approval"}`)
-                      : toast.error("Complete the data review checklist before booking approval.")} />
+                    onPress={() => stageAction("verify", () => crmSend(`/api/crm/bookings/${id}/ready-for-approval`, "PUT"), (r) => `Data review complete — sent to ${r?.label || "Marketing Head Approval"}`)} />
                 </View>
               ) : stage === "Review" && canEditBooking ? (
                 <Text style={{ marginTop: 10, fontSize: 12.5, fontFamily: fonts.body.medium, color: colors.mutedForeground }}>Waiting for data verification</Text>

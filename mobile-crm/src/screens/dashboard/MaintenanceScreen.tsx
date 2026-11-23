@@ -202,7 +202,9 @@ export function KeyCustodianScreen() {
         <Text style={{ color: colors.destructive, fontSize: 12.5, fontFamily: fonts.body.regular }}>{(listQ.error as Error).message}</Text>
       ) : (
         <Section title={`Units not yet handed over (${rows.length})`}>
-          {rows.map((u) => (
+          {/* A phone lists the first 100; search narrows the rest. */}
+          {rows.length > 100 ? <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginBottom: 6 }}>{`Showing the first 100 of ${rows.length}. Search to find any other unit.`}</Text> : null}
+          {rows.slice(0, 100).map((u) => (
             <Pressable key={u.UnitId} onPress={() => setOpenId(u.UnitId)} style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border }}>
               <Text style={{ fontSize: 14, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{[u.ProjectName, u.BlockName, u.UnitName].filter(Boolean).join(" · ")}</Text>
               <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 2 }}>

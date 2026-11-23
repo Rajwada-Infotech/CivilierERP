@@ -737,7 +737,8 @@ export function ApplicationFormScreen() {
       }
       const d = await crmSend<Row>(`/api/crm/applications/${editId}/submit`, "PUT");
       if (d?.unitChange) toast.success(d.unitChange.message);
-      else if (d?.booking?.BookingNo) toast.success(d.booking.alreadyExists ? "Application changes saved" : `Booking ${d.booking.BookingNo} created — payment milestones auto-generated`);
+      // The server answers with bookingNo (crmApplications.js PUT /:id/submit); booking.BookingNo is the older shape.
+      else if (d?.bookingNo || d?.booking?.BookingNo) toast.success(d?.booking?.alreadyExists ? "Application changes saved" : `Booking ${d.bookingNo ?? d.booking.BookingNo} created — payment milestones auto-generated`);
       else if (d?.bookingError) toast.error(`Application submitted, but the booking couldn't be created automatically: ${d.bookingError}`);
       else toast.success("Application submitted");
       afterApp(); nav.goBack();
@@ -1410,8 +1411,10 @@ export function PossessionScreen() {
       <Section title="Pre-Possession Checklist">
         {!r.CheckId ? (
           <>
-            <Text style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>{closed ? "This booking is closed." : "No checklist started yet."}</Text>
-            {keys([right("crm-pre-possession", "create") && !closed && { label: "Start Checklist", go: () => open("start", { date: "" }) }])}
+            <Text style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>
+              {closed ? "This booking is closed." : r.Stage === "NotReady" ? "Not ready yet: the booking must be approved, its agreement registered and the occupancy certificate issued." : "No checklist started yet."}
+            </Text>
+            {keys([right("crm-pre-possession", "create") && !closed && r.Stage !== "NotReady" && { label: "Start Checklist", go: () => open("start", { date: "" }) }])}
           </>
         ) : !c ? <ActivityIndicator color={colors.mutedForeground} /> : (
           <>
