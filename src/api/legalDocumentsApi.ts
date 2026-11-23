@@ -38,7 +38,7 @@ const send = (method: string, body?: unknown): RequestInit => ({ method, headers
 export const getLandDocuments = async (landId: number) => handle<LandDocuments>(await fetchWithAuth(`${BASE}/${landId}`));
 export const getDocumentVersions = async (docId: number) => handle<DocumentVersion[]>(await fetchWithAuth(`${BASE}/doc/${docId}/versions`));
 export const addLandDocument = async (landId: number, body: { docTypeId: number; relatedSection: string; title: string; documentNo?: string; documentDate?: string; issuingAuthority?: string; remarks?: string; fileId: number;
-  registrationDate?: string; relatedOwner?: string; relatedLegalRecordId?: number | null; relatedMortgageId?: number | null; description?: string }) =>
+  registrationDate?: string; relatedOwner?: string; relatedLegalRecordId?: number | null; relatedMortgageId?: number | null; description?: string; alsoSections?: string[] }) =>
   handle<{ id: number; message: string }>(await fetchWithAuth(`${BASE}/${landId}`, send("POST", body)));
 export const addDocumentVersion = async (docId: number, fileId: number, remarks?: string) =>
   handle<{ message: string }>(await fetchWithAuth(`${BASE}/doc/${docId}/versions`, send("POST", { fileId, remarks })));

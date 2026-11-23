@@ -1529,6 +1529,20 @@
   }
   table.auto-cards tbody td[colspan] { grid-column: 1 / -1; }
 }
+/* Legal module: record cards on phones carry several actions (Open, Edit, Delete ...) - the title takes the full width
+   and the actions get their own wrapping row under it, so neither overlaps the other. */
+@media (max-width: 767px) {
+  body[data-module="legal"] table.auto-cards tbody td:first-child { grid-column: 1 / -1; overflow-wrap: anywhere; }
+  body[data-module="legal"] table.auto-cards tbody td:is(.sticky-act, [data-label="Actions"], [data-label="Action"]) {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 0.375rem;
+    padding-bottom: 0.375rem !important;
+    border-bottom: 1px dashed hsl(var(--border)) !important;
+  }
+}
 
 /* Tabbed master forms on phones: two fields per row, compact labels. */
 @media (max-width: 767px) {

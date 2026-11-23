@@ -22,6 +22,10 @@ const { writeAudit, nextCodeSql, codePrefix } = require("./legalAudit");
 
 const router = express.Router();
 router.use(apiRateLimit);
+// Project access (User / Role Project Access): a restricted user reaches only lands / enquiries of their projects.
+const projectGuard = require("./projectGuard");
+router.use(async (req, _res, next) => { try { req.legalScope = await projectGuard.getProjectScope(req.user); } catch { /* unrestricted */ } next(); });
+router.param("landId", projectGuard.landParam("land"));
 
 const PAGE = "legal-land-master";
 const SECTIONS = ["Property", "Ownership", "Legal", "Purchase / Sale", "Registration", "Loan & Mortgage", "Mutation", "Payment", "Tax", "Survey & Valuation", "Other"];
@@ -96,9 +100,11 @@ router.get("/:landId", requirePageRight(PAGE, "view"), async (req, res) => {
   if (!landId) return res.status(400).json({ error: "Invalid land" });
   try {
     const pool = getPool();
+    const secT = !!(await pool.request().query("SELECT OBJECT_ID('dbo.LegalLandDocumentSection','U') AS t")).recordset[0].t;
     const [docs, required] = await Promise.all([
       pool.request().input("Land", sql.Int, landId).query(`
         SELECT d.DocumentId, d.DocumentCode, d.DocTypeId, dt.DocTypeName, d.RelatedSection, d.Title, d.DocumentNo, d.DocumentDate,
+               ${secT ? "(SELECT STRING_AGG(x.Section, N', ') FROM dbo.LegalLandDocumentSection x WHERE x.DocumentId = d.DocumentId)" : "d.RelatedSection"} AS Sections,
                d.IssuingAuthority, d.CurrentVersionNo, d.Remarks, d.IsActive, d.RegistrationDate, d.RelatedOwner, d.Description,
                d.RelatedLegalRecordId, (SELECT lr.RecordType + ISNULL(' ' + lr.CaseNumber, '') FROM dbo.LegalLandLegalRecord lr WHERE lr.LegalRecordId = d.RelatedLegalRecordId) AS RelatedLegalRecord,
                d.RelatedMortgageId, (SELECT m.LenderName + ISNULL(' · ' + m.LoanAccountRef, '') FROM dbo.LegalMortgage m WHERE m.MortgageId = d.RelatedMortgageId) AS RelatedMortgage,
@@ -140,7 +146,13 @@ router.get("/doc/:docId/versions", requirePageRight(PAGE, "view"), async (req, r
   }
 });
 
-router.post("/:landId", requirePageRight(PAGE, "edit"), async (req, res) => {
+const docRight = (action) => async (req, res, next) => {
+  try {
+    if (await require("./sectionRights").canSection(req, "documents", action)) return next();
+    return res.status(403).json({ error: "You cannot change documents of this land (Role Rights → Legal - Land sections)" });
+  } catch (e) { return next(e); }
+};
+router.post("/:landId", requirePageRight(PAGE, "view"), docRight("create"), async (req, res) => {
   const landId = idParam(req.params.landId);
   if (!landId) return res.status(400).json({ error: "Invalid land" });
   { const amend = require("./landAmendment"); if (await amend.isLocked(getPool(), landId)) return res.status(409).json({ error: amend.LOCK_MSG }); }
@@ -193,6 +205,10 @@ router.post("/:landId", requirePageRight(PAGE, "edit"), async (req, res) => {
     const doc = ins.recordset[0];
     await tx.request().input("Doc", sql.Int, doc.id).input("File", sql.Int, fileId).input("UserId", sql.Int, req.user?.userId || null)
       .query("INSERT INTO dbo.LegalLandDocumentVersion (DocumentId, VersionNo, FileId, UploadedBy, ReviewStatus) VALUES (@Doc, 1, @File, @UserId, N'Verified')");
+    // The sections this document belongs to: its main one and any others ticked (a deed can be Ownership and Registration).
+    const also = [b.relatedSection, ...(Array.isArray(b.alsoSections) ? b.alsoSections : [])].filter((x, i, arr) => SECTIONS.includes(x) && arr.indexOf(x) === i);
+    for (const sct of also) await tx.request().input("Doc", sql.Int, doc.id).input("S", sql.NVarChar(30), sct)
+      .query("IF OBJECT_ID('dbo.LegalLandDocumentSection','U') IS NOT NULL INSERT INTO dbo.LegalLandDocumentSection (DocumentId, Section) VALUES (@Doc, @S)");
     await writeAudit(tx, req, { action: "Document uploaded", entityType: "Land Document", entityId: doc.id, landId, newValue: { code: doc.code, title, version: 1 } });
     await tx.commit();
     res.status(201).json({ id: doc.id, message: `Document ${doc.code} added` });
@@ -203,7 +219,7 @@ router.post("/:landId", requirePageRight(PAGE, "edit"), async (req, res) => {
   }
 });
 
-router.post("/doc/:docId/versions", requirePageRight(PAGE, "edit"), async (req, res) => {
+router.post("/doc/:docId/versions", requirePageRight(PAGE, "view"), docRight("edit"), async (req, res) => {
   const docId = idParam(req.params.docId);
   const fileId = idParam(req.body?.fileId);
   if (!docId) return res.status(400).json({ error: "Invalid document" });

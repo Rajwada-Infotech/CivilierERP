@@ -6,7 +6,7 @@ import { LegalFileLink } from "@/components/legal/LegalDocumentPreview";
 import { askLegal } from "@/components/legal/LegalAsk";
 import { InlineRecordEditor, SECTION_MASTERS } from "@/components/legal/InlineRecordEditor";
 import { clearCourtCase, getDiligence } from "@/api/legalDiligenceApi";
-import { checkReviewStep, decideReview, getLandReview, returnReview, submitReview, type EntryField, type EntryRecord, type LandReview, type ReviewStep } from "@/api/legalFlowApi";
+import { checkReviewStep, decideReview, getLandReview, getSectionRights, returnReview, submitReview, type EntryField, type EntryRecord, type LandReview, type ReviewStep } from "@/api/legalFlowApi";
 
 const val = (x: unknown) => {
   if (x === null || x === undefined || x === "") return "—";
@@ -18,25 +18,26 @@ const DOC_STATE: Record<string, string> = { Verified: "text-emerald-700 dark:tex
 
 /** One field: its value (or "Not filled" / "Required — not filled"), the file link, and the old value when it changed. */
 type Dec = "ok" | "bad" | "na";
-type Decide = { decisions?: Record<string, Dec>; onDecide?: (fieldKey: string, d: Dec | null) => void };
-function FieldCell({ f, old, diff, fk, decisions, onDecide }: { f: EntryField; old?: EntryField; diff: boolean; fk?: string } & Decide) {
+type Decide = { decisions?: Record<string, Dec>; remarks?: Record<string, string>; onDecide?: (fieldKey: string, d: Dec | null) => void };
+function FieldCell({ f, old, diff, fk, decisions, remarks, onDecide }: { f: EntryField; old?: EntryField; diff: boolean; fk?: string } & Decide) {
+  const rm = fk ? remarks?.[fk] : undefined;
   const d = fk ? decisions?.[fk] : undefined;
   const changed = diff && old !== undefined && (old?.v ?? null) !== (f.v ?? null);
   const empty = f.v == null;
   return (
     <div className={`relative border-l-2 px-1.5 py-1 ${d === "bad" ? "outline outline-2 -outline-offset-2 outline-destructive" : d === "ok" ? "outline outline-1 -outline-offset-1 outline-emerald-600" : d === "na" ? "opacity-60" : ""} ${changed ? "border-amber-500 bg-amber-500/10" : empty ? (f.req ? "border-destructive bg-destructive/5" : "border-border bg-muted/40") : "border-sky-500 bg-sky-500/5"}`}>
-      <dt className="flex items-start justify-between gap-1 text-[0.625rem] uppercase tracking-[0.08em] text-muted-foreground">
+      <dt className="flex flex-wrap items-start justify-between gap-1 text-[0.625rem] uppercase tracking-[0.08em] text-muted-foreground">
         <span>{f.l}{f.req && <span className="text-destructive"> *</span>}</span>
         {f.info ? (
           <span className="shrink-0 text-[0.5625rem] normal-case text-muted-foreground" title="Not entered data — nothing to verify">info</span>
         ) : fk && onDecide ? (
           <span className="flex shrink-0 gap-0.5 normal-case">
             <button type="button" title="Correct" onClick={() => onDecide(fk, d === "ok" ? null : "ok")}
-              className={`h-5 w-5 border text-[0.6875rem] font-bold leading-none ${d === "ok" ? "border-emerald-600 bg-emerald-600 text-white" : "border-emerald-600/50 text-emerald-700 hover:bg-emerald-600/10"}`}>✓</button>
+              className={`h-8 w-8 border text-sm font-bold leading-none sm:h-5 sm:w-5 sm:text-[0.6875rem] ${d === "ok" ? "border-emerald-600 bg-emerald-600 text-white" : "border-emerald-600/50 text-emerald-700 hover:bg-emerald-600/10"}`}>✓</button>
             <button type="button" title="Wrong" onClick={() => onDecide(fk, d === "bad" ? null : "bad")}
-              className={`h-5 w-5 border text-[0.6875rem] font-bold leading-none ${d === "bad" ? "border-destructive bg-destructive text-white" : "border-destructive/50 text-destructive hover:bg-destructive/10"}`}>✗</button>
+              className={`h-8 w-8 border text-sm font-bold leading-none sm:h-5 sm:w-5 sm:text-[0.6875rem] ${d === "bad" ? "border-destructive bg-destructive text-white" : "border-destructive/50 text-destructive hover:bg-destructive/10"}`}>✗</button>
             <button type="button" title="Not needed / not required" onClick={() => onDecide(fk, d === "na" ? null : "na")}
-              className={`h-5 border px-1 text-[0.5625rem] font-bold leading-none ${d === "na" ? "border-foreground bg-foreground text-background" : "border-foreground/30 text-muted-foreground hover:bg-muted"}`}>N/A</button>
+              className={`h-8 border px-1.5 text-xs font-bold leading-none sm:h-5 sm:px-1 sm:text-[0.5625rem] ${d === "na" ? "border-foreground bg-foreground text-background" : "border-foreground/30 text-muted-foreground hover:bg-muted"}`}>N/A</button>
           </span>
         ) : d ? <span className={`text-xs font-bold ${d === "ok" ? "text-emerald-700" : d === "bad" ? "text-destructive" : "text-muted-foreground"}`}>{d === "ok" ? "✓" : d === "bad" ? "✗" : "N/A"}</span> : null}
       </dt>
@@ -44,12 +45,13 @@ function FieldCell({ f, old, diff, fk, decisions, onDecide }: { f: EntryField; o
         {empty ? <span className={f.req ? "font-semibold text-destructive" : "italic text-muted-foreground"}>{f.req ? "Required — not filled" : "Not filled"}</span>
           : f.file ? <LegalFileLink id={f.file} name={f.v ?? "File"} /> : <span className="font-medium">{val(f.v)}</span>}
         {changed && <s className="ml-1.5 text-xs text-destructive">{val(old?.v)}</s>}
+        {d === "bad" && rm && <span className="mt-0.5 block text-xs font-semibold text-destructive">✗ {rm}</span>}
       </dd>
     </div>
   );
 }
 
-export function RecordCard({ r, prev, diff, tag, decisions, onDecide, onEdit }: { r: EntryRecord; prev?: EntryRecord; diff: boolean; tag?: "new" | "gone"; onEdit?: () => void } & Decide) {
+export function RecordCard({ r, prev, diff, tag, decisions, remarks, onDecide, onEdit }: { r: EntryRecord; prev?: EntryRecord; diff: boolean; tag?: "new" | "gone"; onEdit?: () => void } & Decide) {
   const filled = r.fields.filter((f) => f.v != null).length;
   const reqMissing = r.fields.filter((f) => f.req && f.v == null).length;
   return (
@@ -61,9 +63,9 @@ export function RecordCard({ r, prev, diff, tag, decisions, onDecide, onEdit }: 
         {onEdit && <button onClick={onEdit} className="ml-auto h-7 border border-foreground/50 px-2.5 text-[0.6875rem] font-semibold uppercase tracking-[0.06em] hover:border-foreground hover:bg-foreground hover:text-background">Edit</button>}
         <span className={`${onEdit ? "" : "ml-auto "}text-muted-foreground`}>{filled} / {r.fields.length} filled{reqMissing ? <b className="ml-1.5 text-destructive">· {reqMissing} required missing</b> : null}</span>
       </div>
-      <dl className={`grid grid-cols-2 gap-1 p-2 sm:grid-cols-3 lg:grid-cols-4 ${tag === "gone" ? "line-through" : ""}`}>
+      <dl className={`grid grid-cols-1 gap-1 p-2 min-[480px]:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 ${tag === "gone" ? "line-through" : ""}`}>
         {r.fields.map((f) => <FieldCell key={f.n} f={f} old={prev?.fields.find((x) => x.n === f.n)} diff={diff && !!prev}
-          fk={tag === "gone" ? undefined : `${r.master}#${r.id}#${f.n}`} decisions={decisions} onDecide={onDecide} />)}
+          fk={tag === "gone" ? undefined : `${r.master}#${r.id}#${f.n}`} decisions={decisions} remarks={remarks} onDecide={onDecide} />)}
       </dl>
     </div>
   );
@@ -76,7 +78,7 @@ export function StepBody({ s, first, onDecide, renderRecord }: { s: ReviewStep; 
   return (
     <div className="space-y-2">
       {s.records.length ? s.records.map((r) => {
-        const card = <RecordCard key={`${r.master}-${r.id}`} r={r} prev={prevOf(r)} diff={diff} tag={diff && !prevOf(r) ? "new" : undefined} decisions={s.decisions} onDecide={onDecide} />;
+        const card = <RecordCard key={`${r.master}-${r.id}`} r={r} prev={prevOf(r)} diff={diff} tag={diff && !prevOf(r) ? "new" : undefined} decisions={s.decisions} remarks={s.remarks} onDecide={onDecide} />;
         return renderRecord ? <React.Fragment key={`${r.master}-${r.id}`}>{renderRecord(r, card)}</React.Fragment> : card;
       })
         : (
@@ -153,6 +155,9 @@ export function LandRecordView({ landId, editor }: { landId: number; editor?: (k
   const [editing, setEditing] = useState<string | null>(null);
   // Inline editing: "<master>#<id>" for an entry, "new:<section>:<master>" for a new one.
   const [inline, setInline] = useState<string | null>(null);
+  // Per-section rights: a section without create / edit right shows no + New / Edit.
+  const rightsQ = useQuery({ queryKey: ["legal-section-rights"], queryFn: getSectionRights, staleTime: 300_000 });
+  const can = (sec: string, a: "create" | "edit") => rightsQ.data ? !!rightsQ.data[sec]?.[a] : true;
   const done = () => { setInline(null); qc.invalidateQueries({ queryKey: ["legal-review", landId] }); };
   const { data, isLoading, error } = useQuery({ queryKey: ["legal-review", landId], queryFn: () => getLandReview(landId) });
   if (isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>;
@@ -171,8 +176,8 @@ export function LandRecordView({ landId, editor }: { landId: number; editor?: (k
               <span className="text-xs text-muted-foreground">{s.records.length} entr{s.records.length === 1 ? "y" : "ies"} · {s.filled} / {s.total} fields filled{s.files ? ` · ${s.files} file${s.files === 1 ? "" : "s"}` : ""}</span>
               {wrong > 0 && <span className="bg-destructive px-2 py-0.5 text-[0.625rem] font-semibold uppercase tracking-[0.06em] text-white">✗ {wrong} field{wrong === 1 ? "" : "s"} to correct</span>}
               {(req > 0 || docs > 0 || (empty && s.needed)) && <span className="text-xs font-semibold text-destructive">{[empty && s.needed ? "nothing entered" : "", req ? `${req} required empty` : "", docs ? `${docs} document${docs === 1 ? "" : "s"} missing` : ""].filter(Boolean).join(" · ")}</span>}
-              {editor && SECTION_MASTERS[s.key] && s.key !== "basic" && (
-                <span className="ml-auto flex gap-1">
+              {editor && SECTION_MASTERS[s.key] && s.key !== "basic" && can(s.key, "create") && (
+                <span className="ml-auto flex flex-wrap justify-end gap-1">
                   {SECTION_MASTERS[s.key].map((m) => (
                     <button key={m} onClick={() => setInline(`new:${s.key}:${m}`)}
                       className="h-8 border border-foreground bg-foreground px-3 text-xs font-semibold uppercase tracking-[0.06em] text-background hover:opacity-90">
@@ -182,7 +187,7 @@ export function LandRecordView({ landId, editor }: { landId: number; editor?: (k
                 </span>
               )}
               {/* Documents keep their own editor (upload, file versions). */}
-              {editor && !SECTION_MASTERS[s.key] && s.key !== "registration" && (
+              {editor && !SECTION_MASTERS[s.key] && s.key !== "registration" && can(s.key, "edit") && (
                 <button onClick={() => { if (editing === s.key) qc.invalidateQueries({ queryKey: ["legal-review", landId] }); setEditing(editing === s.key ? null : s.key); }}
                   className={`ml-auto h-8 border px-3 text-xs font-semibold uppercase tracking-[0.06em] ${editing === s.key ? "border-foreground bg-foreground text-background" : "border-foreground/50 hover:border-foreground"}`}>
                   {editing === s.key ? "Done" : "Edit"}
@@ -192,7 +197,7 @@ export function LandRecordView({ landId, editor }: { landId: number; editor?: (k
             <div className="space-y-2 p-3">
               {inline?.startsWith(`new:${s.key}:`) && <InlineRecordEditor master={inline.split(":")[2]} id={null} landId={landId} onDone={done} />}
               {editing === s.key && editor ? editor(s.key) : (
-                <StepBody s={s} first renderRecord={editor && SECTION_MASTERS[s.key] ? (rec, card) => inline === `${rec.master}#${rec.id}`
+                <StepBody s={s} first renderRecord={editor && SECTION_MASTERS[s.key] && can(s.key, "edit") ? (rec, card) => inline === `${rec.master}#${rec.id}`
                   ? <InlineRecordEditor master={rec.master} id={rec.id} landId={landId} title={rec.title} onDone={done} />
                   : React.cloneElement(card as React.ReactElement, { onEdit: () => setInline(`${rec.master}#${rec.id}`) }) : undefined} />
               )}
@@ -291,9 +296,17 @@ export function LandReviewFlow({ landId }: { landId: number }) {
     });
   };
   const valuesOf = (st: ReviewStep) => Object.fromEntries(st.records.flatMap((rec) => rec.fields.filter((f) => !f.info).map((f) => [`${rec.master}#${rec.id}#${f.n}`, f.v ?? null])));
-  const decide = (st: ReviewStep, field: string, decision: "ok" | "bad" | "na" | null) => {
+  const decide = async (st: ReviewStep, field: string, decision: "ok" | "bad" | "na" | null) => {
+    // ✗ asks what is wrong (optional) — shown to data entry on the field after a send-back.
+    let remark: string | undefined;
+    if (decision === "bad") {
+      const x = await askLegal({ title: "What is wrong in this field?", message: "Optional — data entry sees it on the field.", input: { label: "Remark" }, confirmText: "Mark ✗" });
+      if (x === null) return;
+      remark = x || undefined;
+    }
     applyLocal(st.key, (d) => { if (decision) d[field] = decision; else delete d[field]; });
-    send({ step: st.key, field, decision, values: { [field]: valuesOf(st)[field] ?? null } });
+    if (remark) qc.setQueryData<LandReview>(["legal-review", landId], (old) => old && { ...old, steps: old.steps.map((x) => (x.key === st.key ? { ...x, remarks: { ...(x.remarks ?? {}), [field]: remark! } } : x)) });
+    send({ step: st.key, field, decision, remark, values: { [field]: valuesOf(st)[field] ?? null } });
   };
   const markAll = (st: ReviewStep, a: "ok" | "clear") => {
     const vals = valuesOf(st);

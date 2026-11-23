@@ -566,6 +566,7 @@ export function Versions({ versions, landId, code, stages }: { versions: FlowVer
                     <span className={`px-2 py-0.5 text-[0.625rem] font-semibold uppercase tracking-[0.1em] ${ok ? "bg-emerald-600 text-white" : "bg-amber-500 text-white"}`}>{ok ? "Approved" : "In progress"}</span>
                   </div>
                   <p className="text-xs text-muted-foreground">{ok ? `${fmt(x.approvedAt, "At")}${x.approvedBy ? ` · ${x.approvedBy}` : ""}` : x.status}</p>
+                  {x.integrity && <p className={`text-[0.625rem] font-semibold uppercase ${x.integrity === "ok" ? "text-emerald-700" : "text-destructive"}`} title={x.hash ? `SHA-256 ${x.hash}` : undefined}>{x.integrity === "ok" ? "✓ Frozen · intact" : "⚠ Snapshot altered"}</p>}
                   {x.afterRegistration && <p className="mt-1 inline-block self-start bg-indigo-600 px-1.5 py-0.5 text-[0.625rem] font-semibold uppercase text-white">After registration{x.amendment ? ` · Amendment ${x.amendment.no}` : ""}</p>}
                   <div className="mt-2 flex-1 border-t border-border/60 pt-2 text-xs">
                     {x.amendment ? <p><b>{x.amendment.type}</b> · {x.amendment.changes.length} field{x.amendment.changes.length === 1 ? "" : "s"}</p>
@@ -742,6 +743,7 @@ export function NextVersionCard({ landId }: { landId: number }) {
                   <li key={x.key} className={x.fixed ? "text-emerald-700 dark:text-emerald-400" : ""}>
                     <b className={x.fixed ? "" : "text-destructive"}>{x.fixed ? "✓" : "✗"}</b> {x.section} › {x.entry} › <b>{x.field}</b>
                     <span className="text-muted-foreground"> — was “{x.was ?? "empty"}”{x.fixed ? `, now “${x.now ?? "empty"}”` : ""}</span>
+                    {x.remark && !x.fixed && <span className="block pl-4 text-xs text-destructive">Verifier: {x.remark}</span>}
                   </li>
                 ))}
               </ul>

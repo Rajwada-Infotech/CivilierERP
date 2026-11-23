@@ -28,7 +28,7 @@ export default function LandClearancePage() {
         ) : (
           <div className="space-y-4">
             {lands.map((l) => {
-              const done = l.clearances.filter((c) => c.Status === "Obtained").length;
+              const done = l.clearances.filter((c) => ["Approved", "Obtained", "Not Applicable"].includes(c.Status)).length;
               return (
                 <section key={l.LandId} className="border border-border bg-card">
                   <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">

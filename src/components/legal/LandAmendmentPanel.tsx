@@ -245,13 +245,13 @@ export function AmendmentDecision({ a, canApprove, userId }: { a: Amendment; can
         <span className="ml-auto text-xs text-muted-foreground">{a.LandCode} · asked by {a.RequestedByName ?? "—"} · {when(a.RequestedAt)}</span>
       </p>
       <p className="mt-2 text-sm"><b>Reason:</b> {a.Reason}{a.ReferenceNo ? <span className="text-muted-foreground"> · Ref. {a.ReferenceNo}</span> : null}</p>
-      <table className="mt-2 w-full text-xs">
+      <div className="overflow-x-auto"><table className="mt-2 w-full text-xs">
         <thead><tr className="text-left uppercase tracking-[0.08em] text-muted-foreground"><th className="py-1 pr-3 font-semibold">What</th><th className="py-1 pr-3 font-semibold">Registered now</th><th className="py-1 font-semibold">Change to</th></tr></thead>
         <tbody>{a.changes.map((c, i) => (
           <tr key={i} className="border-t border-border/60"><td className="py-1 pr-3 font-medium">{c.label}</td>
             <td className="py-1 pr-3 text-destructive line-through decoration-destructive/40">{describe(c.from)}</td><td className="py-1 text-emerald-700 dark:text-emerald-400">{c.op === "remove" ? "Removed" : describe(c.to)}</td></tr>
         ))}</tbody>
-      </table>
+      </table></div>
       {canApprove && Number(a.RequestedBy) !== Number(userId) && (
         <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
           <label className="block flex-1"><span className={lbl}>Remark *</span>

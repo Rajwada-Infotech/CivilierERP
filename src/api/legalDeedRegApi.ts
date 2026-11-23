@@ -49,6 +49,8 @@ export const inr = (n: number | null | undefined) => (n == null ? "—" : `₹${
 export const addPayment = async (id: number, b: { paymentDate: string; txnTypeId: string; amount: string; paymentModeId: string; payee: string; transactionRef: string; receiptNo: string; receiptFileId?: number | null; remarks: string }) =>
   handle<Msg>(await fetchWithAuth(`${BASE}/${id}/payment`, send("POST", b)));
 export const deletePayment = async (pid: number) => handle<Msg>(await fetchWithAuth(`${BASE}/payment/${pid}`, send("DELETE")));
+/** A payment is never edited or deleted: Pending → Cleared / Failed; Cleared → Refunded / Reversed (with the reason). */
+export const setPaymentStatus = async (pid: number, status: string, reason?: string) => handle<Msg>(await fetchWithAuth(`${BASE}/payment/${pid}/status`, send("POST", { status, reason })));
 export const getInstalmentTemplates = async () => handle<InstalmentTemplate[]>(await fetchWithAuth(`${BASE}/instalment-templates`));
 export const applyInstalmentTemplate = async (id: number, template: string, replace = false) => {
   const res = await fetchWithAuth(`${BASE}/${id}/schedule/apply`, send("POST", { template, replace }));

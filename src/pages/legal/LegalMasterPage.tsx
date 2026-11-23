@@ -440,10 +440,12 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
   // Every field as a column (the table scrolls sideways): documents as a preview chip, long notes cut to one
   // line with the full text on hover, then Status.
   const columns: ColumnDef[] = useMemo(() => {
-    const shown = shownFields.filter((f) => !isStatus(f));
+    // Workflow statuses kept by the system (verification / approval) are shown on the land's own page, not as list columns.
+    const shown = shownFields.filter((f) => !isStatus(f) && !f.system);
     const cols: ColumnDef[] = shown.map((f, i) => ({ key: displayKey(f), label: f.label, hideOnMobile: i >= 2 }));
     // Extras go last, unless one names a field to sit right after (e.g. "Enquiry by" next to the enquiry date).
-    for (const x of extras) {
+    // Extras marked hidden feed buttons / locks only (e.g. "Amendment open") — never a column.
+    for (const x of extras.filter((e) => !(e as { hidden?: boolean }).hidden)) {
       const col = { key: `${x.name}__display`, label: x.label, hideOnMobile: true };
       const at = x.after ? cols.findIndex((c) => c.key === displayKey(shown.find((f) => f.name === x.after) ?? ({ name: "" } as never))) : -1;
       if (at >= 0) cols.splice(at + 1, 0, col); else cols.push(col);
@@ -499,7 +501,7 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
         toast.success(added.message);
         if (onCreated && added.id) onCreated(Number(added.id));
       }
-      if (event.action === "update") toast.success((await updateLegalRow(entry.key, Number(event.id), { ...payload(event.record), ...fixed })).message);
+      if (event.action === "update") toast.success((await updateLegalRow(entry.key, Number(event.id), { ...payload(event.record), ...fixed, __updatedAt: rawById.get(String(event.id))?.UpdatedAt ?? undefined })).message);
       if (event.action === "delete") toast.success((await deleteLegalRow(entry.key, Number(event.id))).message);
       onSaved?.();
     } catch (err) {

@@ -44,6 +44,8 @@ export interface FlowVersion {
   checklist?: { template: string | null; items: { doc: string; requirement: string; stage: string | null; state: string }[] } | null;
   checklistNow?: boolean;
   /** Sections the verifier ticked for this version, and who verified it. */
+  /** SHA-256 of the frozen snapshot, checked on every load: "ok" or "altered" (null: saved before hashes were kept). */
+  integrity?: "ok" | "altered" | null; hash?: string | null;
   verifiedSections?: string[]; verifiedBy?: string | null; fieldDecisions?: Record<string, "ok" | "bad" | "na">;
   amendment?: { no: number; type: string; reason: string; referenceNo: string | null; remarks?: string; requestedBy: string | null;
     changes: { field?: string; op?: string; label: string; from: unknown; to: unknown }[]; pending?: boolean; id?: number } | null;
@@ -71,7 +73,7 @@ export interface ReviewStep {
   checklist?: { doc: string; requirement: string; stage: string | null; state: string }[];
   changed: boolean; checked: boolean; checkedBy: string | null; checkedAt: string | null; staleTick: boolean;
   /** Field decisions (key master#id#field → ok / bad), how many decided of how many, and how many ✗. */
-  decisions?: Record<string, "ok" | "bad" | "na">; decided?: number; fieldTotal?: number; crosses?: number;
+  decisions?: Record<string, "ok" | "bad" | "na">; remarks?: Record<string, string>; decided?: number; fieldTotal?: number; crosses?: number;
 }
 export interface LandReview {
   land: { LandId: number; LandCode: string; LandName: string; WorkflowStatus: string | null };
@@ -83,14 +85,14 @@ export interface LandReview {
   review: { ReviewId: number; Status: string; SubmittedBy: number | null; SubmittedByName: string | null; SubmittedAt: string | null; Remarks: string | null; EntrySubmittedByName?: string | null; EntrySubmittedAt?: string | null } | null;
   returned: { Remarks: string | null; DecidedAt: string; DecidedByName: string | null } | null;
   /** After a send-back: the fields the verifier marked ✗ (fixed = the value has been changed since). */
-  toFix?: { section: string; sectionKey: string; entry: string; field: string; was: string | null; now: string | null; fixed: boolean; key: string }[];
+  toFix?: { section: string; sectionKey: string; entry: string; field: string; was: string | null; now: string | null; fixed: boolean; key: string; remark?: string | null }[];
   canVerify: boolean; canApprove: boolean; userId: number | null;
 }
 export interface ReviewQueueRow { LandId: number; LandCode: string; LandName: string; ProjectId: number | null; WorkflowStatus: string | null; MouzaName: string | null; VersionNo: number; Since: string | null; ByName: string | null }
 const json = (method: string, body: unknown) => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 export const getLandReview = async (id: number) => handle<LandReview>(await fetchWithAuth(`${BASE}/land/${id}/review`));
 /** Verifier's decision: one field (✓ ok / ✗ bad / null clears), or all = "ok" (✓ on every field) / "clear". */
-export const checkReviewStep = async (id: number, body: { step: string; field?: string; decision?: "ok" | "bad" | "na" | null; all?: "ok" | "clear"; values?: Record<string, string | null> }) =>
+export const checkReviewStep = async (id: number, body: { step: string; field?: string; decision?: "ok" | "bad" | "na" | null; remark?: string; all?: "ok" | "clear"; values?: Record<string, string | null> }) =>
   handle<{ message: string }>(await fetchWithAuth(`${BASE}/land/${id}/review/check`, json("PUT", body)));
 export const submitReview = async (id: number, remarks?: string) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/land/${id}/review/submit`, json("POST", { remarks })));
 export const decideReview = async (id: number, action: "Approve" | "Return", remarks?: string) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/land/${id}/review/decide`, json("POST", { action, remarks })));
@@ -98,4 +100,7 @@ export const getReviewQueue = async (qs: string) => handle<{ items: ReviewQueueR
 export const requestReview = async (id: number, remarks?: string) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/land/${id}/review/request`, json("POST", { remarks })));
 export const returnReview = async (id: number, remarks: string) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/land/${id}/review/return`, json("POST", { remarks })));
 export interface FlowLandTab { LandId: number; LandCode: string; LandName: string; ProjectId: number | null; WorkflowStatus: string | null; RsKhatianNo: string | null; RsDagNo: string | null; LrKhatianNo: string | null; LrDagNo: string | null }
+export type SectionRights = Record<string, { view: boolean; create: boolean; edit: boolean; delete: boolean; own: boolean }>;
+/** Which land sections this user may add to / edit / delete in (Role Rights → Legal - Land sections). */
+export const getSectionRights = async () => handle<SectionRights>(await fetchWithAuth(`${BASE}/section-rights`));
 export const getFlowLands = async () => handle<{ lands: FlowLandTab[] }>(await fetchWithAuth(`${BASE}/lands`));
