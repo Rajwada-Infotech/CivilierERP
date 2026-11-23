@@ -3,19 +3,21 @@
 import { useState } from "react";
 import { ActivityIndicator, RefreshControl, ScrollView, Text, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
-import { useRoute, type RouteProp } from "@react-navigation/native";
+import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "@/auth/AuthContext";
 import { getCustomer360 } from "@/api/crmApi";
 import type { MainStackParamList } from "@/navigation/MainStack";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
-import { CRM, Empty, Figure, Kv, LinkRow, Section, fmtDate, joinDot, money, Pill, useCardStyle } from "./ui";
+import { ActionKey, CRM, Empty, Figure, Kv, LinkRow, Section, fmtDate, joinDot, money, Pill, useCardStyle } from "./ui";
 import { useCrmOpen } from "./CrmRegisterScreen";
 
 export default function Customer360Screen() {
   const { params } = useRoute<RouteProp<MainStackParamList, "CrmCustomer">>();
   const card = useCardStyle();
-  const { canAccessPage } = useAuth();
+  const { canAccessPage, canDoAction } = useAuth();
+  const nav = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const open = useCrmOpen();
   const allowed = canAccessPage("crm-customer-360");
   const q = useQuery({ queryKey: ["crm-customer-360", params.customerId], queryFn: () => getCustomer360(params.customerId), enabled: allowed });
@@ -48,6 +50,11 @@ export default function Customer360Screen() {
             {c.Email ? <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 2 }}>{c.Email}</Text> : null}
             <Text style={{ fontSize: 11.5, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 2 }}>{joinDot(c.Address, c.City, c.State, c.Pincode)}</Text>
             {c.PanNo ? <Text style={{ fontSize: 11.5, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 2 }}>PAN {c.PanNo}</Text> : null}
+            {canDoAction("crm-customers", "edit") ? (
+              <View style={{ flexDirection: "row", marginTop: 12 }}>
+                <ActionKey outline label="Edit customer" onPress={() => nav.navigate("CrmCustomerForm", { customerId: params.customerId })} />
+              </View>
+            ) : null}
           </View>
 
           <View style={{ gap: 10, marginBottom: 12 }}>

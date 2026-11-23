@@ -197,6 +197,14 @@ export const getMeters = (filters: MeterFilters = {}): Promise<MeterRow[]> =>
   getJson(`${BASE}/meters${toQs(filters)}`, "Failed to load meters");
 export const getMeter = (id: number): Promise<MeterRow> =>
   getJson(`${BASE}/meters/${id}`, "Failed to load meter");
+/** Add / edit a meter, as the web's Meter Reading Master does (POST /meters, PUT /meters/:id). */
+export interface MeterSave {
+  bookingId?: number; meterBoxNumber?: string; meterNumber?: string; providerId: number; connectionType?: string; meterType?: string;
+  billingCycle: "Monthly" | "3 Monthly"; openingReading?: number; openingReadingDate?: string; status?: MeterRow["Status"]; remarks?: string;
+}
+export const createMeter = (payload: MeterSave) => mutate<{ id: number }>(`${BASE}/meters`, "POST", payload, "Failed to save meter");
+export const updateMeter = (id: number, payload: MeterSave) => mutate<{ message: string }>(`${BASE}/meters/${id}`, "PUT", payload, "Failed to save meter");
+
 export const getNextReadingInfo = (meterId: number): Promise<NextReadingInfo> =>
   getJson(`${BASE}/meters/${meterId}/next-reading-info`, "Failed to load reading info");
 

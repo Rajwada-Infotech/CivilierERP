@@ -26,8 +26,9 @@ import { SuccessBurst } from "@/components/SuccessBurst";
 import { usePageRights } from "@/hooks/usePageRights";
 import { formatINR } from "@/utils/formatCurrency";
 import { getMaintenanceBills } from "@/api/maintenanceBillApi";
+import { getMaintenanceDirectory } from "@/api/maintenanceApi";
 import {
-  getMeters, getElectricityProviders, getNextReadingInfo, getMeterReadings,
+  getMeters, getMeter, createMeter, updateMeter, getElectricityProviders, getNextReadingInfo, getMeterReadings,
   recordReading, correctReading, previewBill, generateBill, getElectricityBills,
   verifyBill, addBillToCustomerBill, cancelBill, getElectricityDashboard,
   getMonthlyReport, getProviderWiseReport, getCustomerWiseReport, getElectricityAuditLog,
@@ -183,6 +184,9 @@ function MetersTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
   const [billingFor, setBillingFor] = useState<MeterRow | null>(null);
   const [historyFor, setHistoryFor] = useState<MeterRow | null>(null);
   const [auditFor, setAuditFor] = useState<MeterRow | null>(null);
+  // Add / edit a meter: the Meter Reading Master page right, as the server checks it.
+  const meterRights = usePageRights("meter-reading-master");
+  const [meterForm, setMeterForm] = useState<MeterRow | "new" | null>(null);
   const [burstLabel, setBurstLabel] = useState<string | null>(null);
 
   const fireBurst = (label: string) => {
@@ -220,6 +224,11 @@ function MetersTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
             style={{ flex: 1, color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 12.5, paddingVertical: 10 }}
           />
         </View>
+        {meterRights.canCreate ? (
+          <Pressable onPress={() => setMeterForm("new")} style={{ alignSelf: "flex-start", paddingHorizontal: 14, paddingVertical: 9, borderRadius: 10, backgroundColor: colors.primary, marginBottom: 12 }}>
+            <Text style={{ color: "#fff", fontSize: 12.5, fontFamily: fonts.heading.semibold }}>Add Meter</Text>
+          </Pressable>
+        ) : null}
         <View style={{ flexDirection: "row", gap: 8, marginBottom: 14 }}>
           <View style={{ flex: 1 }}>
             <PickerRow label="Provider" value={providerOptions.find((o) => o.key === String(providerId))?.label ?? ""} placeholder="All" onPress={() => setProviderPickerOpen(true)} />
@@ -277,6 +286,11 @@ function MetersTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
                       <Text style={{ color: colors.foreground, fontSize: 10.5, fontFamily: fonts.heading.semibold }}>Bill</Text>
                     </Pressable>
                   )}
+                  {meterRights.canEdit ? (
+                    <Pressable onPress={() => setMeterForm(m)} style={{ flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 11, paddingVertical: 7, borderRadius: 9, borderWidth: 1, borderColor: colors.border }}>
+                      <Text style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.heading.semibold }}>Edit</Text>
+                    </Pressable>
+                  ) : null}
                   <Pressable onPress={() => setHistoryFor(m)} style={{ flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 11, paddingVertical: 7, borderRadius: 9, borderWidth: 1, borderColor: colors.border }}>
                     <HistoryIcon size={12} color={colors.mutedForeground} />
                     <Text style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.heading.semibold }}>History</Text>
@@ -310,10 +324,87 @@ function MetersTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
         />
       )}
       {historyFor && <MeterHistorySheet meter={historyFor} onClose={() => setHistoryFor(null)} />}
+      {meterForm && (
+        <MeterFormSheet meter={meterForm === "new" ? null : meterForm} providers={providers} onClose={() => setMeterForm(null)}
+          onDone={(msg) => { setMeterForm(null); toast.success(msg); qc.invalidateQueries({ queryKey: ["elec-meters"] }); qc.invalidateQueries({ queryKey: ["elec-meter"] }); }} />
+      )}
       {auditFor && <AuditLogSheet title={`Audit Log — ${auditFor.MeterNumber}`} filters={{ meterId: auditFor.Id }} onClose={() => setAuditFor(null)} />}
 
       <SuccessBurst visible={!!burstLabel} label={burstLabel ?? ""} color={colors.primary} ink={HERO_GRADIENT[0]} />
     </View>
+  );
+}
+
+// Add / edit a meter — the web's Meter Reading Master form (src/pages/masters/MeterReadingMaster.tsx): the customer
+// (a handed-over booking, from the Maintenance directory), meter box and number, provider, connection and meter type,
+// billing cycle, the opening reading for a new meter or the status for an existing one, remarks.
+const METER_STATUSES = ["Active", "Inactive", "Transferred", "Disconnected"] as const;
+function MeterFormSheet({ meter, providers, onClose, onDone }: { meter: MeterRow | null; providers: { Id: number; Name: string }[]; onClose: () => void; onDone: (msg: string) => void }) {
+  const isEdit = !!meter;
+  const { data: full } = useQuery({ queryKey: ["elec-meter", meter?.Id], queryFn: () => getMeter(meter!.Id), enabled: isEdit });
+  const { data: directory } = useQuery({ queryKey: ["maintenance-directory", ""], queryFn: () => getMaintenanceDirectory(""), enabled: !isEdit });
+  const [f, setF] = useState<Record<string, string>>({ billingCycle: "Monthly", status: "Active", openingReading: "0", openingReadingDate: new Date().toISOString().slice(0, 10) });
+  const [loaded, setLoaded] = useState(false);
+  if (isEdit && full && !loaded) {
+    const m = full as unknown as Record<string, unknown>;
+    const s = (k: string) => (m[k] == null ? "" : String(m[k]));
+    setLoaded(true);
+    setF({ meterBoxNumber: s("MeterBoxNumber"), meterNumber: s("MeterNumber"), providerId: s("ProviderId"), connectionType: s("ConnectionType"),
+      meterType: s("MeterType"), billingCycle: s("BillingCycle") || "Monthly", status: s("Status") || "Active", remarks: s("Remarks") });
+  }
+  const set = (k: string, v: string) => setF((x) => ({ ...x, [k]: v }));
+  const [picker, setPicker] = useState<null | "customer" | "provider" | "cycle" | "status">(null);
+  const [saving, setSaving] = useState(false);
+  const customers = Array.isArray(directory) ? directory : [];
+  const customer = customers.find((c) => String(c.Id) === f.bookingId);
+
+  const save = async () => {
+    if (!isEdit && !f.bookingId) return toast.error("Select a customer/booking");
+    if (!String(f.meterNumber ?? "").trim()) return toast.error("Meter Number is required");
+    if (!f.providerId) return toast.error("Electricity Provider is required");
+    setSaving(true);
+    try {
+      const common = { meterBoxNumber: f.meterBoxNumber || undefined, providerId: Number(f.providerId), connectionType: f.connectionType || undefined,
+        meterType: f.meterType || undefined, billingCycle: f.billingCycle as "Monthly" | "3 Monthly", remarks: f.remarks || undefined };
+      if (isEdit) { await updateMeter(meter!.Id, { ...common, status: f.status as MeterRow["Status"] }); onDone("Meter updated"); }
+      else {
+        await createMeter({ ...common, bookingId: Number(f.bookingId), meterNumber: f.meterNumber.trim(), openingReading: Number(f.openingReading) || 0, openingReadingDate: f.openingReadingDate || undefined });
+        onDone("Meter created");
+      }
+    } catch (err) { toast.error((err as Error).message || "Failed to save meter"); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <ConfirmSheet visible title={isEdit ? `Edit Meter — ${meter!.MeterNumber}` : "Add Meter"} tone="primary" confirmLabel={saving ? "Saving…" : isEdit ? "Save Changes" : "Add Meter"}
+      loading={saving || (isEdit && !loaded)} onConfirm={save} onClose={onClose}>
+      {isEdit ? (
+        <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, marginBottom: 10 }}>{[meter!.CustomerName, meter!.BookingNo].filter(Boolean).join(" · ")}</Text>
+      ) : (
+        <PickerRow label="Customer / Booking" required value={customer ? `${customer.CustomerName ?? ""} — ${[customer.BlockName, customer.UnitNo].filter(Boolean).join(" / ")} (${customer.BookingNo})` : ""} onPress={() => setPicker("customer")} />
+      )}
+      <TextField label="Meter Box Number" value={f.meterBoxNumber ?? ""} onChangeText={(v) => set("meterBoxNumber", v)} />
+      <TextField label="Meter Number" required value={f.meterNumber ?? ""} onChangeText={(v) => set("meterNumber", v)} disabled={isEdit} />
+      <PickerRow label="Electricity Provider" required value={providers.find((p) => String(p.Id) === f.providerId)?.Name ?? ""} onPress={() => setPicker("provider")} />
+      <TextField label="Connection Type" value={f.connectionType ?? ""} onChangeText={(v) => set("connectionType", v)} placeholder="e.g. Single Phase" />
+      <TextField label="Meter Type" value={f.meterType ?? ""} onChangeText={(v) => set("meterType", v)} placeholder="e.g. Digital" />
+      <PickerRow label="Billing Cycle" value={f.billingCycle} onPress={() => setPicker("cycle")} />
+      {isEdit ? <PickerRow label="Status" value={f.status} onPress={() => setPicker("status")} /> : (
+        <>
+          <NumberField label="Opening Reading" value={f.openingReading ?? ""} onChangeText={(v) => set("openingReading", v)} />
+          <DateField label="Opening Reading Date" value={f.openingReadingDate ?? ""} onChange={(v: string) => set("openingReadingDate", v)} />
+        </>
+      )}
+      <RemarksField label="Remarks" value={f.remarks ?? ""} onChangeText={(v) => set("remarks", v)} />
+      <OptionPickerModal visible={!!picker} searchable={picker === "customer"}
+        title={picker === "customer" ? "Customer / Booking" : picker === "provider" ? "Electricity Provider" : picker === "cycle" ? "Billing Cycle" : "Status"}
+        options={picker === "customer" ? customers.map((c) => ({ key: String(c.Id), label: c.CustomerName ?? c.BookingNo, sublabel: `${[c.BlockName, c.UnitNo].filter(Boolean).join(" / ")} · ${c.BookingNo}` }))
+          : picker === "provider" ? providers.map((p) => ({ key: String(p.Id), label: p.Name }))
+          : picker === "cycle" ? ["Monthly", "3 Monthly"].map((x) => ({ key: x, label: x })) : METER_STATUSES.map((x) => ({ key: x, label: x }))}
+        selectedKey={picker === "customer" ? f.bookingId ?? null : picker === "provider" ? f.providerId ?? null : picker === "cycle" ? f.billingCycle : f.status}
+        onSelect={(k) => { if (k) set(picker === "customer" ? "bookingId" : picker === "provider" ? "providerId" : picker === "cycle" ? "billingCycle" : "status", k); setPicker(null); }}
+        onClose={() => setPicker(null)} />
+    </ConfirmSheet>
   );
 }
 

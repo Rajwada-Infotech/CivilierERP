@@ -321,14 +321,16 @@ export function Button({ label, onPress, icon: Icon, kind = "solid", disabled, b
 }
 
 /** A key in a row of keys (Log welcome call, Pay…): the accent fill, or `outline` for the quieter ones. */
-export function ActionKey({ label, icon: Icon, onPress, tone, outline }: {
+export function ActionKey({ label, icon: Icon, onPress, tone, outline, half }: {
+  /** Two to a line, wrapping, for a row of up to four keys. */
+  half?: boolean;
   label: string; icon?: React.ComponentType<{ size?: number; color?: string }>; onPress: () => void; tone?: string; outline?: boolean;
 }) {
   const b = useBrand();
   const c = tone || b.accent;
   return (
     <Tap onPress={onPress}
-      style={({ pressed }) => ({ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, minHeight: 46, paddingHorizontal: 12, borderRadius: 14,
+      style={({ pressed }) => ({ ...(half ? { flexGrow: 1, flexBasis: "40%" } : { flex: 1 }), flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, minHeight: 46, paddingHorizontal: 12, borderRadius: 14,
         backgroundColor: outline ? `${c}1f` : c, opacity: pressed ? 0.75 : 1 })}>
       {Icon ? <Icon size={16} color={outline ? c : ON_ACCENT} /> : null}
       <Text numberOfLines={1} style={{ fontSize: 14, fontFamily: fonts.heading.semibold, color: outline ? c : ON_ACCENT }}>{label}</Text>

@@ -5,20 +5,23 @@
 // staff with that page's right.
 import { useState } from "react";
 import { ActivityIndicator, RefreshControl, ScrollView, Text, View } from "react-native";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import * as DocumentPicker from "expo-document-picker";
+import { fetchWithAuth } from "@/services/fetchWithAuth";
 import { useRoute, type RouteProp } from "@react-navigation/native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { CheckCircle2, Circle, FileText, Lock, PhoneCall, Ticket, Wallet } from "lucide-react-native";
 import { useAuth } from "@/auth/AuthContext";
-import { crmGet, getBooking, getBookingLifecycle, getBookingPayments, type Row } from "@/api/crmApi";
+import { crmGet, crmSend, getBooking, getBookingLifecycle, getBookingPayments, type Row } from "@/api/crmApi";
+import { toast } from "@/components/Toast";
 import { getTicketsForBooking } from "@/api/serviceTicketApi";
 import type { MainStackParamList } from "@/navigation/MainStack";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { ActionKey, CRM, ContactKeys, Empty, HeroSurface, Kv, LinkRow, ON_HERO, Section, Tap, fmtDate, joinDot, money, Pill, useCardStyle, words } from "./ui";
 import { useCrmOpen } from "./CrmRegisterScreen";
-import { milestoneMissing, nextOpenMilestone } from "./CrmForms";
+import { ApplyOnAccountPrompt, ChangeUnitDialog, GenerateInvoiceDialog, Chips, NotePrompt, milestoneMissing, nextOpenMilestone } from "./CrmForms";
 
 // A booking that no longer takes money here (the web's "closed" plan).
 const CLOSED = ["Cancelled", "UnitChanged", "Rejected"];
@@ -72,6 +75,113 @@ export default function BookingDetailScreen() {
   const price = Number(head.GrandTotal ?? sum?.totalDue) || 0;
   const title = head.BookingNo || params.title || "Booking";
   const canPay = live && canDoAction("crm-payments", "edit");
+  // Milestone actions, as the web's booking page (CrmBookingDetail.tsx) and Payment Milestones page offer them.
+  const qc = useQueryClient();
+  const [busyMs, setBusyMs] = useState<number | null>(null);
+  const [waiveFor, setWaiveFor] = useState<Row | null>(null);
+  const canEditReceipts = live && canDoAction("crm-money-receipts", "edit");
+  const [bounceFor, setBounceFor] = useState<Row | null>(null);
+  const [busyRc, setBusyRc] = useState<number | null>(null);
+  const receiptAction = async (r: Row, path: "bounce" | "resubmit", body: object | undefined, done: string) => {
+    setBusyRc(r.Id);
+    try {
+      await crmSend(`/api/crm/money-receipts/${r.Id}/${path}`, "PUT", body);
+      toast.success(done); setBounceFor(null);
+      ["crm-booking-receipts", "crm"].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setBusyRc(null); }
+  };
+  // Booking approval, as the web's booking page runs it (CrmBookingDetail.tsx): the Data Review checklist and
+  // "Verify & Send for Approval" for whoever Approval Setup names as data verifier, then Approve / Send back for
+  // whoever may act at the current stage (stageState.CanActOnStage, decided on the server).
+  const stageState = bookingQ.data?.stageState;
+  const stage: string = b?.WorkflowStage || stageState?.WorkflowStage || "Review";
+  const canEditBooking = live && canDoAction("crm-bookings", "edit");
+  const inApproval = status === "Pending";
+  const verifierQ = useQuery({ queryKey: ["approval-can-act", "crm-booking-verification", ""], enabled: canEditBooking && inApproval && stage === "Review",
+    queryFn: () => crmGet<{ canAct: boolean }>(`/api/approval-workflows/can-act?module=crm-booking-verification`) });
+  const canVerify = canEditBooking && !!verifierQ.data?.canAct;
+  const checklistQ = useQuery({ queryKey: ["crm-booking-checklist", id], enabled: seesBooking && inApproval && stage === "Review",
+    queryFn: () => crmGet<{ items: Row[]; allChecked: boolean }>(`/api/crm/bookings/${id}/checklist`) });
+  const canActOnStage = inApproval && !!stageState?.CanActOnStage;
+  const [busyStage, setBusyStage] = useState<string | null>(null);
+  const [flagItem, setFlagItem] = useState<Row | null>(null);
+  const [sendBack, setSendBack] = useState(false);
+  const sendBackChoices: string[] = Array.isArray(stageState?.SendBackTo) ? stageState.SendBackTo : [];
+  const [sendBackTo, setSendBackTo] = useState<string | null>(null);
+  const refreshBooking = () => ["crm-booking", "crm-booking-life", "crm-booking-checklist", "crm-booking-receipts", "crm-booking-invoices", "crm", "crm-dashboard", "approvals"]
+    .forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+  const stageAction = async (key: string, fn: () => Promise<any>, done: (r: any) => string) => {
+    setBusyStage(key);
+    try {
+      const r = await fn(); toast.success(done(r)); setFlagItem(null); setSendBack(false);
+      if (r?.mrWarning) toast.error(`Money Receipt could not be auto-created. (${r.mrWarning})`);
+    } catch (e) { toast.error((e as Error).message); }
+    finally { refreshBooking(); setBusyStage(null); }
+  };
+  const checkItem = (it: Row, action: "check" | "uncheck" | "flag" | "resubmit", remarks?: string) =>
+    stageAction(it.ItemKey, () => crmSend(`/api/crm/bookings/${id}/checklist/${it.ItemKey}/${action}`, "PUT", action === "check" || action === "flag" ? { remarks } : undefined),
+      () => `${it.ItemLabel}: ${action === "check" ? "verified" : action === "uncheck" ? "unticked" : "sent for recheck"}`);
+  // Civilier Home access, as the web booking page's Civilier Home tab: set up (once Confirmed), deactivate /
+  // reactivate, reset the password back to the first one (crmBookings.js portal routes, crm-portal admin reset).
+  const portalQ = useQuery({ queryKey: ["crm-booking-portal", id], enabled: seesBooking,
+    queryFn: () => crmGet<Row>(`/api/crm/bookings/${id}/portal-status`) });
+  const portal = portalQ.data;
+  const [busyPortal, setBusyPortal] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const portalAction = async (fn: () => Promise<any>, done: (r: any) => string) => {
+    setBusyPortal(true);
+    try { const r = await fn(); toast.success(done(r)); setConfirmReset(false); }
+    catch (e) { toast.error((e as Error).message); }
+    finally { qc.invalidateQueries({ queryKey: ["crm-booking-portal", id] }); setBusyPortal(false); }
+  };
+  // Booking attachments, as the web booking page's Attachments tab: upload (POST /:id/attachments, field "files"),
+  // no delete here (the server erases the row; deleting stays on the web).
+  const [uploading, setUploading] = useState(false);
+  const uploadDocs = async () => {
+    const pick = await DocumentPicker.getDocumentAsync({ multiple: true, copyToCacheDirectory: true });
+    if (pick.canceled || !pick.assets?.length) return;
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      for (const a of pick.assets) {
+        if (a.file) fd.append("files", a.file);
+        else fd.append("files", { uri: a.uri, name: a.name, type: a.mimeType || "application/octet-stream" } as any);
+      }
+      const res = await fetchWithAuth(`/api/crm/bookings/${id}/attachments`, { method: "POST", body: fd });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || "Upload failed");
+      toast.success("File(s) uploaded");
+      qc.invalidateQueries({ queryKey: ["crm-booking-docs", id] });
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setUploading(false); }
+  };
+  // Change unit: the web booking page's menu item (staff who may edit bookings, not for a plot sale).
+  const [changeUnit, setChangeUnit] = useState(false);
+  // Invoices: generate (the web's Generate invoice dialog) and void with a reason — the right the server checks.
+  const canInvoice = live && (canDoAction("crm-bookings", "edit") || canDoAction("crm-invoices", "edit"));
+  const [genInvoice, setGenInvoice] = useState(false);
+  const [voidFor, setVoidFor] = useState<Row | null>(null);
+  const [applyTo, setApplyTo] = useState<Row | null>(null);
+  const refreshMoney = () => ["crm-booking-oa", "crm-booking", "crm-booking-pay", "crm-booking-life", "crm", "crm-dashboard"].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+  // On-account deposits still holding money, and the web's gate for applying them by hand: the booking funded in
+  // full, and only the next outstanding milestone, once its demand is raised (CrmPaymentMilestones.tsx canManuallyApplyOnAccount).
+  const oaQ = useQuery({ queryKey: ["crm-booking-oa", id], queryFn: () => crmGet<{ payments: Row[]; availableBalance: number }>(`/api/crm/payments/booking/${id}/on-account`), enabled: canPay });
+  const deposits = (oaQ.data?.payments ?? []).filter((d) => Number(d.AvailableBalance) > 0.005);
+  const applyTarget = (() => {
+    const ms = payQ.data?.milestones ?? [];
+    const required = ms.length > 0 ? Number(payQ.data?.summary?.totalDue || 0) : Number(pb?.GrandTotal ?? pb?.TotalValue ?? 0);
+    const onHand = Number(payQ.data?.summary?.totalPaid || 0) + Number(oaQ.data?.availableBalance || 0);
+    if (required > 0 && onHand + 0.005 < required) return null;
+    const next = [...ms].sort((a, b) => Number(a.MilestoneNo) - Number(b.MilestoneNo)).find((m) => m.Status !== "Paid" && m.Status !== "Waived");
+    if (!next || Number(next.AmountDue) - Number(next.AmountPaid || 0) <= 0 || next.DemandStatus === "Pending") return null;
+    return next;
+  })();
+  const msAction = async (m: Row, fn: () => Promise<any>, done: (r: any) => string) => {
+    setBusyMs(m.Id);
+    try { const r = await fn(); toast.success(done(r)); refreshMoney(); setWaiveFor(null); setApplyTo(null); }
+    catch (e) { toast.error((e as Error).message); }
+    finally { setBusyMs(null); }
+  };
   const canDeposit = live && canDoAction("crm-payments", "create");
   const canCall = live && canDoAction("crm-welcome-calls", "create");
   const canTicket = live && canDoAction("crm-service-tickets", "create");
@@ -150,6 +260,57 @@ export default function BookingDetailScreen() {
             </View>
           ) : null}
 
+          {inApproval && live ? (
+            <Section title={`Approval · ${words(stage)}`}>
+              {stage === "Review" ? (checklistQ.data?.items ?? []).map((it) => {
+                const st = it.CheckStatus;
+                const tone = st === "Checked" ? colors.primary : st === "NeedsRecheck" ? colors.destructive : colors.mutedForeground;
+                return (
+                  <View key={it.ItemKey} style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 6 }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                      <Text style={{ flex: 1, fontSize: 13.5, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{it.ItemLabel}</Text>
+                      <Pill label={st === "Checked" ? "Verified" : st === "NeedsRecheck" ? "Flagged \u2014 fix needed" : "To verify"} tone={tone} />
+                    </View>
+                    {it.Remarks ? <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>{st === "NeedsRecheck" ? "Flagged: " : "Remark: "}{it.Remarks}</Text> : null}
+                    {canVerify && st !== "NeedsRecheck" ? (
+                      <View style={{ flexDirection: "row", gap: 8 }}>
+                        <ActionKey label={busyStage === it.ItemKey ? "Saving\u2026" : st === "Checked" ? "Untick" : "Verify"} outline={st === "Checked"}
+                          onPress={() => checkItem(it, st === "Checked" ? "uncheck" : "check")} />
+                        <ActionKey label="Flag for Recheck" outline tone={colors.destructive} onPress={() => setFlagItem(it)} />
+                      </View>
+                    ) : null}
+                    {canEditBooking && st === "NeedsRecheck" ? (
+                      <View style={{ flexDirection: "row" }}>
+                        <ActionKey label={busyStage === it.ItemKey ? "Sending\u2026" : "I\u2019ve revised this \u2014 resend for recheck"} outline onPress={() => checkItem(it, "resubmit")} />
+                      </View>
+                    ) : null}
+                  </View>
+                );
+              }) : null}
+              {stage === "Review" && canVerify ? (
+                <View style={{ flexDirection: "row", marginTop: 12 }}>
+                  <ActionKey label={busyStage === "verify" ? "Submitting\u2026" : "Verify & Send for Approval"}
+                    onPress={() => checklistQ.data?.allChecked
+                      ? stageAction("verify", () => crmSend(`/api/crm/bookings/${id}/ready-for-approval`, "PUT"), (r) => `Data review complete \u2014 sent to ${r?.label || "Marketing Head Approval"}`)
+                      : toast.error("Complete the data review checklist before booking approval.")} />
+                </View>
+              ) : stage === "Review" && canEditBooking ? (
+                <Text style={{ marginTop: 10, fontSize: 12.5, fontFamily: fonts.body.medium, color: colors.mutedForeground }}>Waiting for data verification</Text>
+              ) : null}
+              {stage !== "Review" && canActOnStage ? (
+                <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
+                  <ActionKey label="Reject" outline tone={colors.destructive} onPress={() => { if (!sendBackTo) setSendBackTo(sendBackChoices[0] ?? null); setSendBack(true); }} />
+                  <ActionKey label={busyStage === "approve" ? "Approving\u2026" : stage === "DirectorApproval" ? "Final Approve" : "Approve"}
+                    onPress={() => stageAction("approve", () => crmSend(`/api/crm/bookings/${id}/approve`, "PUT"), (r) => r?.confirmed ? "Booking confirmed" : `Approved - moved to ${r?.label || "next stage"}`)} />
+                </View>
+              ) : null}
+              {stage !== "Review" && canActOnStage && sendBackChoices.length > 1 ? (
+                <Chips label="If sent back, it goes" options={sendBackChoices} value={sendBackTo ?? sendBackChoices[0]} onChange={setSendBackTo}
+                  labelOf={(c) => (c === "Review" ? "To Data Review" : `To the ${words(c).replace(/ Approval$/, "")}`)} />
+              ) : null}
+            </Section>
+          ) : null}
+
           {moneyInfo ? (
             <Section title="Money">
               <Kv label="On account (available)" value={money(pb?.OnAccountAvailable)} />
@@ -202,10 +363,21 @@ export default function BookingDetailScreen() {
                     <Text style={{ fontSize: 10.5, fontFamily: fonts.body.regular, color: "#f59e0b", marginTop: 2 }}>{money(m.PendingVerificationAmount)} with Finance for approval</Text>
                   ) : null}
                   {canPay && payQ.data && m.Status !== "Waived" && m.Status !== "Paid" && milestoneMissing(m) > 0 ? (
-                    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 8 }}>
-                      <Text style={{ fontSize: 11, fontFamily: fonts.body.medium, color: colors.mutedForeground }}>Balance {money(milestoneMissing(m))}</Text>
-                      <View style={{ width: 96, flexDirection: "row" }}>
-                        <ActionKey label="Pay" outline={m.Id !== nextOpenId} onPress={() => nav.navigate("CrmPayment", { bookingId: id, milestoneId: m.Id, title })} />
+                    <View style={{ gap: 8, marginTop: 10 }}>
+                      <Text style={{ fontSize: 12, fontFamily: fonts.body.medium, color: colors.mutedForeground }}>Balance {money(milestoneMissing(m))}</Text>
+                      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                        <ActionKey half label="Pay" outline={m.Id !== nextOpenId} onPress={() => nav.navigate("CrmPayment", { bookingId: id, milestoneId: m.Id, title })} />
+                        {m.DemandStatus === "Pending" ? (
+                          <ActionKey half label={busyMs === m.Id ? "Raising…" : "Raise demand"} outline
+                            onPress={() => msAction(m, () => crmSend(`/api/crm/payments/${m.Id}/demand`, "POST", {}), (r) => `Demand ${r?.DemandNo ?? ""} raised`)} />
+                        ) : m.DemandStatus === "Demanded" ? (
+                          <ActionKey half label={busyMs === m.Id ? "Undoing…" : "Undo demand"} outline tone={colors.mutedForeground}
+                            onPress={() => msAction(m, () => crmSend(`/api/crm/payments/${m.Id}/demand/undo`, "PATCH"), () => "Demand reverted to Not Raised")} />
+                        ) : null}
+                        {applyTarget?.Id === m.Id && deposits.length > 0 ? (
+                          <ActionKey half label="Apply on account" outline onPress={() => setApplyTo(m)} />
+                        ) : null}
+                        <ActionKey half label="Waive" outline tone={colors.mutedForeground} onPress={() => setWaiveFor(m)} />
                       </View>
                     </View>
                   ) : null}
@@ -218,20 +390,52 @@ export default function BookingDetailScreen() {
           {seesReceipts || seesInvoices || seesBooking ? (
             <Section title="Papers">
               {seesReceipts ? receipts.map((r) => (
-                <LinkRow key={`r${r.Id}`} icon={FileText} title={`Money receipt ${r.ReceiptNo}`} sub={joinDot(money(r.Amount), fmtDate(r.ReceivedDate), r.PaymentMode, r.Status)}
-                  onPress={() => open({ to: "document", path: `/api/crm/money-receipts/${r.Id}/pdf`, name: r.ReceiptNo || "Money Receipt" })} />
+                <View key={`r${r.Id}`}>
+                  <LinkRow icon={FileText} title={`Money receipt ${r.ReceiptNo}`} sub={joinDot(money(r.Amount), fmtDate(r.ReceivedDate), r.PaymentMode, r.Status)}
+                    onPress={() => open({ to: "document", path: `/api/crm/money-receipts/${r.Id}/pdf`, name: r.ReceiptNo || "Money Receipt" })} />
+                  {/* The web's Money Receipts actions: bounce a pending one, put a bounced one back (CrmMoneyReceipts.tsx). */}
+                  {canEditReceipts && r.ReceivedPaymentId == null && (r.Status === "Pending" || r.Status === "Bounced") ? (
+                    <View style={{ flexDirection: "row", gap: 8, marginBottom: 8 }}>
+                      {r.Status === "Pending" ? (
+                        <ActionKey label="Bounce" outline tone={colors.destructive} onPress={() => setBounceFor(r)} />
+                      ) : (
+                        <ActionKey label={busyRc === r.Id ? "Putting back…" : "Put back"} outline
+                          onPress={() => receiptAction(r, "resubmit", undefined, `${r.ReceiptNo} put back`)} />
+                      )}
+                    </View>
+                  ) : null}
+                </View>
               )) : null}
               {seesInvoices ? invoices.map((v) => (
-                <LinkRow key={`i${v.Id}`} icon={FileText} tone="#3b82f6" title={`Invoice ${v.InvoiceNo ?? v.Id}`}
-                  sub={joinDot(v.InvoiceType, money(v.TotalAmount ?? v.GrandTotal ?? v.Amount), fmtDate(v.InvoiceDate ?? v.CreatedAt), v.Status)}
-                  onPress={() => open({ to: "document", path: `/api/crm/bookings/${id}/invoices/${v.Id}/pdf`, name: v.InvoiceNo || "Invoice" })} />
+                <View key={`i${v.Id}`}>
+                  <LinkRow icon={FileText} tone="#3b82f6" title={`Invoice ${v.InvoiceNo ?? v.Id}`}
+                    sub={joinDot(v.InvoiceType, money(v.TotalAmount ?? v.GrandTotal ?? v.Amount), fmtDate(v.InvoiceDate ?? v.CreatedAt), v.Status)}
+                    onPress={() => open({ to: "document", path: `/api/crm/bookings/${id}/invoices/${v.Id}/pdf`, name: v.InvoiceNo || "Invoice" })} />
+                  {canInvoice && v.Status !== "Void" ? (
+                    <View style={{ flexDirection: "row", marginBottom: 8 }}>
+                      <ActionKey label="Void" outline tone={colors.destructive} onPress={() => setVoidFor(v)} />
+                    </View>
+                  ) : null}
+                </View>
               )) : null}
+              {canInvoice ? (
+                <View style={{ flexDirection: "row", marginTop: 8 }}>
+                  <ActionKey outline label="Generate invoice" onPress={() => setGenInvoice(true)} />
+                </View>
+              ) : null}
               {seesBooking ? docs.map((d) => (
-                <LinkRow key={`${d.Source}${d.Id}`} icon={FileText} tone="#8b5cf6" title={d.Label || d.FileName}
-                  sub={joinDot(d.FileName !== d.Label && d.FileName, kb(d.FileSize), fmtDate(d.CreatedAt), d.UploaderName)}
-                  onPress={() => open({ to: "document", name: d.FileName || "Document",
-                    path: d.Source === "booking" ? `/api/crm/bookings/${id}/attachments/file/${d.Id}` : `/api/crm/booking-documents/file/${d.Id}` })} />
+                <View key={`${d.Source}${d.Id}`}>
+                  <LinkRow icon={FileText} tone="#8b5cf6" title={d.Label || d.FileName}
+                    sub={joinDot(d.FileName !== d.Label && d.FileName, kb(d.FileSize), fmtDate(d.CreatedAt), d.UploaderName, d.Source === "application" && "From Application")}
+                    onPress={() => open({ to: "document", name: d.FileName || "Document",
+                      path: d.Source === "booking" ? `/api/crm/bookings/${id}/attachments/file/${d.Id}` : `/api/crm/booking-documents/file/${d.Id}` })} />
+                </View>
               )) : null}
+              {canEditBooking ? (
+                <View style={{ flexDirection: "row", marginTop: 8 }}>
+                  <ActionKey outline label={uploading ? "Uploading\u2026" : "Upload files"} onPress={uploadDocs} />
+                </View>
+              ) : null}
               {receiptsQ.isLoading || invoicesQ.isLoading || docsQ.isLoading ? <ActivityIndicator color={colors.mutedForeground} style={{ paddingVertical: 10 }} />
                 : !receipts.length && !invoices.length && !docs.length ? <Empty text="No receipts, invoices or documents yet." /> : null}
             </Section>
@@ -274,12 +478,72 @@ export default function BookingDetailScreen() {
             </Section>
           ) : null}
 
+          {["crm-pre-possession", "crm-possession-notice", "crm-handover"].some((pg) => canAccessPage(pg)) && status === "Approved" ? (
+            <Section title="Possession">
+              <LinkRow icon={FileText} title="Possession & Handover" sub="Checklist, notice, handover and snags" onPress={() => nav.navigate("CrmPossession", { bookingId: id, title })} />
+            </Section>
+          ) : null}
+          {canEditBooking && b && !b.IsPlotSale ? (
+            <Section title="Unit">
+              <LinkRow icon={FileText} title="Change unit" sub="Move this booking to another unit; it goes for approval" onPress={() => setChangeUnit(true)} />
+            </Section>
+          ) : null}
+          {changeUnit && b ? <ChangeUnitDialog booking={{ ...pb, ...b }} onClose={() => setChangeUnit(false)} /> : null}
+
+          {/* Civilier Home */}
+          {portal ? (
+            <Section title="Civilier Home">
+              {portal.hasPortal ? (
+                <>
+                  <Kv label="Access" value={portal.isActive ? "Access Active" : "Access Deactivated"} />
+                  <Kv label="Mobile login" value={portal.loginMobile || "No 10-digit mobile on file"} />
+                  <Kv label="Password" value={portal.mustChangePassword ? "First password" : "Own password"} />
+                  <Kv label="Last sign-in" value={portal.lastLoginAt ? fmtDate(portal.lastLoginAt) : "Never"} />
+                  {portal.firstPassword ? <Kv label="First password" value={`${portal.firstPassword} (${portal.passwordRule})`} /> : null}
+                  {canEditBooking ? (
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
+                      <ActionKey half outline tone={portal.isActive ? colors.destructive : undefined}
+                        label={busyPortal && !confirmReset ? "Updating\u2026" : portal.isActive ? "Deactivate Access" : "Reactivate Access"}
+                        onPress={() => portalAction(() => crmSend(`/api/crm/bookings/${id}/portal/${portal.isActive ? "deactivate" : "reactivate"}`, "PUT"),
+                          () => (portal.isActive ? "Portal access deactivated" : "Portal access reactivated"))} />
+                      {portal.isActive ? (
+                        <ActionKey half outline tone={confirmReset ? colors.destructive : undefined}
+                          label={confirmReset ? (busyPortal ? "Resetting\u2026" : "Confirm reset") : "Reset password"}
+                          onPress={() => confirmReset
+                            ? portalAction(() => crmSend("/api/crm-portal/admin/reset-password", "POST", { customerId: portal.customerId }), (r) => r?.message || "Password reset")
+                            : setConfirmReset(true)} />
+                      ) : null}
+                    </View>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <Text style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>
+                    {portal.workflowStage !== "Confirmed"
+                      ? "Civilier Home access is set up automatically once this booking reaches Confirmed status."
+                      : "This booking is Confirmed but has no Civilier Home account yet. Set it up below."}
+                  </Text>
+                  {canEditBooking && portal.workflowStage === "Confirmed" ? (
+                    <View style={{ flexDirection: "row", marginTop: 10 }}>
+                      <ActionKey label={busyPortal ? "Setting up\u2026" : "Set up Civilier Home"}
+                        onPress={() => portalAction(() => crmSend(`/api/crm/bookings/${id}/provision-portal`, "POST"), () => "Civilier Home access created")} />
+                    </View>
+                  ) : null}
+                </>
+              )}
+            </Section>
+          ) : null}
+
           {/* Welcome call and agreement */}
           {bookingQ.data ? (
             <Section title="Welcome Call & Agreement">
               {bookingQ.data.welcomeCalls?.[0] ? (
                 <Kv label="Welcome call" value={joinDot(bookingQ.data.welcomeCalls[0].Outcome, fmtDate(bookingQ.data.welcomeCalls[0].CallDate))} />
               ) : <Kv label="Welcome call" value="Not done yet" />}
+              {canAccessPage("crm-welcome-calls") ? (
+                <LinkRow icon={CheckCircle2} title="Welcome checklist" sub="Verify each fact confirmed on the call, then submit"
+                  onPress={() => nav.navigate("CrmWelcomeChecklist", { bookingId: id, title })} />
+              ) : null}
               {bookingQ.data.agreement ? (
                 <>
                   <Kv label="Agreement" value={joinDot(bookingQ.data.agreement.AgreementNo, bookingQ.data.agreement.Status)} />
@@ -290,6 +554,39 @@ export default function BookingDetailScreen() {
           ) : null}
         </>
       )}
+      <ApplyOnAccountPrompt milestone={applyTo} deposits={deposits} busy={busyMs != null} onClose={() => setApplyTo(null)}
+        onApply={(d, amount) => applyTo && msAction(applyTo, () => crmSend(`/api/crm/payments/on-account/${d.Id}/apply`, "PUT", { MilestoneId: applyTo.Id, Amount: amount }), () => `${money(amount)} applied from ${d.ReceiptNo}`)} />
+      {genInvoice ? <GenerateInvoiceDialog bookingId={id} onClose={() => setGenInvoice(false)} /> : null}
+      <NotePrompt open={!!voidFor} danger title={`Void ${voidFor?.InvoiceNo ?? "invoice"}?`} hint="The invoice stays on record as Void; its milestone can then be invoiced again."
+        placeholder="Reason for voiding (required)" submitLabel="Void invoice" busy={busyRc != null}
+        onSubmit={async (reason) => {
+          if (!voidFor) return;
+          try { await crmSend(`/api/crm/bookings/${id}/invoices/${voidFor.Id}/void`, "PUT", { reason }); toast.success(`${voidFor.InvoiceNo} voided`); setVoidFor(null);
+            ["crm-booking-invoices", "crm-booking", "crm"].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); }
+          catch (e) { toast.error((e as Error).message); }
+        }}
+        onClose={() => setVoidFor(null)} />
+      <NotePrompt open={!!flagItem} danger title={`Flag ${flagItem?.ItemLabel ?? ""} for recheck`} hint="The preparer corrects it, then resends it for recheck."
+        placeholder="What needs to be fixed? (required)" submitLabel="Send for Recheck" busy={busyStage != null}
+        onSubmit={(text) => flagItem && checkItem(flagItem, "flag", text)} onClose={() => setFlagItem(null)} />
+      <NotePrompt open={sendBack} danger title="Send Back for Correction"
+        hint={sendBackTo ? (sendBackTo === "Review" ? "To Data Review" : `To the ${words(sendBackTo).replace(/ Approval$/, "")}`) : ""}
+        placeholder="What needs to be corrected? (required)" submitLabel="Send Back" busy={busyStage != null}
+        onSubmit={(note) => stageAction("reject", () => crmSend(`/api/crm/bookings/${id}/reject`, "PUT", { note, toStage: sendBackTo }), (r) => `Sent back to ${r?.label || "previous stage"}`)}
+        onClose={() => setSendBack(false)} />
+      <NotePrompt open={!!bounceFor} danger title={`Bounce ${bounceFor?.ReceiptNo ?? ""}?`}
+        hint={bounceFor ? joinDot(money(bounceFor.Amount), bounceFor.PaymentMode, bounceFor.ChequeNo ? `cheque ${bounceFor.ChequeNo}` : null) : ""}
+        placeholder="Why this receipt bounced…" submitLabel="Bounce receipt" busy={busyRc != null}
+        onSubmit={(reason) => bounceFor && receiptAction(bounceFor, "bounce", { reason }, `${bounceFor.ReceiptNo} marked as bounced`)}
+        onClose={() => setBounceFor(null)} />
+      <NotePrompt open={!!waiveFor} title={`Waive ${waiveFor ? `${waiveFor.MilestoneNo}. ${waiveFor.MilestoneName}` : ""}`}
+        hint="Say why this milestone is being waived. It goes for approval and stays due until approved."
+        placeholder="Reason for the waiver…" submitLabel="Send for approval" busy={busyMs != null}
+        onSubmit={(text) => {
+          if (text.length < 10) { toast.error("Write at least 10 characters for the reason."); return; }
+          if (waiveFor) msAction(waiveFor, () => crmSend(`/api/crm/payments/${waiveFor.Id}/waive`, "PUT", { Reason: text }), () => "Waiver sent for approval. The milestone stays due until it is approved.");
+        }}
+        onClose={() => setWaiveFor(null)} />
     </ScrollView>
   );
 }

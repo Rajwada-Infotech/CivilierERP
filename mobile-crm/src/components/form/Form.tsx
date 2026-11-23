@@ -107,8 +107,12 @@ export function FormSection({ title, children }: { title: string; children: Reac
 }
 
 export function FormScaffold({
-  children, onSubmit, submitLabel = "Save", onCancel, submitting, disabled, tone, toneInk = "#FFFFFF",
+  children, onSubmit, submitLabel = "Save", onCancel, cancelLabel = "Cancel", header, scrollRef, submitting, disabled, tone, toneInk = "#FFFFFF",
 }: {
+  /** Shown fixed above the scrolling form (a step strip, a summary). */
+  header?: ReactNode;
+  cancelLabel?: string;
+  scrollRef?: React.RefObject<{ scrollTo: (o: { y: number; animated?: boolean }) => void } | null>;
   /** The submit key's colour and its text colour: the app's accent (Settings) unless a screen passes its own. */
   tone?: string;
   toneInk?: string;
@@ -125,7 +129,9 @@ export function FormScaffold({
       style={{ flex: 1, backgroundColor: colors.background }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
+      {header}
       <ScrollView
+        ref={scrollRef as never}
         contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
         keyboardShouldPersistTaps="handled"
       >
@@ -141,7 +147,7 @@ export function FormScaffold({
           onPress={submitting ? undefined : onCancel}
           style={{ flex: 1, paddingVertical: 13, borderRadius: 12, borderWidth: 1, borderColor: colors.border, alignItems: "center" }}
         >
-          <Text style={{ color: colors.foreground, fontSize: 13, fontFamily: fonts.heading.semibold }}>Cancel</Text>
+          <Text style={{ color: colors.foreground, fontSize: 13, fontFamily: fonts.heading.semibold }}>{cancelLabel}</Text>
         </Pressable>
         <Pressable
           onPress={submitting || disabled ? undefined : onSubmit}

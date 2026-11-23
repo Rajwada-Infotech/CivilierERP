@@ -7,7 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Search, SlidersHorizontal, X } from "lucide-react-native";
+import { ChevronRight, Plus, Search, SlidersHorizontal, X } from "lucide-react-native";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { DataList } from "@/components/list/DataList";
@@ -16,19 +16,19 @@ import { openDocument } from "@/utils/documents";
 import { useAuth } from "@/auth/AuthContext";
 import type { MainStackParamList } from "@/navigation/MainStack";
 import { pairParent, registerByKey, type CrmOpen, type CrmRegister } from "./crmRegisters";
-import { CRM, ContactKeys, Pill, useCardStyle } from "./ui";
+import { ActionKey, CRM, ContactKeys, Pill, useCardStyle } from "./ui";
 
 const ALL = "All";
 
 /** The pages a card may open: a booking with Bookings or Payment Milestones rights, a customer with Customer 360, a
  * ticket with Service Tickets. */
 export function useCrmCanOpen() {
-  const { canAccessPage } = useAuth();
+  const { canAccessPage, canDoAction } = useAuth();
   return (o: CrmOpen | null | undefined): o is CrmOpen =>
-    !!o && (o.to === "document" ||
+    !!o && (o.to === "document" || (o.to === "application" ? canDoAction("crm-applications", "edit") :
       (o.to === "booking" ? canAccessPage("crm-bookings") || canAccessPage("crm-payments")
         : o.to === "ticket" ? canAccessPage("crm-service-tickets")
-        : canAccessPage("crm-customer-360")));
+        : canAccessPage("crm-customer-360"))));
 }
 
 export function useCrmOpen() {
@@ -39,6 +39,7 @@ export function useCrmOpen() {
     if (o.to === "booking") nav.navigate("CrmBooking", { bookingId: o.bookingId, title: o.title });
     else if (o.to === "customer") nav.navigate("CrmCustomer", { customerId: o.customerId, title: o.title });
     else if (o.to === "ticket") nav.navigate("CrmTicket", { ticketId: o.ticketId });
+    else if (o.to === "application") nav.navigate("CrmApplicationForm", { applicationId: o.applicationId });
     else openDocument(o.path, o.name).catch((e: Error) => Alert.alert("Could not open", e.message));
   };
 }
@@ -175,6 +176,7 @@ export default function CrmRegisterScreen() {
   }, [rows, status, project, period, sort, debounced, reg]);
 
   const activeFilters = (project !== ALL ? 1 : 0) + (period !== "all" ? 1 : 0) + (sort !== "default" ? 1 : 0);
+  const create = reg.createAction && reg.createAction.pages.some((p) => canDoAction(p, "create")) ? reg.createAction : null;
   const action = reg.cardAction && reg.cardAction.pages.some((p) => canDoAction(p, reg.cardAction!.right)) ? reg.cardAction : null;
 
   return (
@@ -223,6 +225,11 @@ export default function CrmRegisterScreen() {
                 ) : null}
               </Pressable>
             </View>
+            {create ? (
+              <View style={{ flexDirection: "row", marginTop: 10 }}>
+                <ActionKey label={create.label} icon={Plus} onPress={() => nav.navigate(create.screen as never)} />
+              </View>
+            ) : null}
             {query.data ? (
               <Text style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 10, paddingHorizontal: 4 }}>
                 {items.length === rows.length ? `${rows.length} shown` : `${items.length} of ${rows.length} shown`}
@@ -239,6 +246,7 @@ export default function CrmRegisterScreen() {
           const amount = reg.amount?.(r);
           const mobile = reg.mobile ? reg.mobile(r) : r.Mobile;
           const lines = (reg.lines?.(r) ?? []).filter((l): l is string => typeof l === "string" && l.trim() !== "");
+          const footer = !!(amount || mobile || (action && (!action.when || action.when(r))));
           return (
             <Pressable
               disabled={!target}
@@ -247,31 +255,39 @@ export default function CrmRegisterScreen() {
                 ...card, padding: 16, marginBottom: 12, opacity: pressed ? 0.8 : 1,
               })}
             >
+              {/* Who and where it stands, then the details, then the money and the keys. */}
               <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text numberOfLines={1} style={{ fontSize: 15.5, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{reg.title(r) || "—"}</Text>
-                  {reg.sub(r) ? <Text numberOfLines={1} style={{ fontSize: 13, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 3 }}>{reg.sub(r)}</Text> : null}
+                  {reg.sub(r) ? <Text numberOfLines={1} style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 3, fontVariant: ["tabular-nums"] }}>{reg.sub(r)}</Text> : null}
                 </View>
-                {amount ? (
-                  <View style={{ alignItems: "flex-end" }}>
-                    <Text style={{ fontSize: 15.5, fontFamily: fonts.heading.semibold, color: colors.foreground, fontVariant: ["tabular-nums"] }}>{amount.value}</Text>
-                    <Text style={{ fontSize: 11.5, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>{amount.label}</Text>
-                  </View>
-                ) : null}
+                {st ? <Pill label={st} /> : null}
+                {target && !footer ? <ChevronRight size={18} color={colors.mutedForeground} style={{ marginTop: 2 }} /> : null}
               </View>
-              {st ? <View style={{ flexDirection: "row", marginTop: 10 }}><Pill label={st} /></View> : null}
-              {lines.map((l, i) => (
-                <Text key={i} numberOfLines={2} style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 5 }}>{l}</Text>
-              ))}
-              {mobile || action ? (
-                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
-                  <View><ContactKeys mobile={mobile} compact /></View>
-                  {action ? (
-                    <Pressable onPress={() => { const to = action.to(r); nav.navigate(to.screen, to.params); }}
-                      style={({ pressed }) => ({ paddingHorizontal: 16, paddingVertical: 9, borderRadius: 999, backgroundColor: CRM, opacity: pressed ? 0.75 : 1 })}>
+              {lines.length ? (
+                <View style={{ marginTop: 10, gap: 4 }}>
+                  {lines.map((l, i) => (
+                    <Text key={i} numberOfLines={2} style={{ fontSize: 13, fontFamily: fonts.body.regular, color: i === 0 ? colors.foreground : colors.mutedForeground }}>{l}</Text>
+                  ))}
+                </View>
+              ) : null}
+              {footer ? (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border }}>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    {amount ? (
+                      <>
+                        <Text style={{ fontSize: 11.5, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>{amount.label}</Text>
+                        <Text style={{ fontSize: 15.5, fontFamily: fonts.heading.semibold, color: colors.foreground, fontVariant: ["tabular-nums"] }}>{amount.value}</Text>
+                      </>
+                    ) : null}
+                  </View>
+                  {mobile ? <ContactKeys mobile={mobile} compact /> : null}
+                  {action && (!action.when || action.when(r)) ? (
+                    <Pressable onPress={() => { const to = action.to(r); (nav.navigate as (s: string, p: object) => void)(to.screen, to.params); }}
+                      style={({ pressed }) => ({ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, backgroundColor: CRM, opacity: pressed ? 0.75 : 1 })}>
                       <Text style={{ fontSize: 12, fontFamily: fonts.heading.semibold, color: "#fff" }}>{action.label}</Text>
                     </Pressable>
-                  ) : null}
+                  ) : target ? <ChevronRight size={18} color={colors.mutedForeground} /> : null}
                 </View>
               ) : null}
             </Pressable>

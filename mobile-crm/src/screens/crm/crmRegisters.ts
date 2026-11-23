@@ -18,6 +18,7 @@ export type CrmOpen =
   | { to: "booking"; bookingId: number; title: string }
   | { to: "customer"; customerId: number; title: string }
   | { to: "ticket"; ticketId: number }
+  | { to: "application"; applicationId: number }
   | { to: "document"; path: string; name: string };
 
 /** Welcome-call outcomes and their words — the web's (src/pages/CRM/welcomeCalls/config.tsx OUTCOMES / OUTCOME_LABEL),
@@ -28,9 +29,16 @@ export const OUTCOME_LABEL: Record<string, string> = {
 };
 
 /** A key on the card that starts a job there (Log call), for staff with that right on one of the pages. */
-export interface CardAction { label: string; pages: string[]; right: "create" | "edit"; to: (r: Row) => { screen: "CrmWelcomeCall"; params: { bookingId: number; title?: string } } }
+export interface CardAction {
+  label: string; pages: string[]; right: "create" | "edit"; when?: (r: Row) => boolean;
+  to: (r: Row) => { screen: "CrmWelcomeCall"; params: { bookingId: number; title?: string } } | { screen: "CrmApplicationForm"; params: { applicationId: number } };
+}
+
+/** The list's "new" key (the web list's own New button), for those with the right. */
+export interface CreateAction { label: string; pages: string[]; screen: "CrmCustomerForm" | "CrmApplicationForm" }
 
 export interface CrmRegister {
+  createAction?: CreateAction;
   key: string;
   label: string;
   /** What the list holds, in a line — under its name on the CRM tab and in the Menu. */
@@ -93,6 +101,7 @@ export const CRM_REGISTERS: CrmRegister[] = [
     empty: "No leads handed over to the CRM.",
   },
   {
+    createAction: { label: "New customer", pages: ["crm-customers"], screen: "CrmCustomerForm" },
     key: "customers", about: "Everyone who has applied or booked", icon: Users, label: "Customers", group: "Buyers & Bookings", pages: ["crm-customers"], path: "/api/crm/customers",
     rows: list, id: (r) => String(r.Id),
     title: (r) => r.CustomerName, sub: (r) => joinDot(r.CustomerNo, r.Mobile),
@@ -104,7 +113,8 @@ export const CRM_REGISTERS: CrmRegister[] = [
     empty: "No customers yet.",
   },
   {
-    key: "applications", about: "Applications for a unit or plot", icon: FileCheck2, label: "Applications", group: "Buyers & Bookings", pages: ["crm-applications"], path: "/api/crm/applications",
+    createAction: { label: "New application", pages: ["crm-applications"], screen: "CrmApplicationForm" },
+    key: "applications", about: "Applications for a unit or plot", icon: FileCheck2, label: "Applications", group: "Buyers & Bookings", pages: ["crm-applications"], path: "/api/crm/applications?includeConverted=1",
     rows: list, id: (r) => String(r.Id),
     title: (r) => r.ApplicantName, sub: (r) => joinDot(r.ApplicationNo, r.Mobile),
     status: (r) => r.Status,
@@ -114,7 +124,8 @@ export const CRM_REGISTERS: CrmRegister[] = [
       joinDot(r.PropertyType, r.BhkPreference, r.DateOfApply && `Applied ${fmtDate(r.DateOfApply)}`),
     ],
     searchIn: (r) => [r.ApplicantName, r.Mobile, r.ApplicationNo, r.InterestedProject, r.InterestedUnit, r.Status],
-    open: (r) => (r.CustomerId ? { to: "customer", customerId: Number(r.CustomerId), title: r.ApplicantName } : null),
+    // An application opens itself (its steps); once it has a booking, the booking.
+    open: (r) => (r.BookingId ? { to: "booking", bookingId: Number(r.BookingId), title: r.BookingNo || r.ApplicantName } : { to: "application", applicationId: Number(r.Id) }),
     dateOf: (r) => r.DateOfApply, amountOf: (r) => r.BookingAmount, projectOf: (r) => r.InterestedProject,
     empty: "No applications yet.",
   },

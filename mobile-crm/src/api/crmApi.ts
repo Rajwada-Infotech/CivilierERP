@@ -14,6 +14,14 @@ export async function crmGet<T = any>(path: string): Promise<T> {
   return res.json();
 }
 
+/** A CRM action (POST / PUT / PATCH / DELETE) on the web's own route: the server's message on failure. */
+export async function crmSend<T = any>(path: string, method: "POST" | "PUT" | "PATCH" | "DELETE", body?: object): Promise<T> {
+  const res = await fetchWithAuth(path, { method, body: body ? JSON.stringify(body) : undefined });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data as { error?: string })?.error || `The request could not be completed (${res.status}).`);
+  return data as T;
+}
+
 /** One booking: unit, buyer, milestones, welcome calls, agreement, stage (crmBookings.js GET /:id). */
 export const getBooking = (id: number) => crmGet<{
   booking: Row; milestones: Row[]; welcomeCalls: Row[]; agreement: Row | null; customer: Row | null;

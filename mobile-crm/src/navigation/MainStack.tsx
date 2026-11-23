@@ -11,7 +11,7 @@ import { useAuth } from "@/auth/AuthContext";
 import { fonts } from "@/theme/fonts";
 import { useBrand } from "@/theme/ThemeContext";
 import HomeScreen from "@/screens/dashboard/DashboardScreen";
-import MaintenanceScreen, { useHasMaintenance } from "@/screens/dashboard/MaintenanceScreen";
+import MaintenanceScreen, { KeyCustodianScreen, useHasMaintenance } from "@/screens/dashboard/MaintenanceScreen";
 import ProfileScreen, { SettingsScreen } from "@/screens/dashboard/ProfileScreen";
 import NotificationsScreen from "@/screens/notifications/NotificationsScreen";
 import DirectoryScreen from "@/screens/directory/DirectoryScreen";
@@ -28,7 +28,7 @@ import CrmRegisterScreen from "@/screens/crm/CrmRegisterScreen";
 import BookingDetailScreen from "@/screens/crm/BookingDetailScreen";
 import Customer360Screen from "@/screens/crm/Customer360Screen";
 import TicketScreen from "@/screens/crm/TicketScreen";
-import { NewTicketScreen, PaymentScreen, WelcomeCallScreen } from "@/screens/crm/CrmForms";
+import { NewTicketScreen, CustomerFormScreen, ApplicationFormScreen, WelcomeChecklistScreen, PossessionScreen, PaymentScreen, WelcomeCallScreen } from "@/screens/crm/CrmForms";
 import { pairParent, registerByKey, useHasCrm } from "@/screens/crm/crmRegisters";
 import { Tap } from "@/screens/crm/ui";
 import { ShellMenusProvider, TopHeader, useMenuCount, useShellMenus } from "./TopHeader";
@@ -48,6 +48,7 @@ export type MainStackParamList = {
   Approvals: undefined;
   // Maintenance
   Directory: undefined;
+  KeyCustodian: undefined;
   CustomerProfile: { bookingId: number; customerName?: string | null };
   Bills: undefined;
   BillView: { billId: number };
@@ -62,6 +63,10 @@ export type MainStackParamList = {
   CrmCustomer: { customerId: number; title?: string };
   CrmTicket: { ticketId: number };
   CrmTicketNew: { bookingId: number; title?: string };
+  CrmCustomerForm: { customerId?: number } | undefined;
+  CrmWelcomeChecklist: { bookingId: number; title?: string };
+  CrmPossession: { bookingId: number; title?: string };
+  CrmApplicationForm: { applicationId?: number; customer?: { Id: number; Name: string } } | undefined;
   CrmWelcomeCall: { bookingId: number; title?: string };
   CrmPayment: { bookingId: number; milestoneId?: number; title?: string };
 };
@@ -151,6 +156,7 @@ export default function MainStack() {
         <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: "Settings" }} />
         <Stack.Screen name="Approvals" component={ApprovalInboxScreen} options={{ title: "Approval Inbox" }} />
         <Stack.Screen name="Directory" component={DirectoryScreen} options={{ title: "Customer Directory" }} />
+        <Stack.Screen name="KeyCustodian" component={KeyCustodianScreen} options={{ title: "Key Custodian" }} />
         <Stack.Screen name="CustomerProfile" component={CustomerProfileScreen} options={{ title: "Customer Profile" }} />
         <Stack.Screen name="Bills" component={BillsScreen} options={{ title: "Maintenance Bills" }} />
         <Stack.Screen name="BillView" component={BillViewScreen} options={{ title: "Bill" }} />
@@ -163,6 +169,10 @@ export default function MainStack() {
         <Stack.Screen name="CrmCustomer" component={Customer360Screen} options={{ title: "Customer 360" }} />
         <Stack.Screen name="CrmTicket" component={TicketScreen} options={{ title: "Service Ticket" }} />
         <Stack.Screen name="CrmTicketNew" component={NewTicketScreen} options={{ title: "New Service Ticket" }} />
+        <Stack.Screen name="CrmApplicationForm" component={ApplicationFormScreen} options={({ route }) => ({ title: route.params?.applicationId ? "Edit Application" : "New Application" })} />
+        <Stack.Screen name="CrmPossession" component={PossessionScreen} options={{ title: "Possession & Handover" }} />
+        <Stack.Screen name="CrmWelcomeChecklist" component={WelcomeChecklistScreen} options={{ title: "Welcome Checklist" }} />
+        <Stack.Screen name="CrmCustomerForm" component={CustomerFormScreen} options={({ route }) => ({ title: route.params?.customerId ? "Edit Customer" : "New Customer" })} />
         <Stack.Screen name="CrmWelcomeCall" component={WelcomeCallScreen} options={{ title: "Log Welcome Call" }} />
         <Stack.Screen name="CrmPayment" component={PaymentScreen} options={({ route }) => ({ title: route.params.milestoneId ? "Submit Payment" : "On-account Deposit" })} />
       </Stack.Navigator>
