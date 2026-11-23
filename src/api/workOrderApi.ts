@@ -238,6 +238,7 @@ export interface WOItemOption {
   gstRate: number;
   hsnCode: string | null;
   uomName: string | null;
+  isActive?: boolean; // false = disabled in Item Master: only kept where a material already uses it
 }
 
 export const fetchItems = async (): Promise<WOItemOption[]> => {
@@ -255,6 +256,7 @@ export const fetchItems = async (): Promise<WOItemOption[]> => {
       M_UOM: string | null;
       Parent_Id: string | null;
       M_IdentityCode: number | null;
+      M_IsActive?: boolean;
     }>(await res.json());
     return rows
       .filter((r) => r.Parent_Id != null || r.M_IdentityCode === 1)
@@ -270,6 +272,7 @@ export const fetchItems = async (): Promise<WOItemOption[]> => {
         // UOM: M_UOM stores UOMCode — resolved to id/name at point-of-use via uomOptions
         uomId: null,
         uomName: r.M_UOM || null,
+        isActive: r.M_IsActive !== false,
       }));
   } catch (err) {
     console.error("[workOrderApi] fetchItems failed:", err);
