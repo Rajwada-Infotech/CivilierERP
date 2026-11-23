@@ -10,8 +10,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { cn } from "@/lib/utils";
 import { AlertTriangle, ArrowLeft, ChevronLeft, ChevronRight, Download, ExternalLink, Hourglass, Landmark, ListChecks, MessageSquare, Plus, Receipt, RefreshCw, Wallet } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { useSearchParams, useNavigate, Link } from "react-router-dom";
-import { promptNextStep } from "@/lib/workflowNav";
+import { useSearchParams, Link } from "react-router-dom";
 import { BankNamePicker } from "@/components/finance/BankNamePicker";
 import { CrmCompanyProjectBlockFilter } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { SentBackPanel } from "@/components/crm/CrmListToolbar";
@@ -23,15 +22,20 @@ import {
 import { useCrmListState, useSticky, listParams } from "@/hooks/useCrmListState";
 import {
   API, BKG_API, PAY_MODES, modeHasBank, fmt, fmtDate, fmtShort, todayStr, isOverdue, milestoneFill, nextOpenMilestone, pct,
-  fetchLedger, fetchLedgerExport, fetchLedgerSummary, fetchMilestones, fetchMoneyReceipts, fetchOnAccount, fetchProjectBanks, fetchCustomerBank,
+  fetchLedger, fetchLedgerExport, fetchLedgerSummary, fetchMilestones, fetchMoneyReceipts, fetchOnAccount, fetchCustomerBank,
   type DeskTab, type LedgerRow,
   pendingWaiverIds, planCoverage,
 } from "./payments/config";
-import { BAND_DOT, BAND_KEY, BAND_KEY_MAIN, CollectionBar, EntryTable, LEDGER_COLS, MilestoneTable, MoneyBand, MoneyTrail, OnAccountPanel, WaiverNotes, WaiverSection, PlanRibbon, PriceTable, TokenNote } from "./payments/parts";
+import { BAND_DOT, BAND_KEY, BAND_KEY_MAIN, CollectionBar, EntryTable, LEDGER_COLS, LedgerMobileCard, MilestoneTable, MoneyBand, MoneyTrail, OnAccountPanel, WaiverNotes, WaiverSection, PlanRibbon, PriceTable, TokenNote } from "./payments/parts";
 
 const { INP, KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT, TEXTAREA } = GRID_SHEET_KEYS;
 const LABEL = `block mb-1.5 ${LBL}`;
 const DIALOG = "p-5 gap-4";
+const roundPaise = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
+const isMoneyAmount = (value: unknown) => {
+  const amount = Number(value);
+  return Number.isFinite(amount) && Math.abs(amount * 100 - Math.round(amount * 100)) < 1e-7;
+};
 const PREFS_KEY = "crm-payments-queue-cols-v5";
 const VIEWS_KEY = "crm-payments-queue-views";
 const DESK_TABS: { key: DeskTab; label: string }[] = [
@@ -43,16 +47,15 @@ const DESK_TABS: { key: DeskTab; label: string }[] = [
 const CrmPaymentMilestones: React.FC = () => {
   const rights = usePageRights("crm-payments");
   const qc = useQueryClient();
-  const navigate = useNavigate();
   const [sp, setSp] = useSearchParams();
   const selectedBookingId = sp.get("bookingId") || "";
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [payForm, setPayForm] = useState({ AmountPaid: "", PaidDate: "", PaymentMode: "", BankName: "", TransactionRef: "", Remarks: "", DepositBankId: "" });
+  const [payForm, setPayForm] = useState({ AmountPaid: "", PaidDate: "", PaymentMode: "", BankName: "", TransactionRef: "", Remarks: "" });
   const [saving, setSaving] = useState(false);
   const [addDialog, setAddDialog] = useState(false);
   const [addForm, setAddForm] = useState({ MilestoneName: "", DueDate: "", AmountDue: "", ResponsibleDepartment: "", RequiredDocuments: "" });
   const [onAccountDialog, setOnAccountDialog] = useState(false);
-  const [onAccountForm, setOnAccountForm] = useState({ Amount: "", ReceivedDate: "", PaymentMode: "", BankName: "", TransactionRef: "", Notes: "", DepositBankId: "" });
+  const [onAccountForm, setOnAccountForm] = useState({ Amount: "", ReceivedDate: "", PaymentMode: "", BankName: "", TransactionRef: "", Notes: "" });
   const [applyDialog, setApplyDialog] = useState<{ payment: any; milestone: any | null; amount: string } | null>(null);
   const [applyMilestoneId, setApplyMilestoneId] = useState<string>("");
   const [waiveDialog, setWaiveDialog] = useState<{ milestone: any; reason: string } | null>(null);
@@ -92,7 +95,7 @@ const CrmPaymentMilestones: React.FC = () => {
     enabled: !selectedBookingId,
     staleTime: 30_000,
   });
-  const { data: ledgerSummary, refetch: refetchSummary } = useQuery({
+  const { data: ledgerSummary, isFetching: summaryFetching, error: summaryError, refetch: refetchSummary } = useQuery({
     queryKey: ["crm-payments-ledger", "summary", scopeParams.toString()],
     queryFn: () => fetchLedgerSummary(scopeParams),
     enabled: !selectedBookingId,
@@ -116,7 +119,11 @@ const CrmPaymentMilestones: React.FC = () => {
   const queueAt = queueRows.findIndex((r) => String(r.BookingId) === selectedBookingId);
   const pickMilestone = (m: any) => {
     setActiveMilestone(m.Id);
-    requestAnimationFrame(() => document.getElementById(`milestone-${m.Id}`)?.scrollIntoView({ block: "center", behavior: "smooth" }));
+    requestAnimationFrame(() => {
+      const compact = document.getElementById(`milestone-${m.Id}`);
+      const target = compact?.getClientRects().length ? compact : document.getElementById(`milestone-desktop-${m.Id}`);
+      target?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
   };
 
   const { data: milestoneData, isLoading, isError, error: milestoneError, isFetching, refetch } = useQuery({
@@ -126,15 +133,22 @@ const CrmPaymentMilestones: React.FC = () => {
     staleTime: 30_000,
     retry: 1,
   });
-  const { data: onAccountData } = useQuery({ queryKey: ["crm-on-account", selectedBookingId], queryFn: () => fetchOnAccount(selectedBookingId), enabled: !!selectedBookingId, staleTime: 15_000 });
-  const { data: moneyReceipts = [] } = useQuery({ queryKey: ["crm-money-receipts", selectedBookingId], queryFn: () => fetchMoneyReceipts(selectedBookingId), enabled: !!selectedBookingId, staleTime: 15_000 });
-  const { data: customerBank } = useQuery({ queryKey: ["crm-customer-bank", selectedBookingId], queryFn: () => fetchCustomerBank(selectedBookingId), enabled: !!selectedBookingId, staleTime: 30_000 });
-  const { data: bookingUnitChange } = useQuery({
+  const { data: onAccountData, isLoading: onAccountLoading, error: onAccountError, refetch: refetchOnAccount } = useQuery({ queryKey: ["crm-on-account", selectedBookingId], queryFn: () => fetchOnAccount(selectedBookingId), enabled: !!selectedBookingId, staleTime: 15_000 });
+  const { data: moneyReceipts, isLoading: receiptsLoading, error: receiptsError, refetch: refetchMoneyReceipts } = useQuery({ queryKey: ["crm-money-receipts", selectedBookingId], queryFn: () => fetchMoneyReceipts(selectedBookingId), enabled: !!selectedBookingId, staleTime: 15_000 });
+  const { data: customerBank, isLoading: customerBankLoading, error: customerBankError, refetch: refetchCustomerBank } = useQuery({ queryKey: ["crm-customer-bank", selectedBookingId], queryFn: () => fetchCustomerBank(selectedBookingId), enabled: !!selectedBookingId && modeHasBank(payForm.PaymentMode), staleTime: 30_000 });
+  const { data: bookingUnitChange, error: unitChangeError, isFetching: unitChangeFetching, refetch: refetchUnitChange } = useQuery({
     queryKey: ["crm-booking-unit-change", selectedBookingId],
     queryFn: async () => {
       const res = await fetchWithAuth(`${BKG_API}/${selectedBookingId}/unit-change`);
       if (!res.ok) throw new Error("Could not load the unit change");
-      return res.json();
+      const data = await res.json().catch(() => undefined);
+      const requestId = data?.Id;
+      const validRequestId = (typeof requestId === "number" && Number.isFinite(requestId))
+        || (typeof requestId === "string" && requestId.trim() !== "" && Number.isFinite(Number(requestId)));
+      if (data !== null && (!data || typeof data !== "object" || !validRequestId)) {
+        throw new Error("The unit-change response was invalid.");
+      }
+      return data;
     },
     enabled: !!selectedBookingId,
     staleTime: 30_000,
@@ -144,13 +158,16 @@ const CrmPaymentMilestones: React.FC = () => {
   const summary = milestoneData?.summary || {};
   const booking = milestoneData?.booking || null;
   const unitChanged = booking?.BookingStatus === "UnitChanged";
-  const { data: destinationCreditData } = useQuery({
+  const bookingClosed = isBookingClosed(booking?.BookingStatus);
+  const unitChangeMissing = unitChanged && !bookingUnitChange && !unitChangeFetching && !unitChangeError;
+  const { data: destinationCreditData, error: destinationCreditError, isFetching: destinationCreditFetching, refetch: refetchDestinationCredit } = useQuery({
     queryKey: ["crm-unit-change-destination-credit", bookingUnitChange?.TargetBookingId],
     queryFn: () => fetchOnAccount(String(bookingUnitChange.TargetBookingId)),
     enabled: unitChanged && !!bookingUnitChange?.TargetBookingId,
     staleTime: 15_000,
   });
   const onAccountBalance = onAccountData?.availableBalance || 0;
+  const onAccountKnown = !!onAccountData && !onAccountLoading && !onAccountError;
   // Funded = what's settled on milestones plus the on-account money still usable, against the dues that aren't
   // waived (the GrandTotal when there's no schedule yet) — the backend's gate in applyOnAccountToMilestone. Applied
   // deposits are already in totalPaid, so only their unapplied remainder counts on top.
@@ -168,17 +185,11 @@ const CrmPaymentMilestones: React.FC = () => {
     ? Math.max(0, Number(nextOutstandingMilestone.AmountDue) - Number(nextOutstandingMilestone.AmountPaid || 0))
     : 0;
   const canManuallyApplyOnAccount = !!(
-    !notFullyPaid && nextOutstandingMilestone && nextMilestoneBalance > 0 &&
+    onAccountKnown && !notFullyPaid && nextOutstandingMilestone && nextMilestoneBalance > 0 &&
     nextOutstandingMilestone.DemandStatus !== CrmStatus.PENDING
   );
   // The booking's money by stage, from the server (verified / with Finance / still to collect).
   const money = milestoneData?.money || null;
-
-  const { data: projectBanks = [] } = useQuery({
-    queryKey: ["crm-project-banks-for", booking?.ProjectId],
-    queryFn: () => fetchProjectBanks(booking?.ProjectId),
-    enabled: booking?.ProjectId != null,
-  });
 
   // The core Booking Amount row: a parking / extra-charge row can also be numbered 1.
   const milestone1 = milestones.find((m) => m.MilestoneNo === 1 && !m.ParkingAllotmentId && !m.ExtraChargeId);
@@ -209,7 +220,6 @@ const CrmPaymentMilestones: React.FC = () => {
       BankName: "",
       TransactionRef: "",
       Remarks: "",
-      DepositBankId: m.DepositBankId != null ? String(m.DepositBankId) : projectBanks.length === 1 ? String(projectBanks[0].BId) : "",
     });
   };
 
@@ -231,7 +241,7 @@ const CrmPaymentMilestones: React.FC = () => {
 
   const handleRecordPayment = async () => {
     if (editingId == null) return;
-    if (!(enteredPaid > 0)) { toast.error("Enter the amount received"); return; }
+    if (!(isMoneyAmount(enteredPaid) && enteredPaid > 0)) { toast.error("Enter a valid amount received in rupees and paise"); return; }
     // No deposit bank here — CRM records the money received; Accounts assigns the bank on the Received Payment.
     setSaving(true);
     try {
@@ -271,8 +281,8 @@ const CrmPaymentMilestones: React.FC = () => {
   const handleAddMilestone = async () => {
     if (!selectedBookingId || !addForm.MilestoneName.trim()) return;
     const amountDue = Number(addForm.AmountDue);
-    if (!Number.isFinite(amountDue) || amountDue <= 0) {
-      toast.error("Enter an Amount Due greater than zero");
+    if (!isMoneyAmount(amountDue) || amountDue <= 0) {
+      toast.error("Enter an Amount Due greater than zero, using up to two decimal places");
       return;
     }
     setSaving(true);
@@ -297,7 +307,7 @@ const CrmPaymentMilestones: React.FC = () => {
   };
 
   const handleDepositOnAccount = async () => {
-    if (!selectedBookingId || !(Number(onAccountForm.Amount) > 0)) { toast.error("Enter the amount received"); return; }
+    if (!selectedBookingId || !isMoneyAmount(onAccountForm.Amount) || !(Number(onAccountForm.Amount) > 0)) { toast.error("Enter a valid amount received in rupees and paise"); return; }
     setSaving(true);
     try {
       const res = await fetchWithAuth(`${API}/booking/${selectedBookingId}/on-account`, {
@@ -315,7 +325,7 @@ const CrmPaymentMilestones: React.FC = () => {
       if (!res.ok) throw new Error(data.error);
       toast.success(`On-account deposit submitted for Finance approval${data.RPDocNo ? ` — ${data.RPDocNo}` : ""}. It won't appear until approved.`);
       setOnAccountDialog(false);
-      setOnAccountForm({ Amount: "", ReceivedDate: "", PaymentMode: "", BankName: "", TransactionRef: "", Notes: "", DepositBankId: "" });
+      setOnAccountForm({ Amount: "", ReceivedDate: "", PaymentMode: "", BankName: "", TransactionRef: "", Notes: "" });
       qc.invalidateQueries({ queryKey: ["crm-on-account", selectedBookingId] });
       reloadMilestones();
     } catch (e: any) { toast.error(translateError(e.message)); }
@@ -323,8 +333,8 @@ const CrmPaymentMilestones: React.FC = () => {
   };
 
   const openApplyDialog = (payment: any, milestone: any | null) => {
-    const remaining = Number(payment.Amount) - Number(payment.AppliedAmount || 0);
-    const milestoneBalance = milestone ? Number(milestone.AmountDue) - Number(milestone.AmountPaid || 0) : remaining;
+    const remaining = roundPaise(Number(payment.Amount) - Number(payment.AppliedAmount || 0));
+    const milestoneBalance = milestone ? roundPaise(Number(milestone.AmountDue) - Number(milestone.AmountPaid || 0)) : remaining;
     setApplyMilestoneId(milestone ? String(milestone.Id) : "");
     setApplyDialog({ payment, milestone, amount: String(milestone ? Math.min(remaining, milestoneBalance) : remaining) });
   };
@@ -334,7 +344,14 @@ const CrmPaymentMilestones: React.FC = () => {
     const milId = applyDialog.milestone?.Id ?? parseInt(applyMilestoneId);
     if (milId == null || Number.isNaN(milId)) { toast.error("Select a milestone to apply to"); return; }
     const amount = parseFloat(applyDialog.amount);
-    if (!amount || amount <= 0) { toast.error("Enter a valid amount"); return; }
+    if (!isMoneyAmount(amount) || amount <= 0) { toast.error("Enter a valid amount in rupees and paise"); return; }
+    const target = applyDialog.milestone ?? milestones.find((m: any) => m.Id === milId);
+    const available = roundPaise(Number(applyDialog.payment.Amount) - Number(applyDialog.payment.AppliedAmount || 0));
+    const balance = target ? roundPaise(Number(target.AmountDue) - Number(target.AmountPaid || 0)) : 0;
+    if (!target || amount > available || amount > balance) {
+      toast.error("The amount must fit both the available deposit and milestone balance");
+      return;
+    }
     setSaving(true);
     try {
       const res = await fetchWithAuth(`${API}/on-account/${applyDialog.payment.Id}/apply`, {
@@ -352,8 +369,8 @@ const CrmPaymentMilestones: React.FC = () => {
     finally { setSaving(false); }
   };
 
-  const modeSelect = (value: string, onChange: (mode: string) => void) => (
-    <select value={value} onChange={(e) => onChange(e.target.value)} className={INP}>
+  const modeSelect = (value: string, onChange: (mode: string) => void, id: string) => (
+    <select id={id} value={value} onChange={(e) => onChange(e.target.value)} className={INP}>
       <option value="">Select mode</option>
       {PAY_MODES.map((m) => <option key={m} value={m}>{m}</option>)}
     </select>
@@ -366,17 +383,17 @@ const CrmPaymentMilestones: React.FC = () => {
   );
 
   // What the plan needs next, in one sentence.
-  const planOverdue = milestones.filter(isOverdue).length;
   const nextUp = nextOpenMilestone(milestones);
   const nextSentence = (() => {
     if (!money || !milestones.length) return null;
-    if (unitChanged) return <>This booking closed when the unit changed. Its {fmt(summary.totalDue)} payment schedule is historical, not due for collection here. {bookingUnitChange?.Id ? <><Link to={`/crm/unit-changes?id=${bookingUnitChange.Id}`} className="underline underline-offset-2 hover:text-white">View {bookingUnitChange.RequestNo || "unit-change request"}</Link>{bookingUnitChange.TargetBookingId ? <> for the credit moved, and <Link to={`/crm/payments?bookingId=${bookingUnitChange.TargetBookingId}`} className="underline underline-offset-2 hover:text-white">open the new booking</Link> for its current balance.</> : " for its status and credit details."}</> : "The linked unit-change request contains the credit and destination booking details."}</>;
+    if (unitChanged) return <>This booking closed when the unit changed. Its {fmt(summary.totalDue)} payment schedule is historical, not due for collection here. {bookingUnitChange?.Id ? <><Link to={`/crm/unit-changes?id=${bookingUnitChange.Id}`} className="underline underline-offset-2 hover:text-white">View {bookingUnitChange.RequestNo || "unit-change request"}</Link>{bookingUnitChange.TargetBookingId ? <> for the credit moved, and <Link to={`/crm/payments?bookingId=${bookingUnitChange.TargetBookingId}`} className="underline underline-offset-2 hover:text-white">open the new booking</Link> for its current balance.</> : " for its status and credit details."}</> : unitChangeFetching ? "Loading unit-change request details." : unitChangeError ? "Unit-change request details could not be loaded." : "No linked unit-change request was found; destination credit cannot be verified."}</>;
+    if (bookingClosed) return "This booking is closed. Its payment schedule is shown for history; no further collection or adjustments can be made.";
     if (!nextUp) return notFullyPaid ? `All milestones are covered, including ${fmt(money.inVerification + money.recorded)} pending Finance approval.` : "Full booking amount received. Deposits are adjusted to the milestones automatically, in order.";
     return `Next: ${nextUp.MilestoneName}, balance ${fmt(milestoneFill(nextUp).missing)}. Payments stay on account and are adjusted to the milestones once the full booking amount is received and approved.`;
   })();
 
   const openDeposit = () => {
-    setOnAccountForm((f) => ({ ...f, ReceivedDate: f.ReceivedDate || todayStr(), DepositBankId: projectBanks.length === 1 ? String(projectBanks[0].BId) : f.DepositBankId }));
+    setOnAccountForm((f) => ({ ...f, ReceivedDate: f.ReceivedDate || todayStr() }));
     setOnAccountDialog(true);
   };
   const refreshQueue = () => { refetchLedger(); refetchSummary(); };
@@ -392,20 +409,21 @@ const CrmPaymentMilestones: React.FC = () => {
   const queue = (
     <div hidden={!!selectedBookingId} className="space-y-4">
       <MoneyBand eyebrow="CRM · Finance" title="Payment Milestones" sub="Receipts and balances across live bookings."
-        actions={<><SentBackPanel chip />{refreshOnBand(refreshQueue, ledgerFetching)}</>}
-        lead={fmtShort(receivedAll)} leadNote={figures ? `received of ${fmtShort(figures.totalDue)} · ${pct(coverage.covered, figures.totalDue)}%` : ""}
-        bar={<CollectionBar onDark due={figures?.totalDue || 0} collected={Math.max(0, collectedAll - coverage.excess)} finance={figures?.withFinance || 0} recorded={figures?.recorded || 0}
-          title={figures ? `Total due ${fmt(figures.totalDue)} · Adjusted ${fmt(figures.settled)} · On account ${fmt(figures.held)}` : undefined} />}
+        actions={<><SentBackPanel chip />{refreshOnBand(refreshQueue, ledgerFetching || summaryFetching)}</>}
+        lead={figures ? fmtShort(receivedAll) : summaryFetching ? "Checking…" : "Unavailable"} leadNote={figures ? `received of ${fmtShort(figures.totalDue)} · ${pct(coverage.covered, figures.totalDue)}%` : ""}
+        bar={figures ? <CollectionBar onDark due={figures.totalDue} collected={Math.max(0, collectedAll - coverage.excess)} finance={figures.withFinance} recorded={figures.recorded}
+          title={`Total due ${fmt(figures.totalDue)} · Adjusted ${fmt(figures.settled)} · On account ${fmt(figures.held)}`} /> : <span className="text-xs text-slate-300">{summaryFetching ? "Loading collection breakdown…" : "Collection breakdown unavailable"}</span>}
         figures={[
-          { label: "Approved by Finance", dot: BAND_DOT.collected, value: fmtShort(collectedAll), note: `${fmtShort(figures?.held)} on account`, exact: figures ? `Adjusted ${fmt(figures.settled)} · On account ${fmt(figures.held)}` : undefined },
-          { label: "Pending with Finance", dot: BAND_DOT.finance, value: fmtShort(figures?.withFinance), note: `${figures?.counts.finance ?? 0} booking${figures?.counts.finance === 1 ? "" : "s"}`, exact: fmt(figures?.withFinance) },
-          { label: "Not sent to Finance", dot: BAND_DOT.recorded, value: fmtShort(figures?.recorded), note: `${figures?.counts.recorded ?? 0} booking${figures?.counts.recorded === 1 ? "" : "s"}`, exact: fmt(figures?.recorded) },
-          { label: "Balance to collect", dot: BAND_DOT.notDue, value: fmtShort(figures?.toCollect), note: "Yet to be received", exact: fmt(figures?.toCollect) },
+          { label: "Approved by Finance", dot: BAND_DOT.collected, value: figures ? fmtShort(collectedAll) : summaryFetching ? "Checking…" : "Unavailable", note: figures ? `${fmtShort(figures.held)} on account` : "Totals unavailable", exact: figures ? `Adjusted ${fmt(figures.settled)} · On account ${fmt(figures.held)}` : undefined },
+          { label: "Pending with Finance", dot: BAND_DOT.finance, value: figures ? fmtShort(figures.withFinance) : summaryFetching ? "Checking…" : "Unavailable", note: figures ? `${figures.counts.finance} booking${figures.counts.finance === 1 ? "" : "s"}` : "Totals unavailable", exact: figures ? fmt(figures.withFinance) : undefined },
+          { label: "Not sent to Finance", dot: BAND_DOT.recorded, value: figures ? fmtShort(figures.recorded) : summaryFetching ? "Checking…" : "Unavailable", note: figures ? `${figures.counts.recorded} booking${figures.counts.recorded === 1 ? "" : "s"}` : "Totals unavailable", exact: figures ? fmt(figures.recorded) : undefined },
+          { label: "Balance to collect", dot: BAND_DOT.notDue, value: figures ? fmtShort(figures.toCollect) : summaryFetching ? "Checking…" : "Unavailable", note: figures ? "Yet to be received" : "Totals unavailable", exact: figures ? fmt(figures.toCollect) : undefined },
         ]}
-        footer={coverage.excess > 0 ? <span className="text-amber-200">{fmt(coverage.excess)} of the amount received is more than those bookings owe, so {fmt(coverage.covered)} counts against the {fmt(figures?.totalDue)} due.</span> : undefined} />
+        footer={summaryError ? <span role="status" className="text-amber-200">{figures ? "Could not refresh the totals; showing the last successful figures." : "Payment totals are unavailable. Use Refresh to try again."}</span> : coverage.excess > 0 ? <span className="text-amber-200">{fmt(coverage.excess)} of the amount received is more than those bookings owe, so {fmt(coverage.covered)} counts against the {fmt(figures?.totalDue)} due.</span> : undefined} />
       <div className={cn(GRID_CARD, "rounded-xl overflow-hidden")}>
-        <GridTabs<DeskTab> label="Queues" active={tab} onChange={setTab}
+        <GridTabs<DeskTab> label="Queues" active={tab} onChange={setTab} panelId="payment-milestones-queue-panel"
           tabs={DESK_TABS.map((t) => ({ ...t, count: figures ? figures.counts[t.key] : null }))} />
+        <div id="payment-milestones-queue-panel" role="tabpanel" aria-labelledby={`payment-milestones-queue-panel-tab-${tab}`} tabIndex={0}>
         <div className="px-3 py-2 flex flex-wrap items-center gap-2 border-b border-border">
           <GridSearch value={list.searchInput} onChange={list.setSearchInput} placeholder="Customer, mobile, booking or unit" />
           <CrmCompanyProjectBlockFilter value={list.cpb} onChange={list.setCpb} />
@@ -423,14 +441,16 @@ const CrmPaymentMilestones: React.FC = () => {
                 setAgeRaw(x.age || "");
               }} />
             <GridColumnChooser cols={LEDGER_COLS} prefs={prefs} onChange={setPrefs} />
-            <button type="button" onClick={handleExport} disabled={exporting || !ledger?.total} className={GRID_BTN} title="Export to Excel"><Download size={13} /> <span className="hidden md:inline">{exporting ? "Exporting…" : "Export"}</span></button>
+            {rights.canExport && <button type="button" onClick={handleExport} disabled={exporting || !ledger?.total} className={GRID_BTN} title="Export to Excel"><Download size={13} /> <span className="hidden md:inline">{exporting ? "Exporting…" : "Export"}</span></button>}
           </div>
         </div>
         <CrmGrid cols={LEDGER_COLS} prefs={prefs} onPrefs={setPrefs} rows={queueRows} rowKey={(r) => r.BookingId} noRowNumbers
+          mobileCardRenderer={(row) => <LedgerMobileCard row={row} onOpen={() => openBooking(row.BookingId)} />}
           loading={ledgerLoading} fetching={ledgerFetching} error={ledgerError ? translateError((ledgerError as Error).message) : null} onRetry={() => refetchLedger()}
           sort={list.sort} onSort={list.toggleSort} onRowClick={(r) => openBooking(r.BookingId)} activeKey={selectedBookingId ? Number(selectedBookingId) : null}
           empty={list.hasFilters || age ? "No booking matches these filters." : "No bookings here."}
           page={list.page} pageSize={pageSize} total={ledger?.total ?? 0} onPage={list.setPage} onPageSize={(n) => { setPageSize(n); list.setPage(1); }} />
+        </div>
       </div>
     </div>
   );
@@ -446,7 +466,10 @@ const CrmPaymentMilestones: React.FC = () => {
   const record = isLoading ? (
     <div className="py-16 text-center text-muted-foreground text-sm flex items-center justify-center gap-2"><RefreshCw size={14} className="animate-spin" /> Loading the plan…</div>
   ) : isError ? (
-    <div className="py-16 text-center text-destructive text-sm">Could not load the plan{milestoneError instanceof Error ? `: ${translateError(milestoneError.message)}` : ""}</div>
+    <div role="alert" className="py-16 text-center text-destructive text-sm">
+      <p>Could not load the plan{milestoneError instanceof Error ? `: ${translateError(milestoneError.message)}` : ""}</p>
+      <button type="button" onClick={() => refetch()} disabled={isFetching} className="mt-2 font-semibold underline underline-offset-2 disabled:opacity-60">{isFetching ? "Retrying…" : "Retry"}</button>
+    </div>
   ) : !milestoneData || !booking ? (
     <div className="py-16 text-center text-muted-foreground text-sm">This booking was not found.</div>
   ) : (
@@ -466,20 +489,20 @@ const CrmPaymentMilestones: React.FC = () => {
               </span>
             )}
             <Link to={`/crm/bookings?view=${selectedBookingId}`} className={BAND_KEY}><ExternalLink size={13} /> Open booking</Link>
-            {rights.canEdit && needsResync && (
+            {rights.canEdit && !bookingClosed && needsResync && (
               <button type="button" onClick={handleResyncSchedule} disabled={resyncing} className={BAND_KEY}>
                 <RefreshCw size={13} className={resyncing ? "animate-spin" : ""} /> {resyncing ? "Resyncing…" : "Resync schedule"}
               </button>
             )}
-            {rights.canCreate && !unitChanged && <button type="button" onClick={() => setAddDialog(true)} className={BAND_KEY}><Plus size={13} /> Add milestone</button>}
-            {rights.canCreate && !unitChanged && <button type="button" onClick={openDeposit} className={BAND_KEY_MAIN}><Wallet size={13} /> Deposit on account</button>}
+            {rights.canCreate && !bookingClosed && <button type="button" onClick={() => setAddDialog(true)} className={BAND_KEY}><Plus size={13} /> Add milestone</button>}
+            {rights.canCreate && !bookingClosed && <button type="button" onClick={openDeposit} className={BAND_KEY_MAIN}><Wallet size={13} /> Deposit on account</button>}
             {refreshOnBand(() => refetch(), isFetching)}
           </>
         }
         lead={unitChanged ? "Unit changed" : fmtShort(received)} leadNote={unitChanged ? "Old booking closed · schedule shown for history" : `counted toward ${fmtShort(summary.totalDue)} due · ${pct(received, summary.totalDue || 0)}%`}
         bar={unitChanged ? <div className="rounded-md border border-white/10 px-3 py-2 text-xs text-slate-300">Historical payment schedule · {fmt(summary.totalDue)} · not collectible on this closed booking</div> : <PlanRibbon onDark plan={milestones} activeId={activeMilestone} onPick={pickMilestone} />}
         figures={[
-          { label: unitChanged ? "Money carried forward" : "Approved by Finance", dot: BAND_DOT.collected, value: fmtShort(unitChanged ? bookingUnitChange?.MovedAmount : money?.collected), note: unitChanged ? "See unit-change request" : `${fmtShort(money?.held)} on account`, exact: unitChanged ? `Moved to new booking: ${fmt(bookingUnitChange?.MovedAmount)}` : `Adjusted ${fmt(money?.adjusted)} · On account ${fmt(money?.held)}` },
+          { label: unitChanged ? "Money carried forward" : "Approved by Finance", dot: BAND_DOT.collected, value: unitChanged ? bookingUnitChange ? fmtShort(bookingUnitChange.MovedAmount) : unitChangeFetching ? "Checking…" : "Unavailable" : fmtShort(money?.collected), note: unitChanged ? bookingUnitChange ? "See unit-change request" : "Request details unavailable" : `${fmtShort(money?.held)} on account`, exact: unitChanged ? bookingUnitChange ? `Moved to new booking: ${fmt(bookingUnitChange.MovedAmount)}` : "Unit-change request details unavailable" : `Adjusted ${fmt(money?.adjusted)} · On account ${fmt(money?.held)}` },
           { label: "Pending with Finance", dot: BAND_DOT.finance, value: fmtShort(money?.inVerification), note: money?.inVerificationCount ? `${money.inVerificationCount} pending` : "None pending", exact: fmt(money?.inVerification) },
           { label: "Not sent to Finance", dot: BAND_DOT.recorded, value: fmtShort(money?.recorded), note: "Sent on Director approval", exact: fmt(money?.recorded) },
           { label: unitChanged ? "Old schedule" : "Balance to collect", dot: BAND_DOT.notDue, value: fmtShort(unitChanged ? summary.totalDue : money?.toCollect), note: unitChanged ? "Historical · not collectible" : "Yet to be received", exact: fmt(unitChanged ? summary.totalDue : money?.toCollect) },
@@ -490,22 +513,26 @@ const CrmPaymentMilestones: React.FC = () => {
           <div className="px-4 py-3 border-b border-border/70 text-xs text-muted-foreground">
             The customer paid once. The records below show that same money leaving this booking, being held for the unit change, and arriving on the new booking. Hold and transfer rows are internal steps, not extra payments.
           </div>
+          {unitChangeError && <div role="alert" className="flex flex-wrap items-center gap-2 border-b border-border/70 px-4 py-2 text-xs text-destructive">
+            <span>{unitChangeFetching ? "Refreshing unit-change details…" : "Could not load the unit-change request details."}</span>
+            <button type="button" onClick={() => refetchUnitChange()} className="font-semibold underline underline-offset-2">Retry</button>
+          </div>}
           <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-border">
             <div className="p-4 min-w-0">
               <div className="text-xs text-muted-foreground">Customer payment · counted once</div>
-              <div className="mt-1 font-semibold tabular-nums">{fmt(movedReceipt?.amount || 0)}</div>
-              <div className="mt-1 text-xs text-muted-foreground break-words">{movedReceipt?.docs?.join(" → ") || "Receipt documents loading"}</div>
+              <div className="mt-1 font-semibold tabular-nums">{movedReceipt ? fmt(movedReceipt.amount) : "Unavailable"}</div>
+              <div className="mt-1 text-xs text-muted-foreground break-words">{movedReceipt ? movedReceipt.docs?.join(" → ") || "No receipt documents attached" : "Original receipt details unavailable"}</div>
             </div>
             <div className="p-4 min-w-0">
               <div className="text-xs text-muted-foreground">Internal unit-change hold</div>
               <div className="mt-1 font-semibold">No new payment</div>
-              <div className="mt-1 text-xs text-muted-foreground break-words">{heldUnitChangeCredit?.ReceiptNo || bookingUnitChange?.RequestNo || "Unit-change credit"}</div>
+              <div className="mt-1 text-xs text-muted-foreground break-words">{unitChangeError || unitChangeMissing ? "Request reference unavailable" : unitChangeFetching && !bookingUnitChange ? "Loading request details…" : heldUnitChangeCredit?.ReceiptNo || bookingUnitChange?.RequestNo || "Unit-change credit"}</div>
             </div>
             <div className="p-4 min-w-0">
               <div className="text-xs text-muted-foreground">Same credit · now on the new booking</div>
-              <div className="mt-1 font-semibold tabular-nums">{fmt(Math.max(0, Number(destinationUnitChangeCredit?.Amount || bookingUnitChange?.CreditCarriedAmount || 0) - Number(destinationUnitChangeCredit?.AppliedAmount || 0)))} available</div>
+              <div className="mt-1 font-semibold tabular-nums">{unitChangeError || unitChangeMissing ? "Unavailable" : unitChangeFetching && !bookingUnitChange ? "Checking request…" : destinationCreditError ? "Balance unavailable" : destinationCreditFetching && !destinationCreditData ? "Checking balance…" : `${fmt(Math.max(0, Number(destinationUnitChangeCredit?.Amount || bookingUnitChange?.CreditCarriedAmount || 0) - Number(destinationUnitChangeCredit?.AppliedAmount || 0)))} available`}</div>
               <div className="mt-1 text-xs text-muted-foreground">
-                {destinationUnitChangeCredit ? `${destinationUnitChangeCredit.ReceiptNo} · ${fmt(Math.max(0, Number(destinationUnitChangeCredit.Amount) - Number(destinationUnitChangeCredit.AppliedAmount || 0)))} still on account` : bookingUnitChange?.TargetBookingNo || "Destination credit"}
+                {unitChangeError || unitChangeMissing ? "Unit-change request details unavailable" : unitChangeFetching && !bookingUnitChange ? "Loading the unit-change request…" : destinationCreditError ? <button type="button" onClick={() => refetchDestinationCredit()} className="font-semibold underline underline-offset-2">Retry balance lookup</button> : destinationCreditFetching && !destinationCreditData ? "Loading the new booking's on-account details…" : destinationUnitChangeCredit ? `${destinationUnitChangeCredit.ReceiptNo} · ${fmt(Math.max(0, Number(destinationUnitChangeCredit.Amount) - Number(destinationUnitChangeCredit.AppliedAmount || 0)))} still on account` : bookingUnitChange?.TargetBookingNo || "Destination credit"}
                 {bookingUnitChange?.TargetBookingId && <> · <Link to={`/crm/payments?bookingId=${bookingUnitChange.TargetBookingId}`} className="underline underline-offset-2">Open booking {bookingUnitChange.TargetBookingNo || ""}</Link></>}
               </div>
             </div>
@@ -518,25 +545,32 @@ const CrmPaymentMilestones: React.FC = () => {
             ? "Resync the schedule to generate it; schedule rows that already exist are kept for review."
             : <>Milestone 1 ({fmt(milestone1.AmountDue)}) doesn't match this booking's booking amount ({fmt(booking.BookingAmount)}). Resync the schedule to fix it and redistribute the remaining milestones.</>} />
       )}
-      <TokenNote booking={booking} moneyReceipts={moneyReceipts as any[]} />
+      {receiptsError ? (
+        <div role="alert" className="flex flex-wrap items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
+          <span>{receiptsLoading ? "Loading token receipt details…" : "Could not verify token receipt details."}</span>
+          <button type="button" onClick={() => refetchMoneyReceipts()} className="font-semibold underline underline-offset-2">Retry</button>
+        </div>
+      ) : receiptsLoading ? (
+        Number(booking.TokenValue) > 0 ? <p role="status" className="text-xs text-muted-foreground">Loading token receipt details…</p> : null
+      ) : <TokenNote booking={booking} moneyReceipts={moneyReceipts || []} />}
       <GridRelated icon={Wallet} title="Receipts" count={money?.trail?.rows?.length || 0}>
         <MoneyTrail trail={money?.trail} totalDue={summary.totalDue || 0} />
       </GridRelated>
       <GridRelated icon={ListChecks} title="Payment schedule" count={milestones.length}>
-        <MilestoneTable milestones={milestones} canEdit={rights.canEdit && !unitChanged} closed={isBookingClosed(booking?.BookingStatus)} onAccountData={onAccountData} onAccountBalance={onAccountBalance}
+        <MilestoneTable milestones={milestones} canEdit={rights.canEdit && !bookingClosed} closed={bookingClosed} onAccountData={onAccountError ? null : onAccountData} onAccountBalance={onAccountError ? 0 : onAccountBalance}
           notFullyPaid={notFullyPaid} fullPaymentShortfall={fullPaymentShortfall} activeId={activeMilestone}
           pendingWaivers={pendingWaiverIds(milestoneData.waivers)}
           nextMilestone={nextOutstandingMilestone} canManuallyApply={canManuallyApplyOnAccount}
           onPay={handleOpenPayment} onApply={openApplyDialog} onWaive={(m) => setWaiveDialog({ milestone: m, reason: "" })} onRemarks={(m) => setRemarksDialog({ milestone: m })} />
       </GridRelated>
-      <WaiverSection waivers={milestoneData.waivers || []} canEdit={rights.canEdit} onChanged={reloadMilestones} />
+      <WaiverSection waivers={milestoneData.waivers || []} canEdit={rights.canEdit && !bookingClosed} onChanged={reloadMilestones} />
       <div className={cn("grid grid-cols-1 gap-4 items-start", !unitChanged && "xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]")}>
-        {!unitChanged && <GridRelated icon={Landmark} title="On-account deposits" count={accountCount}>
-          <OnAccountPanel onAccountData={onAccountData} notFullyPaid={notFullyPaid}
+        {!unitChanged && <GridRelated icon={Landmark} title="On-account deposits" count={onAccountData ? accountCount : undefined}>
+          <OnAccountPanel onAccountData={onAccountData} loading={onAccountLoading} error={onAccountError ? translateError((onAccountError as Error).message) : null} onRetry={() => refetchOnAccount()} notFullyPaid={notFullyPaid}
             fundsOnHand={bookingFundsOnHand} requiredAmount={bookingRequiredAmount} fullPaymentShortfall={fullPaymentShortfall}
             inVerification={money?.inVerification || 0}
             milestones={milestones} canManuallyApply={canManuallyApplyOnAccount}
-            canEdit={rights.canEdit} onApply={(p) => openApplyDialog(p, null)} />
+            canEdit={rights.canEdit && !bookingClosed} onApply={(p) => openApplyDialog(p, null)} />
         </GridRelated>}
         <GridRelated icon={Receipt} title="Price"><PriceTable booking={booking} /></GridRelated>
       </div>
@@ -575,16 +609,16 @@ const CrmPaymentMilestones: React.FC = () => {
             )}
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               <div>
-                <label className={LABEL}>Amount received now (₹)</label>
-                <input type="number" min={0} value={payForm.AmountPaid} onChange={(e) => setPayForm((f) => ({ ...f, AmountPaid: e.target.value }))} className={`${INP} font-semibold tabular-nums`} />
+                <label className={LABEL} htmlFor="milestone-payment-amount">Amount received now (₹)</label>
+                <input id="milestone-payment-amount" type="number" min={0} step="0.01" value={payForm.AmountPaid} onChange={(e) => setPayForm((f) => ({ ...f, AmountPaid: e.target.value }))} className={`${INP} font-semibold tabular-nums`} />
               </div>
               <div>
-                <label className={LABEL}>Payment date</label>
-                <DateInput value={payForm.PaidDate} max={todayStr()} onChange={(e) => setPayForm((f) => ({ ...f, PaidDate: e.target.value }))} className={INP} />
+                <label className={LABEL} htmlFor="milestone-payment-date">Payment date</label>
+                <DateInput id="milestone-payment-date" value={payForm.PaidDate} max={todayStr()} onChange={(e) => setPayForm((f) => ({ ...f, PaidDate: e.target.value }))} className={INP} />
               </div>
               <div>
-                <label className={LABEL}>Payment mode</label>
-                {modeSelect(payForm.PaymentMode, (mode) => setPayForm((f) => ({ ...f, PaymentMode: mode, BankName: modeHasBank(mode) ? f.BankName : "" })))}
+                <label className={LABEL} htmlFor="milestone-payment-mode">Payment mode</label>
+                {modeSelect(payForm.PaymentMode, (mode) => setPayForm((f) => ({ ...f, PaymentMode: mode, BankName: modeHasBank(mode) ? f.BankName : "" })), "milestone-payment-mode")}
               </div>
               {previewOverflow > 0 && (
                 <p className="col-span-2 sm:col-span-3 text-[0.6875rem] font-medium flex items-center gap-1.5 px-2.5 py-1.5" style={{ border: RULE_SOFT }}>
@@ -594,34 +628,36 @@ const CrmPaymentMilestones: React.FC = () => {
               {modeHasBank(payForm.PaymentMode) && (
                 <div className="col-span-2 sm:col-span-1">
                   <label className={LABEL}>Customer's bank</label>
-                  <BankNamePicker value={payForm.BankName} onChange={(v) => setPayForm((f) => ({ ...f, BankName: v }))} placeholder="Select customer's bank…" otherPlaceholder="Bank of customer" />
+                  <BankNamePicker ariaLabel="Customer's bank" value={payForm.BankName} onChange={(v) => setPayForm((f) => ({ ...f, BankName: v }))} placeholder="Select customer's bank…" otherPlaceholder="Bank of customer" />
                 </div>
               )}
               <div className={modeHasBank(payForm.PaymentMode) ? "col-span-2" : "col-span-2 sm:col-span-3"}>
-                <label className={LABEL}>Transaction ref</label>
-                <input type="text" value={payForm.TransactionRef} placeholder="UTR / cheque / reference no." onChange={(e) => setPayForm((f) => ({ ...f, TransactionRef: e.target.value }))} className={INP} />
+                <label className={LABEL} htmlFor="milestone-payment-ref">Transaction ref</label>
+                <input id="milestone-payment-ref" type="text" value={payForm.TransactionRef} placeholder="UTR / cheque / reference no." onChange={(e) => setPayForm((f) => ({ ...f, TransactionRef: e.target.value }))} className={INP} />
               </div>
               <div className="col-span-2 sm:col-span-3">
-                <label className={LABEL}>Remarks</label>
-                <textarea value={payForm.Remarks} onChange={(e) => setPayForm((f) => ({ ...f, Remarks: e.target.value }))} rows={2} placeholder="Optional note for Finance…" className={TEXTAREA} />
+                <label className={LABEL} htmlFor="milestone-payment-remarks">Remarks</label>
+                <textarea id="milestone-payment-remarks" value={payForm.Remarks} onChange={(e) => setPayForm((f) => ({ ...f, Remarks: e.target.value }))} rows={2} placeholder="Optional note for Finance…" className={TEXTAREA} />
               </div>
             </div>
             <div className="grid sm:grid-cols-2 gap-3">
               {depositNote}
-              {customerBank && (customerBank.BankName || customerBank.AccountNo) ? (
-                <div className="px-3 py-2.5" style={{ border: RULE_SOFT }}>
-                  <p className={`${LBL} mb-1.5`}>Bank on file (KYC) — reference only</p>
+              {modeHasBank(payForm.PaymentMode) && <div className="px-3 py-2.5 text-xs" style={{ border: RULE_SOFT }}>
+                <p className={`${LBL} mb-1.5`}>Bank on file (KYC) — reference only</p>
+                {customerBankLoading ? <p role="status" className="text-muted-foreground">Loading bank details…</p> : customerBankError ? (
+                  <p role="alert" className="text-destructive">Could not load KYC bank details. <button type="button" onClick={() => refetchCustomerBank()} className="font-semibold underline underline-offset-2">Retry</button></p>
+                ) : customerBank?.BankName || customerBank?.AccountNo ? (
                   <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[0.6875rem]">
                     <span className="text-muted-foreground">Bank</span><span className="font-medium text-right truncate">{customerBank.BankName || "—"}</span>
                     <span className="text-muted-foreground">A/C no.</span><span className="font-medium text-right tabular-nums">{customerBank.AccountNo || "—"}</span>
                     <span className="text-muted-foreground">IFSC</span><span className="font-medium text-right tabular-nums">{customerBank.IfscCode || "—"}</span>
                   </div>
-                </div>
-              ) : null}
+                ) : <p className="text-muted-foreground">No KYC bank details on file.</p>}
+              </div>}
             </div>
             <DialogFooter className="gap-2">
               <button onClick={() => setEditingId(null)} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
-              <button onClick={handleRecordPayment} disabled={saving} className={`${KEY_INK} h-9 px-4`}>{saving ? "Submitting…" : "Submit for approval"}</button>
+              <button onClick={handleRecordPayment} disabled={saving || !isMoneyAmount(payForm.AmountPaid) || !(Number(payForm.AmountPaid) > 0)} className={`${KEY_INK} h-9 px-4`}>{saving ? "Submitting…" : "Submit for approval"}</button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -632,31 +668,31 @@ const CrmPaymentMilestones: React.FC = () => {
             <DialogHeader><DialogTitle className="font-heading">Add custom milestone</DialogTitle></DialogHeader>
             <div className="space-y-3">
               <div>
-                <label className={LABEL}>Milestone name *</label>
-                <input type="text" value={addForm.MilestoneName} onChange={(e) => setAddForm((f) => ({ ...f, MilestoneName: e.target.value }))} className={INP} placeholder="e.g. PLC charges" autoFocus />
+                <label className={LABEL} htmlFor="add-milestone-name">Milestone name *</label>
+                <input id="add-milestone-name" type="text" value={addForm.MilestoneName} onChange={(e) => setAddForm((f) => ({ ...f, MilestoneName: e.target.value }))} className={INP} placeholder="e.g. PLC charges" autoFocus />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className={LABEL}>Due date</label>
-                  <DateInput value={addForm.DueDate} onChange={(e) => setAddForm((f) => ({ ...f, DueDate: e.target.value }))} className={INP} />
+                  <label className={LABEL} htmlFor="add-milestone-date">Due date</label>
+                  <DateInput id="add-milestone-date" value={addForm.DueDate} onChange={(e) => setAddForm((f) => ({ ...f, DueDate: e.target.value }))} className={INP} />
                 </div>
                 <div>
-                  <label className={LABEL}>Amount due (₹)</label>
-                  <input type="number" min={0} value={addForm.AmountDue} onChange={(e) => setAddForm((f) => ({ ...f, AmountDue: e.target.value }))} className={`${INP} tabular-nums`} />
+                  <label className={LABEL} htmlFor="add-milestone-amount">Amount due (₹) *</label>
+                  <input id="add-milestone-amount" type="number" min={0} step="0.01" value={addForm.AmountDue} onChange={(e) => setAddForm((f) => ({ ...f, AmountDue: e.target.value }))} className={`${INP} tabular-nums`} />
                 </div>
               </div>
               <div>
-                <label className={LABEL}>Responsible department</label>
-                <input type="text" value={addForm.ResponsibleDepartment} onChange={(e) => setAddForm((f) => ({ ...f, ResponsibleDepartment: e.target.value }))} className={INP} placeholder="e.g. Construction, Legal, Sales" />
+                <label className={LABEL} htmlFor="add-milestone-department">Responsible department</label>
+                <input id="add-milestone-department" type="text" value={addForm.ResponsibleDepartment} onChange={(e) => setAddForm((f) => ({ ...f, ResponsibleDepartment: e.target.value }))} className={INP} placeholder="e.g. Construction, Legal, Sales" />
               </div>
               <div>
-                <label className={LABEL}>Required documents</label>
-                <input type="text" value={addForm.RequiredDocuments} onChange={(e) => setAddForm((f) => ({ ...f, RequiredDocuments: e.target.value }))} className={INP} placeholder="e.g. Completion certificate" />
+                <label className={LABEL} htmlFor="add-milestone-documents">Required documents</label>
+                <input id="add-milestone-documents" type="text" value={addForm.RequiredDocuments} onChange={(e) => setAddForm((f) => ({ ...f, RequiredDocuments: e.target.value }))} className={INP} placeholder="e.g. Completion certificate" />
               </div>
             </div>
             <DialogFooter className="gap-2">
               <button onClick={() => setAddDialog(false)} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
-              <button onClick={handleAddMilestone} disabled={saving || !addForm.MilestoneName.trim()} className={`${KEY_INK} h-9 px-4`}>{saving ? "Adding…" : "Add milestone"}</button>
+              <button onClick={handleAddMilestone} disabled={saving || !addForm.MilestoneName.trim() || !isMoneyAmount(addForm.AmountDue) || !(Number(addForm.AmountDue) > 0)} className={`${KEY_INK} h-9 px-4`}>{saving ? "Adding…" : "Add milestone"}</button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -670,36 +706,36 @@ const CrmPaymentMilestones: React.FC = () => {
             </DialogHeader>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               <div>
-                <label className={LABEL}>Amount (₹) *</label>
-                <input type="number" min={0} value={onAccountForm.Amount} onChange={(e) => setOnAccountForm((f) => ({ ...f, Amount: e.target.value }))} className={`${INP} font-semibold tabular-nums`} />
+                <label className={LABEL} htmlFor="on-account-amount">Amount (₹) *</label>
+                <input id="on-account-amount" type="number" min={0} step="0.01" value={onAccountForm.Amount} onChange={(e) => setOnAccountForm((f) => ({ ...f, Amount: e.target.value }))} className={`${INP} font-semibold tabular-nums`} />
               </div>
               <div>
-                <label className={LABEL}>Received date</label>
-                <DateInput value={onAccountForm.ReceivedDate} max={todayStr()} onChange={(e) => setOnAccountForm((f) => ({ ...f, ReceivedDate: e.target.value }))} className={INP} />
+                <label className={LABEL} htmlFor="on-account-date">Received date</label>
+                <DateInput id="on-account-date" value={onAccountForm.ReceivedDate} max={todayStr()} onChange={(e) => setOnAccountForm((f) => ({ ...f, ReceivedDate: e.target.value }))} className={INP} />
               </div>
               <div>
-                <label className={LABEL}>Payment mode</label>
-                {modeSelect(onAccountForm.PaymentMode, (mode) => setOnAccountForm((f) => ({ ...f, PaymentMode: mode, BankName: modeHasBank(mode) ? f.BankName : "" })))}
+                <label className={LABEL} htmlFor="on-account-mode">Payment mode</label>
+                {modeSelect(onAccountForm.PaymentMode, (mode) => setOnAccountForm((f) => ({ ...f, PaymentMode: mode, BankName: modeHasBank(mode) ? f.BankName : "" })), "on-account-mode")}
               </div>
               {modeHasBank(onAccountForm.PaymentMode) && (
                 <div className="col-span-2 sm:col-span-1">
                   <label className={LABEL}>Customer's bank</label>
-                  <BankNamePicker value={onAccountForm.BankName} onChange={(v) => setOnAccountForm((f) => ({ ...f, BankName: v }))} placeholder="Select customer's bank…" otherPlaceholder="Bank of customer" />
+                  <BankNamePicker ariaLabel="Customer's bank" value={onAccountForm.BankName} onChange={(v) => setOnAccountForm((f) => ({ ...f, BankName: v }))} placeholder="Select customer's bank…" otherPlaceholder="Bank of customer" />
                 </div>
               )}
               <div className={modeHasBank(onAccountForm.PaymentMode) ? "col-span-2" : "col-span-2 sm:col-span-3"}>
-                <label className={LABEL}>Transaction ref</label>
-                <input type="text" value={onAccountForm.TransactionRef} placeholder="UTR / cheque / reference no." onChange={(e) => setOnAccountForm((f) => ({ ...f, TransactionRef: e.target.value }))} className={INP} />
+                <label className={LABEL} htmlFor="on-account-ref">Transaction ref</label>
+                <input id="on-account-ref" type="text" value={onAccountForm.TransactionRef} placeholder="UTR / cheque / reference no." onChange={(e) => setOnAccountForm((f) => ({ ...f, TransactionRef: e.target.value }))} className={INP} />
               </div>
               <div className="col-span-2 sm:col-span-3">
-                <label className={LABEL}>Notes</label>
-                <textarea value={onAccountForm.Notes} onChange={(e) => setOnAccountForm((f) => ({ ...f, Notes: e.target.value }))} rows={2} placeholder="Optional note for Finance…" className={TEXTAREA} />
+                <label className={LABEL} htmlFor="on-account-notes">Notes</label>
+                <textarea id="on-account-notes" value={onAccountForm.Notes} onChange={(e) => setOnAccountForm((f) => ({ ...f, Notes: e.target.value }))} rows={2} placeholder="Optional note for Finance…" className={TEXTAREA} />
               </div>
             </div>
             {depositNote}
             <DialogFooter className="gap-2">
               <button onClick={() => setOnAccountDialog(false)} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
-              <button onClick={handleDepositOnAccount} disabled={saving || !onAccountForm.Amount} className={`${KEY_INK} h-9 px-4`}>{saving ? "Submitting…" : "Submit for approval"}</button>
+              <button onClick={handleDepositOnAccount} disabled={saving || !isMoneyAmount(onAccountForm.Amount) || !(Number(onAccountForm.Amount) > 0)} className={`${KEY_INK} h-9 px-4`}>{saving ? "Submitting…" : "Submit for approval"}</button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -709,11 +745,14 @@ const CrmPaymentMilestones: React.FC = () => {
           <DialogContent className={`max-w-sm ${DIALOG}`} style={{ border: RULE }}>
             <DialogHeader><DialogTitle className="font-heading flex items-center gap-1.5"><Wallet size={16} /> Apply on-account to a milestone</DialogTitle></DialogHeader>
             {applyDialog && (() => {
-              const remaining = Number(applyDialog.payment.Amount) - Number(applyDialog.payment.AppliedAmount || 0);
+              const remaining = roundPaise(Number(applyDialog.payment.Amount) - Number(applyDialog.payment.AppliedAmount || 0));
               const unpaid = canManuallyApplyOnAccount && nextOutstandingMilestone ? [nextOutstandingMilestone] : [];
               const chosenMil = applyDialog.milestone ?? milestones.find((m: any) => m.Id === parseInt(applyMilestoneId));
-              const milBalance = chosenMil ? Number(chosenMil.AmountDue) - Number(chosenMil.AmountPaid || 0) : 0;
+              const milBalance = chosenMil ? roundPaise(Number(chosenMil.AmountDue) - Number(chosenMil.AmountPaid || 0)) : 0;
               const chosenTargetEligible = canManuallyApplyOnAccount && !!chosenMil && chosenMil.Id === nextOutstandingMilestone?.Id;
+              const amountLimit = Math.min(remaining, roundPaise(Math.max(0, milBalance)));
+              const applyAmount = Number(applyDialog.amount);
+              const amountValid = isMoneyAmount(applyAmount) && applyAmount > 0 && applyAmount <= amountLimit;
               return (
                 <>
                   <div className="p-3 text-sm" style={{ border: RULE_SOFT }}>
@@ -731,8 +770,8 @@ const CrmPaymentMilestones: React.FC = () => {
                     </div>
                   ) : (
                     <div>
-                      <label className={LABEL}>Apply to milestone *</label>
-                      <select value={applyMilestoneId} className={INP} onChange={(e) => {
+                      <label className={LABEL} htmlFor="apply-milestone-target">Apply to milestone *</label>
+                      <select id="apply-milestone-target" value={applyMilestoneId} className={INP} onChange={(e) => {
                         const val = e.target.value;
                         setApplyMilestoneId(val);
                         const m = milestones.find((x: any) => String(x.Id) === val);
@@ -744,8 +783,8 @@ const CrmPaymentMilestones: React.FC = () => {
                     </div>
                   )}
                   <div>
-                    <label className={LABEL}>Amount to apply</label>
-                    <input type="number" min="1" max={remaining} value={applyDialog.amount} onChange={(e) => setApplyDialog((d) => (d ? { ...d, amount: e.target.value } : d))} className={`${INP} tabular-nums`} />
+                    <label className={LABEL} htmlFor="apply-milestone-amount">Amount to apply</label>
+                    <input id="apply-milestone-amount" type="number" min="0.01" step="0.01" max={chosenMil ? amountLimit : remaining} value={applyDialog.amount} onChange={(e) => setApplyDialog((d) => (d ? { ...d, amount: e.target.value } : d))} className={`${INP} tabular-nums`} />
                     {chosenMil && milBalance > 0 && (
                       <p className="text-xs text-muted-foreground mt-1 tabular-nums">
                         Outstanding {fmt(milBalance)} · available {fmt(remaining)}
@@ -755,14 +794,15 @@ const CrmPaymentMilestones: React.FC = () => {
                   </div>
                   {chosenMil && !chosenTargetEligible && (
                     <p className="text-xs text-destructive">
-                      {notFullyPaid ? `${fmt(fullPaymentShortfall)} more is needed before deposits are adjusted to the milestones.`
+                      {!onAccountKnown ? <>Could not verify the on-account balance. <button type="button" onClick={() => refetchOnAccount()} className="font-semibold underline underline-offset-2">Retry lookup</button> before applying money.</>
+                        : notFullyPaid ? `${fmt(fullPaymentShortfall)} more is needed before deposits are adjusted to the milestones.`
                         : nextOutstandingMilestone?.DemandStatus === CrmStatus.PENDING ? `Raise the Demand for ${nextOutstandingMilestone.MilestoneName} first.`
                         : "Only the next outstanding milestone can take on-account money."}
                     </p>
                   )}
                   <DialogFooter className="gap-2">
                     <button onClick={() => setApplyDialog(null)} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
-                    <button onClick={handleConfirmApply} disabled={saving || !applyDialog.amount || (!applyDialog.milestone && !applyMilestoneId) || !chosenTargetEligible} className={`${KEY_INK} h-9 px-4`}>
+                    <button onClick={handleConfirmApply} disabled={saving || (!applyDialog.milestone && !applyMilestoneId) || !chosenTargetEligible || !amountValid} className={`${KEY_INK} h-9 px-4`}>
                       {saving ? "Applying…" : `Apply ${applyDialog.amount ? fmt(parseFloat(applyDialog.amount)) : ""}`}
                     </button>
                   </DialogFooter>
@@ -788,8 +828,8 @@ const CrmPaymentMilestones: React.FC = () => {
                   </p>
                 )}
                 <div>
-                  <label className={LABEL}>Reason *</label>
-                  <textarea value={waiveDialog.reason} onChange={(e) => setWaiveDialog((d) => (d ? { ...d, reason: e.target.value } : d))} rows={3} autoFocus
+                  <label className={LABEL} htmlFor="waiver-reason">Reason *</label>
+                  <textarea id="waiver-reason" value={waiveDialog.reason} onChange={(e) => setWaiveDialog((d) => (d ? { ...d, reason: e.target.value } : d))} rows={3} autoFocus
                     placeholder="e.g. Discount approved by management, PLC waiver agreed in negotiation…" className={TEXTAREA} />
                 </div>
                 <DialogFooter className="gap-2">

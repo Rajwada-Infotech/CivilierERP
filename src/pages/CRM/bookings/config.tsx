@@ -33,33 +33,33 @@ export const EMPTY_FORM = {
 };
 export type BookingForm = typeof EMPTY_FORM;
 
-export async function fetchUnits(): Promise<any[]> {
-  try { const r = await fetchWithAuth(`${UNIT_API}?isActive=1`); return r.ok ? r.json() : []; } catch { return []; }
+async function fetchList(url: string, label: string): Promise<any[]> {
+  const res = await fetchWithAuth(url);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `Could not load ${label}.`);
+  if (!Array.isArray(data)) throw new Error(`Could not load ${label}. The server returned an unexpected response.`);
+  return data;
 }
-export async function fetchPlots(): Promise<any[]> {
-  try { const r = await fetchWithAuth(`${PLOT_API}?available=1`); return r.ok ? r.json() : []; } catch { return []; }
+
+export function fetchUnits(): Promise<any[]> {
+  return fetchList(`${UNIT_API}?isActive=1`, "units");
+}
+export function fetchPlots(): Promise<any[]> {
+  return fetchList(`${PLOT_API}?available=1`, "plots");
 }
 // Needed to resolve a tagged plan's fixed Booking Amount: it is decided when the plan is made, not typed per booking.
-export async function fetchPaymentPlans(): Promise<any[]> {
-  try { const r = await fetchWithAuth(`${PLAN_API}?isActive=1`); return r.ok ? r.json() : []; } catch { return []; }
+export function fetchPaymentPlans(): Promise<any[]> {
+  return fetchList(`${PLAN_API}?isActive=1`, "payment plans");
 }
 // One Application -> at most one Booking. Only applications both Approved and not yet converted (the server's
 // ?forBooking=1 filter).
-export async function fetchApps(): Promise<any[]> {
-  try {
-    const res = await fetchWithAuth(`${APP_API}?forBooking=1`);
-    if (!res.ok) return [];
-    return res.json();
-  } catch { return []; }
+export function fetchApps(): Promise<any[]> {
+  return fetchList(`${APP_API}?forBooking=1`, "applications");
 }
 // Sales users for "Assigned To" (Sales Automation's list, readable with the Bookings right too).
 export async function fetchUsers(): Promise<{ value: string; label: string }[]> {
-  try {
-    const res = await fetchWithAuth(`${SA_LEADS_API}/users`);
-    if (!res.ok) return [];
-    const d: any[] = await res.json();
-    return d.map((u) => ({ value: String(u.Id), label: u.Name }));
-  } catch { return []; }
+  const data = await fetchList(`${SA_LEADS_API}/users`, "sales users");
+  return data.map((u: any) => ({ value: String(u.Id), label: u.Name }));
 }
 
 // The booking(s) for one application (?applicationId= deep link), cancelled ones included.
@@ -115,7 +115,7 @@ export function getNextStep(b: any): NextStep {
   // Post-agreement lifecycle, in GET /:id/lifecycle's own order.
   if (!b.AgreementRegistered) return { label: "Agreement registration", path: `/crm/agreements?bookingId=${b.Id}` };
   if (!b.NocIssued) return { label: "NOC", path: `/crm/noc?bookingId=${b.Id}` };
-  if (!b.HandoverDone) return { label: "Handover", path: `/crm/possession` };
+  if (!b.HandoverDone) return { label: "Handover", path: `/crm/possession?bookingId=${b.Id}` };
   if (!b.SalesDeedDone) return { label: "Sale deed", path: `/crm/sales-deed?bookingId=${b.Id}` };
   if (!b.RegistryDone) return { label: "Registry", path: `/crm/sales-deed?bookingId=${b.Id}&tab=Registry` };
   if (!b.MutationDone) return { label: "Mutation", path: `/crm/mutation?bookingId=${b.Id}` };

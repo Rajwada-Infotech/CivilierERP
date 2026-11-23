@@ -6,7 +6,9 @@ import { localDay } from "../salesDeed/config";
 export const API = "/api/crm/payments";
 export const BKG_API = "/api/crm/bookings";
 export const CUSTOMER_BANK_API = "/api/crm/customer-bank-details";
-export const PROJECT_BANK_API = "/api/crm/project-banks";
+const isFiniteNumericValue = (value: unknown) =>
+  (typeof value === "number" && Number.isFinite(value))
+  || (typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value)));
 
 export const PAY_MODES = ["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Home Loan", "Other"];
 // Modes where the money demonstrably came out of a bank account, so asking which one is meaningful. Mirrors
@@ -139,12 +141,22 @@ export async function fetchLedger(params: URLSearchParams): Promise<{ rows: Ledg
   const r = await fetchWithAuth(`${API}/ledger?${params}`);
   const d = await r.json().catch(() => null);
   if (!r.ok) throw new Error(d?.error || `Could not load the bookings (${r.status}).`);
-  return { rows: d?.rows || [], total: d?.total || 0 };
+  if (!d || !Array.isArray(d.rows) || !Number.isFinite(Number(d.total))) {
+    throw new Error("The bookings list response was invalid. Retry to load the queue.");
+  }
+  return { rows: d.rows, total: Number(d.total) };
 }
 export async function fetchLedgerSummary(params: URLSearchParams): Promise<LedgerSummary> {
   const r = await fetchWithAuth(`${API}/ledger/summary?${params}`);
   const d = await r.json().catch(() => null);
   if (!r.ok) throw new Error(d?.error || `Could not load the figures (${r.status}).`);
+  const countKeys: DeskTab[] = ["everything", "all", "attention", "overdue", "soon", "finance", "recorded", "collected", "closed"];
+  const amountKeys = ["totalDue", "settled", "held", "withFinance", "recorded", "toCollect", "overdue"] as const;
+  if (!d || typeof d !== "object" || !d.counts || !countKeys.every((k) => Number.isFinite(Number(d.counts[k])))
+    || !amountKeys.every((k) => Number.isFinite(Number(d[k]))) || !Array.isArray(d.ages)
+    || !d.ages.every((a: any) => a && typeof a.key === "string" && typeof a.label === "string" && Number.isFinite(Number(a.amount)) && Number.isFinite(Number(a.count)))) {
+    throw new Error("The payment totals response was invalid. Retry to load the figures.");
+  }
   return d;
 }
 /** Every row under the same search and filters, for the export. */
@@ -152,7 +164,8 @@ export async function fetchLedgerExport(params: URLSearchParams): Promise<Ledger
   const r = await fetchWithAuth(`${API}/ledger?${params}`);
   const d = await r.json().catch(() => null);
   if (!r.ok) throw new Error(d?.error || `Could not export the bookings (${r.status}).`);
-  return Array.isArray(d) ? d : [];
+  if (!Array.isArray(d)) throw new Error("The bookings export response was invalid. Retry the export.");
+  return d;
 }
 
 export async function fetchMilestones(bookingId: string): Promise<any> {
@@ -160,40 +173,66 @@ export async function fetchMilestones(bookingId: string): Promise<any> {
   // Unlike the supporting fetches below, this one drives the page's main content: a failure must not read as
   // "no milestones" on a money-tracking page, so it throws and React Query shows the error.
   const r = await fetchWithAuth(`${API}/booking/${bookingId}`);
+  if (r.status === 404) return null;
   if (!r.ok) {
     const data = await r.json().catch(() => ({}));
     throw new Error(data.error || `Failed to load milestones (${r.status})`);
   }
-  return r.json();
+  const data = await r.json().catch(() => null);
+  const summaryNumbers = ["totalDue", "totalPaid", "balance", "waivedDue", "waivedCount", "overdue"];
+  const moneyNumbers = ["adjusted", "held", "collected", "inVerification", "inVerificationCount", "recorded", "toCollect", "excess"];
+  const hasNumbers = (value: any, keys: string[]) => keys.every((key) => {
+    return isFiniteNumericValue(value?.[key]);
+  });
+  const bookingValid = !!data?.booking && typeof data.booking === "object"
+    && typeof data.booking.BookingNo === "string" && data.booking.BookingNo.trim() !== ""
+    && typeof data.booking.BookingStatus === "string" && data.booking.BookingStatus.trim() !== "";
+  const milestonesValid = Array.isArray(data?.milestones) && data.milestones.every((milestone: any) =>
+    !!milestone && typeof milestone === "object"
+    && isFiniteNumericValue(milestone.Id) && isFiniteNumericValue(milestone.MilestoneNo)
+    && typeof milestone.MilestoneName === "string" && milestone.MilestoneName.trim() !== ""
+    && isFiniteNumericValue(milestone.AmountDue)
+    && (milestone.AmountPaid == null || isFiniteNumericValue(milestone.AmountPaid))
+    && typeof milestone.Status === "string" && milestone.Status.trim() !== "");
+  if (!data || typeof data !== "object" || !bookingValid || !milestonesValid
+    || !hasNumbers(data.summary, summaryNumbers) || !hasNumbers(data.money, moneyNumbers)
+    || !Array.isArray(data.money.trail?.rows) || !Array.isArray(data.money.entries) || !Array.isArray(data.money.returned)
+    || !Array.isArray(data.waivers)) {
+    throw new Error("The payment plan response was incomplete. Retry to load the booking schedule.");
+  }
+  return data;
 }
 
 // The booking's Money Receipts: a token captured at intake shows here before Finance approves it (Collected would
 // otherwise read ₹0 and the whole balance red).
 export async function fetchMoneyReceipts(bookingId: string): Promise<any[]> {
   if (!bookingId) return [];
-  try {
-    const r = await fetchWithAuth(`/api/crm/money-receipts?bookingId=${bookingId}`);
-    return r.ok ? r.json() : [];
-  } catch { return []; }
+  const r = await fetchWithAuth(`/api/crm/money-receipts?bookingId=${bookingId}`);
+  const d = await r.json().catch(() => null);
+  if (!r.ok) throw new Error(d?.error || `Could not load money receipts (${r.status}).`);
+  if (!Array.isArray(d)) throw new Error("The money receipts response was invalid.");
+  return d;
 }
 export async function fetchOnAccount(bookingId: string): Promise<any> {
   if (!bookingId) return null;
-  try {
-    const r = await fetchWithAuth(`${API}/booking/${bookingId}/on-account`);
-    return r.ok ? r.json() : null;
-  } catch { return null; }
-}
-export async function fetchProjectBanks(projectId?: number | null): Promise<any[]> {
-  if (projectId == null) return [];
-  try {
-    const r = await fetchWithAuth(`${PROJECT_BANK_API}/for-project/${projectId}`);
-    return r.ok ? r.json() : [];
-  } catch { return []; }
+  const r = await fetchWithAuth(`${API}/booking/${bookingId}/on-account`);
+  const d = await r.json().catch(() => null);
+  if (!r.ok) throw new Error(d?.error || `Could not load on-account deposits (${r.status}).`);
+  const paymentsValid = Array.isArray(d?.payments) && d.payments.every((payment: any) =>
+    !!payment && typeof payment === "object"
+    && isFiniteNumericValue(payment.Id) && isFiniteNumericValue(payment.Amount)
+    && (payment.AppliedAmount == null || isFiniteNumericValue(payment.AppliedAmount))
+    && typeof payment.Status === "string" && payment.Status.trim() !== "");
+  if (!d || typeof d !== "object" || !paymentsValid || !isFiniteNumericValue(d.availableBalance)) {
+    throw new Error("The on-account deposits response was invalid.");
+  }
+  return d;
 }
 export async function fetchCustomerBank(bookingId: string): Promise<any> {
   if (!bookingId) return null;
-  try {
-    const r = await fetchWithAuth(`${CUSTOMER_BANK_API}/booking/${bookingId}`);
-    return r.ok ? r.json() : null;
-  } catch { return null; }
+  const r = await fetchWithAuth(`${CUSTOMER_BANK_API}/booking/${bookingId}`);
+  const d = await r.json().catch(() => null);
+  if (!r.ok) throw new Error(d?.error || `Could not load the customer's bank on file (${r.status}).`);
+  if (!d || typeof d !== "object") throw new Error("The customer's bank details response was invalid.");
+  return d;
 }
