@@ -53,6 +53,8 @@ export default function LandSalesPage() {
           <LegalMasterTable
             entry={SALE}
             parentId={landId}
+            // The whole register follows the project picked at the top; one land's sales are that land's.
+            projectScoped={!landId}
             rowActions={(raw) => (
               <span className="inline-flex gap-1.5">
                 {!landId && <button className={small} onClick={() => navigate(`/legal/land/properties/${raw.LandId}`)}>Land</button>}

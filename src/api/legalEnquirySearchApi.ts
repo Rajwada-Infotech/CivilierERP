@@ -41,7 +41,7 @@ export const findEnquiriesPage = async (projectId: number | "all" | "none", q: s
   handle<{ items: EnquiryHit[]; total: number; page: number; pageSize: number }>(await fetchWithAuth(
     `${BASE}/find?projectId=${projectId}&tab=all&q=${encodeURIComponent(q)}&page=${page}&pageSize=${pageSize}${kind ? `&kind=${kind}` : ""}`));
 export const getEnquirySearches = async (enquiryId: number) => handle<{ offices: OfficeSearch[]; years: YearResult[] }>(await fetchWithAuth(`${BASE}/${enquiryId}`));
-export const getOverdueSearches = async () => handle<OfficeSearch[]>(await fetchWithAuth(`${BASE}/overdue`));
+export const getOverdueSearches = async (project = "all") => handle<OfficeSearch[]>(await fetchWithAuth(`${BASE}/overdue?project=${encodeURIComponent(project)}`));
 export const setOfficeOf = async (id: number, officeId: number | null) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/office/${id}`, send("PUT", { officeId })));
 export const addYearResult = async (id: number, body: YearBody) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/office/${id}/year`, send("POST", body)));
 export const editYearResult = async (searchId: number, body: YearBody) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/item/${searchId}`, send("PUT", body)));

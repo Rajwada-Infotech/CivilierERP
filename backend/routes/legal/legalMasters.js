@@ -520,6 +520,11 @@ function pagedWhere(cfg, master, q, request) {
     if (q.project === "none") where.push("b.ProjectId IS NULL");
     else { const p = Number(q.project); if (Number.isInteger(p) && p > 0) { request.input("Proj", sql.Int, p); where.push("b.ProjectId = @Proj"); } }
   }
+  // A land's own records (RS / LR registers, taxes, payments …) follow the project of their land.
+  else if (q.project !== undefined && q.project !== "" && q.project !== "all" && cfg.parent === "LandId") {
+    if (q.project === "none") where.push("b.LandId IN (SELECT LandId FROM dbo.LegalLand WHERE ProjectId IS NULL)");
+    else { const p = Number(q.project); if (Number.isInteger(p) && p > 0) { request.input("Proj", sql.Int, p); where.push("b.LandId IN (SELECT LandId FROM dbo.LegalLand WHERE ProjectId = @Proj)"); } }
+  }
   const nf = NAMED_FILTERS[master]?.[String(q.filter || "")];
   if (nf) where.push(nf);
   return where;
