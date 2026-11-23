@@ -348,9 +348,11 @@ function StockDetailsTable({ godownId, godownName, dateFrom, dateTo, projectName
   const [selectedItem, setSelectedItem] = useState<{ ItemID: string; ItemName: string | null } | null>(null);
 
   const allRows = data?.data ?? [];
-  const q = appliedItemSearch.trim().toLowerCase();
+  // Spaces, dashes and dots don't count, so "readymix" finds "Ready Mix" and "m30" finds "M-30".
+  const squash = (v: unknown) => String(v ?? "").toLowerCase().replace(/[\s.\-]+/g, "");
+  const q = squash(appliedItemSearch);
   const rows = q
-    ? allRows.filter((r) => r.ItemName?.toLowerCase().includes(q) || r.ItemGroupName?.toLowerCase().includes(q) || String(r.ItemID ?? "").includes(q))
+    ? allRows.filter((r) => squash(r.ItemName).includes(q) || squash(r.ItemGroupName).includes(q) || squash(r.ItemID).includes(q))
     : allRows;
   const totals = rows.reduce(
     (acc, r) => ({ opening: acc.opening + r.OpeningStock, in: acc.in + r.StockIn, out: acc.out + r.StockOut, closing: acc.closing + r.ClosingStock }),

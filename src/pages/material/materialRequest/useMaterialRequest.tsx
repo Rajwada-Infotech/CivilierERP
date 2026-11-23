@@ -242,8 +242,10 @@ export function useMaterialRequest() {
     () =>
       (itemOptions as any[])
         .filter((item) => {
-          if (availableSupplyDays === null) return true; // no Required By Date chosen yet
           if (selectedItemIds.has(String(item.M_Id))) return true;
+          // Disabled in Item Master: not offered for new lines.
+          if (item.M_IsActive === false) return false;
+          if (availableSupplyDays === null) return true; // no Required By Date chosen yet
           const dos = item.DaysOfSupply;
           // Days of Supply is a new field — most items don't have one set
           // yet. No data means no constraint: show it anyway, exactly like

@@ -663,6 +663,7 @@ export function useItemMaster() {
               // empty-default this field already gets on the manual Add
               // form (EMPTY_FORM below).
               daysOfSupply: "",
+              isActive: true,
             },
             group.description,
           );
@@ -766,7 +767,14 @@ export function useItemMaster() {
       header: "Item Name",
       size: 170,
       cell: ({ row }) => (
-        <span className="font-medium">{row.original.itemName}</span>
+        <span className="font-medium">
+          {row.original.itemName}
+          {!row.original.isActive && (
+            <span className="ml-2 align-middle text-[0.625rem] font-semibold uppercase tracking-[0.08em] text-destructive border border-destructive/50 px-1.5 py-0.5">
+              Disabled
+            </span>
+          )}
+        </span>
       ),
     },
     {

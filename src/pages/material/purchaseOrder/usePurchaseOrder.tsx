@@ -439,6 +439,7 @@ export function usePurchaseOrder() {
         // Days of Supply (Item Master) — used to floor Expected Delivery so
         // it's never sooner than the slowest item on this PO can arrive.
         daysOfSupply: i.M_DaysOfSupply != null ? Number(i.M_DaysOfSupply) : null,
+        isActive: i.M_IsActive !== false,
       })),
     [itemsRaw, itemsGstById],
   );
@@ -511,9 +512,11 @@ export function usePurchaseOrder() {
   );
 
   const pickableItems = useMemo(() => {
-    if (availableSupplyDays === null) return items;
     return items.filter((i) => {
       if (selectedItemIds.has(i.id)) return true;
+      // Disabled in Item Master: not offered for new lines (a line that already has it keeps it).
+      if (!i.isActive) return false;
+      if (availableSupplyDays === null) return true;
       // Days of Supply is a new field — most items don't have one set yet.
       // No data means no constraint: show it anyway, exactly like an item
       // whose lead time already fits.

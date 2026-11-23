@@ -215,7 +215,7 @@ export const MaterialBreakdownModal: React.FC<{
                                   ? "No items available"
                                   : "Select material item…"}
                               </option>
-                              {itemOptions.map((it) => (
+                              {itemOptions.filter((it) => it.isActive !== false || it.id === mat.itemId).map((it) => (
                                 <option key={it.id} value={it.id}>
                                   {it.name}
                                 </option>

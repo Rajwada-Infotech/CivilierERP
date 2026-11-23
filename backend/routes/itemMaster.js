@@ -18,7 +18,7 @@ async function getItemOptionalCols(pool) {
   const result = await pool.request().query(`
     SELECT name FROM sys.columns
     WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group')
-      AND name IN (N'M_UOM', N'default_supplier_id', N'M_GLHeadId', N'M_CostCenterId', N'M_DaysOfSupply')
+      AND name IN (N'M_UOM', N'default_supplier_id', N'M_GLHeadId', N'M_CostCenterId', N'M_DaysOfSupply', N'M_IsActive')
   `);
   const names = new Set(result.recordset.map((r) => r.name));
   return {
@@ -27,6 +27,7 @@ async function getItemOptionalCols(pool) {
     hasGL: names.has("M_GLHeadId"),
     hasCC: names.has("M_CostCenterId"),
     hasDOS2: names.has("M_DaysOfSupply"),
+    hasActive: names.has("M_IsActive"),
   };
 }
 
@@ -34,7 +35,7 @@ async function getItemOptionalCols(pool) {
 router.get("/", cache("item-master", 300), async (req, res) => {
   try {
     const pool = getPool();
-    const { hasUOM, hasDS, hasGL, hasCC, hasDOS2 } = await getItemOptionalCols(pool);
+    const { hasUOM, hasDS, hasGL, hasCC, hasDOS2, hasActive } = await getItemOptionalCols(pool);
 
     const result = await pool.request().query(`
       SELECT
@@ -65,7 +66,8 @@ router.get("/", cache("item-master", 300), async (req, res) => {
         ${hasGL ? "gl.LHeadName AS GLHeadName," : "NULL AS GLHeadName,"}
         ${hasCC ? "item.M_CostCenterId," : "NULL AS M_CostCenterId,"}
         ${hasCC ? "cc.Name AS CostCenterName," : "NULL AS CostCenterName,"}
-        ${hasDOS2 ? "item.M_DaysOfSupply" : "NULL AS M_DaysOfSupply"}
+        ${hasDOS2 ? "item.M_DaysOfSupply," : "NULL AS M_DaysOfSupply,"}
+        ${hasActive ? "item.M_IsActive" : "CAST(1 AS BIT) AS M_IsActive"}
       FROM dbo.Item_Master_Group item
       LEFT JOIN dbo.Item_Master_Group grp ON grp.M_Id = item.Parent_Id
       ${hasDS ? "LEFT JOIN dbo.AccountHeadMaster supp ON supp.LHeadId = item.default_supplier_id" : ""}
@@ -116,7 +118,7 @@ router.get("/:id", async (req, res) => {
   const { id } = req.params;
   try {
     const pool = getPool();
-    const { hasUOM, hasGL, hasCC, hasDOS2 } = await getItemOptionalCols(pool);
+    const { hasUOM, hasGL, hasCC, hasDOS2, hasActive } = await getItemOptionalCols(pool);
 
     const result = await pool.request().input("M_Id", sql.UniqueIdentifier, id)
       .query(`
@@ -148,7 +150,8 @@ router.get("/:id", async (req, res) => {
           ${hasGL ? "gl.LHeadName AS GLHeadName," : "NULL AS GLHeadName,"}
           ${hasCC ? "item.M_CostCenterId," : "NULL AS M_CostCenterId,"}
           ${hasCC ? "cc.Name AS CostCenterName," : "NULL AS CostCenterName,"}
-          ${hasDOS2 ? "item.M_DaysOfSupply" : "NULL AS M_DaysOfSupply"}
+          ${hasDOS2 ? "item.M_DaysOfSupply," : "NULL AS M_DaysOfSupply,"}
+          ${hasActive ? "item.M_IsActive" : "CAST(1 AS BIT) AS M_IsActive"}
         FROM dbo.Item_Master_Group item
         LEFT JOIN dbo.Item_Master_Group grp ON grp.M_Id = item.Parent_Id
         LEFT JOIN dbo.AccountHeadMaster supp ON supp.LHeadId = item.default_supplier_id
@@ -328,6 +331,7 @@ router.put("/:id", requirePageRight("item-master", "edit"), async (req, res) => 
     M_GLHeadId,
     M_CostCenterId,
     M_DaysOfSupply,
+    M_IsActive, // ← false disables the item; left out, the current value is kept
   } = req.body;
 
   if (!M_Name) return res.status(400).json({ error: "M_Name is required" });
@@ -351,7 +355,8 @@ router.put("/:id", requirePageRight("item-master", "edit"), async (req, res) => 
         if (clash) return res.status(409).json({ error: duplicateCodeMessage(shortCode, clash) });
       }
     }
-    const { hasUOM, hasDS, hasGL, hasCC, hasDOS2 } = await getItemOptionalCols(pool);
+    const { hasUOM, hasDS, hasGL, hasCC, hasDOS2, hasActive } = await getItemOptionalCols(pool);
+    const setActive = hasActive && M_IsActive !== undefined && M_IsActive !== null;
 
     const req2 = pool
       .request()
@@ -385,6 +390,7 @@ router.put("/:id", requirePageRight("item-master", "edit"), async (req, res) => 
       req2.input("M_CostCenterId", sql.Int, M_CostCenterId !== undefined && M_CostCenterId !== null && M_CostCenterId !== "" ? parseInt(M_CostCenterId, 10) : null);
     if (hasDOS2)
       req2.input("M_DaysOfSupply", sql.Int, M_DaysOfSupply != null && M_DaysOfSupply !== "" ? parseInt(M_DaysOfSupply, 10) : null);
+    if (setActive) req2.input("M_IsActive", sql.Bit, M_IsActive === false || M_IsActive === 0 || M_IsActive === "0" ? 0 : 1);
 
     const result = await req2.query(`
       UPDATE dbo.Item_Master_Group SET
@@ -404,6 +410,7 @@ router.put("/:id", requirePageRight("item-master", "edit"), async (req, res) => 
         ${hasGL ? "M_GLHeadId = @M_GLHeadId," : ""}
         ${hasCC ? "M_CostCenterId = @M_CostCenterId," : ""}
         ${hasDOS2 ? "M_DaysOfSupply = @M_DaysOfSupply," : ""}
+        ${setActive ? "M_IsActive = @M_IsActive," : ""}
         M_UpdatedBy    = @M_UpdatedBy,
         UpdatedAt      = @UpdatedAt,
         M_ApprovedBy   = @M_ApprovedBy,

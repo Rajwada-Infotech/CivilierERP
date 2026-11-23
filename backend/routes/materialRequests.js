@@ -202,7 +202,7 @@ router.get("/item-options", authenticateToken, async (req, res) => {
     if (requestedProjectId && !assertProjectAllowed(req, res, requestedProjectId)) return;
 
     // Detect optional columns (same pattern as inventoryMaster.js)
-    const [hasUOM, hasGodownCol, hasCreatedDate, hasEntryDate, hasDaysOfSupply, hasCC] =
+    const [hasUOM, hasGodownCol, hasCreatedDate, hasEntryDate, hasDaysOfSupply, hasCC, hasActive] =
       await Promise.all([
         pool
           .request()
@@ -244,6 +244,13 @@ router.get("/item-options", authenticateToken, async (req, res) => {
           .query(
             `SELECT COUNT(1) AS cnt FROM sys.columns
              WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'M_CostCenterId'`,
+          )
+          .then((r) => r.recordset[0].cnt > 0),
+        pool
+          .request()
+          .query(
+            `SELECT COUNT(1) AS cnt FROM sys.columns
+             WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'M_IsActive'`,
           )
           .then((r) => r.recordset[0].cnt > 0),
       ]);
@@ -297,6 +304,7 @@ router.get("/item-options", authenticateToken, async (req, res) => {
               ${hasDaysOfSupply ? "img.M_DaysOfSupply" : "NULL"} AS DaysOfSupply,
               ${hasCC ? "img.M_CostCenterId" : "NULL"} AS M_CostCenterId,
               ${hasCC ? "cc.Name" : "NULL"} AS CostCenterName,
+              ${hasActive ? "img.M_IsActive" : "CAST(1 AS BIT)"} AS M_IsActive,
               ISNULL(SUM(CASE WHEN sl.Type = 'IN'  THEN sl.Qty ELSE 0 END), 0)
             - ISNULL(SUM(CASE WHEN sl.Type = 'OUT' THEN sl.Qty ELSE 0 END), 0)
               AS AvailableStock
@@ -313,6 +321,7 @@ router.get("/item-options", authenticateToken, async (req, res) => {
                ${hasUOM ? ", img.M_UOM" : ""},
                ${hasDaysOfSupply ? "img.M_DaysOfSupply," : ""}
                ${hasCC ? "img.M_CostCenterId, cc.Name," : ""}
+               ${hasActive ? "img.M_IsActive," : ""}
                uom.UOMName, uom.Symbol
       ORDER BY img.M_Name
     `);
