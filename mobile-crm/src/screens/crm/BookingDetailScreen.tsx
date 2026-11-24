@@ -306,8 +306,22 @@ export default function BookingDetailScreen() {
                 <>
                   <Kv label="Agreement" value={joinDot(bookingQ.data.agreement.AgreementNo, bookingQ.data.agreement.Status)} />
                   <Kv label="Agreement date" value={fmtDate(bookingQ.data.agreement.AgreementDate)} />
+                  {canAccessPage("crm-agreements") ? (
+                    <View style={{ flexDirection: "row", marginTop: 8 }}>
+                      <ActionKey outline label="Open agreement" onPress={() => nav.navigate("CrmAgreement", { bookingId: id, title })} />
+                    </View>
+                  ) : null}
                 </>
-              ) : <Kv label="Agreement" value="Not drafted yet" />}
+              ) : (
+                <>
+                  <Kv label="Agreement" value="Not drafted yet" />
+                  {canDoAction("crm-agreements", "create") ? (
+                    <View style={{ flexDirection: "row", marginTop: 8 }}>
+                      <ActionKey label="Draft agreement" onPress={() => nav.navigate("CrmAgreement", { bookingId: id, title })} />
+                    </View>
+                  ) : null}
+                </>
+              )}
       </> },
     (seesLegalMil || bookingQ.data?.agreement) && (() => {
       const lm = legalMilQ.data;
