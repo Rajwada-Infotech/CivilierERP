@@ -20,6 +20,8 @@ import {
   Handshake,
   HardHat,
   Hash,
+  Hexagon,
+  Home,
   Landmark,
   Layers,
   Map,
@@ -38,6 +40,7 @@ import {
   TrendingUp,
   Truck,
   Upload,
+  UserCog,
   UserSquare,
   Users,
   UsersRound,
@@ -208,6 +211,11 @@ export const maintenanceSetupItems: SetupItem[] = [
     color: "text-emerald-500",
     pageKey: "electricity-tariff-master",
   },
+  // The Civilier Security app's set-up.
+  { icon: DoorOpen, label: "Security Gates", path: "/maintenance/security-gates", color: "text-slate-500", pageKey: "security-gates" },
+  { icon: UserCog, label: "Security Guards", path: "/maintenance/security-guards", color: "text-slate-500", pageKey: "security-guards" },
+  { icon: Home, label: "Residents", path: "/maintenance/residents", color: "text-slate-500", pageKey: "security-residents" },
+  { icon: Hexagon, label: "Geofences", path: "/maintenance/geofences", color: "text-slate-500", pageKey: "security-geofences" },
 ];
 
 export const hrPayrollSetupItems: SetupItem[] = [

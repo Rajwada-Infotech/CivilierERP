@@ -114,6 +114,28 @@ function initSocket(httpServer) {
       return next(new Error("Authentication required"));
     }
 
+    // A customer-portal token (residents in the Civilier Security app): checked exactly as middleware/crmPortalAuth.js
+    // checks it (revoked, session version). It only ever joins its own customer:<id> room — see the connection handler.
+    let portal = null;
+    try {
+      const p = jwt.verify(token, process.env.PORTAL_JWT_SECRET || process.env.JWT_SECRET);
+      if (p?.type === "crm_portal") portal = p;
+    } catch {
+      /* not a portal token */
+    }
+    if (portal) {
+      try {
+        if (!portal.customerId) return next(new Error("Session expired"));
+        if (await redisGetStrict(`blacklist:${token}`)) return next(new Error("Token has been revoked"));
+        const currentVersion = Number(await redisGetStrict(`crm-portal:session-version:${portal.portalUserId}`)) || 0;
+        if ((Number(portal.sessionVersion) || 0) !== currentVersion) return next(new Error("Session expired"));
+        socket.data.portal = { customerId: Number(portal.customerId), portalUserId: Number(portal.portalUserId) };
+        return next();
+      } catch {
+        return next(new Error("Authentication service unavailable"));
+      }
+    }
+
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       const blacklisted = await isTokenBlacklisted(token);
@@ -127,6 +149,12 @@ function initSocket(httpServer) {
 
   // ── Connection lifecycle ─────────────────────────────────────────────────
   io.on("connection", (socket) => {
+    // Residents: their own room and nothing else (no staff rooms, no ticket / activity handlers).
+    if (socket.data.portal) {
+      socket.join(`customer:${socket.data.portal.customerId}`);
+      logger.info({ event: "SOCKET_CONNECT_PORTAL", socketId: socket.id, customerId: socket.data.portal.customerId }, "Portal socket connected");
+      return;
+    }
     const { userId, role, roleId } = socket.data.user || {};
     logger.info(
       { event: "SOCKET_CONNECT", socketId: socket.id, userId, role },
@@ -145,6 +173,18 @@ function initSocket(httpServer) {
     if (isTicketAdmin(role)) {
       socket.join("activity-watchers");
     }
+
+    // Security Live (web): users with the page right join the room the tracking service emits "security:live" to.
+    socket.on("security:live:join", async (ack) => {
+      try {
+        const { hasAnyPageAction } = require("./middleware/requirePageRight");
+        const ok = await hasAnyPageAction({ user: socket.data.user }, "security-live", ["view"]);
+        if (ok) socket.join("security-live");
+        if (typeof ack === "function") ack({ ok });
+      } catch {
+        if (typeof ack === "function") ack({ ok: false });
+      }
+    });
 
     socket.on("ticket:join", async (ticketId, ack) => {
       const id = Number(ticketId);
