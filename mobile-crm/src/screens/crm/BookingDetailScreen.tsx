@@ -13,7 +13,7 @@ import { fetchWithAuth } from "@/services/fetchWithAuth";
 import { useRoute, type RouteProp } from "@react-navigation/native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { ArrowLeftRight, Banknote, Check, CheckCircle2, ChevronRight, FileText, KeyRound, Landmark, PhoneCall, Scale, Smartphone, Ticket, Wallet, XCircle } from "lucide-react-native";
+import { ArrowLeftRight, Banknote, Check, CheckCircle2, ChevronRight, FileText, KeyRound, Landmark, PhoneCall, RefreshCw, Scale, Smartphone, Ticket, Wallet, XCircle } from "lucide-react-native";
 import { useAuth } from "@/auth/AuthContext";
 import { crmGet, crmSend, getBooking, getBookingLifecycle, getBookingPayments, type Row } from "@/api/crmApi";
 import { toast } from "@/components/Toast";
@@ -24,7 +24,7 @@ import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { ActionKey, CRM, ContactKeys, Empty, HeroSurface, Kv, LinkRow, ON_HERO, Section, Tap, fmtDate, joinDot, money, Pill, useCardStyle, words } from "./ui";
 import { useCrmOpen } from "./CrmRegisterScreen";
-import { ApplyOnAccountPrompt, ChangeUnitDialog, GenerateInvoiceDialog, Chips, NotePrompt, milestoneMissing, nextOpenMilestone } from "./CrmForms";
+import { ApplyOnAccountPrompt, ChangeUnitDialog, GenerateInvoiceDialog, Chips, NotePrompt, ResaleDealDialog, milestoneMissing, nextOpenMilestone } from "./CrmForms";
 
 // A booking that no longer takes money here (the web's "closed" plan).
 const CLOSED = ["Cancelled", "UnitChanged", "Rejected"];
@@ -162,6 +162,9 @@ export default function BookingDetailScreen() {
   };
   // Change unit: the web booking page's menu item (staff who may edit bookings, not for a plot sale).
   const [changeUnit, setChangeUnit] = useState(false);
+  // Resale / buy-back: open a case on this booking (crm-resales create right).
+  const canResale = live && canDoAction("crm-resales", "create");
+  const [resaleDialog, setResaleDialog] = useState(false);
   // Cancellation: raise a cancellation request on this booking (crm-cancellations create right).
   const canCancelBooking = live && canDoAction("crm-cancellations", "create");
   const [cancelDialog, setCancelDialog] = useState(false);
@@ -431,6 +434,7 @@ export default function BookingDetailScreen() {
               )}
       </> },
     canEditBooking && b && !b.IsPlotSale && { key: "unit", label: "Change unit", icon: ArrowLeftRight, go: () => setChangeUnit(true) },
+    canResale && { key: "resale", label: "Resale / Buy-back", icon: RefreshCw, go: () => setResaleDialog(true) },
     canCancelBooking && { key: "cancel", label: "Cancel booking", icon: XCircle, tone: colors.destructive, go: () => setCancelDialog(true) },
   ].filter(Boolean) as never;
   if (!seesBooking && !seesMoney) {
@@ -835,6 +839,7 @@ export default function BookingDetailScreen() {
             </Section>
           ) : null}
           {changeUnit && b ? <ChangeUnitDialog booking={{ ...pb, ...b }} onClose={() => setChangeUnit(false)} /> : null}
+      {resaleDialog ? <ResaleDealDialog bookingId={id} sellerId={customer ? Number(customer.Id) : undefined} onClose={() => setResaleDialog(false)} /> : null}
       {cancelDialog ? (
         <Modal visible transparent animationType="fade" onRequestClose={() => setCancelDialog(false)}>
           <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", padding: 16 }}>

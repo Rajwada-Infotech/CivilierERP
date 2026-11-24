@@ -5,12 +5,12 @@
 //                      (POST /booking/:id/on-account) — both go to Finance, then the Directors, before they count
 //   NewTicketScreen    raise a service ticket on a booking (crmServiceTickets.js POST /)
 // NotePrompt is the small "why / what was done" box the ticket screen uses.
-import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Linking, Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { useEffect, useRef, useState, useCallback } from "react";
+import { ActivityIndicator, Linking, Modal, Pressable, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { Check, FileText, Phone, Square } from "lucide-react-native";
+import { Check, FileText, Phone, Search, Square, User } from "lucide-react-native";
 import { useAuth } from "@/auth/AuthContext";
 import { fetchWithAuth } from "@/services/fetchWithAuth";
 import { crmGet, crmSend, getBookingPayments, type Row } from "@/api/crmApi";
@@ -1769,6 +1769,165 @@ export function GenerateInvoiceDialog({ bookingId, onClose }: { bookingId: numbe
                 </View>
               </>
             )}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+// ── Customer search picker ────────────────────────────────────────────────────
+// Used by resale and ownership-change forms to pick the new buyer/owner.
+// Calls GET /api/crm/customers?search=q (requires crm-customers or crm-resales view right).
+export function CustomerSearchPicker({ label, value, onChange, excludeId }: {
+  label: string;
+  value: Row | null;
+  onChange: (c: Row | null) => void;
+  excludeId?: number;
+}) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<Row[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const search = useCallback((q: string) => {
+    if (q.trim().length < 2) { setResults([]); return; }
+    setLoading(true);
+    crmGet<Row[]>(`/api/crm/customers?search=${encodeURIComponent(q.trim())}`)
+      .then((rows) => setResults(Array.isArray(rows) ? rows.slice(0, 10) : []))
+      .catch(() => setResults([]))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const onType = (t: string) => {
+    setQuery(t);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => search(t), 350);
+  };
+
+  const pick = (r: Row) => { onChange(r); setOpen(false); setQuery(""); setResults([]); };
+  const clear = () => { onChange(null); };
+
+  return (
+    <View style={{ marginBottom: 14 }}>
+      <Text style={{ color: colors.mutedForeground, fontSize: 13, fontFamily: fonts.body.medium, marginBottom: 6 }}>{label}</Text>
+      {value ? (
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card }}>
+          <User size={15} color={CRM} />
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={{ fontSize: 13.5, fontFamily: fonts.body.medium, color: colors.foreground }} numberOfLines={1}>{value.CustomerName}</Text>
+            <Text style={{ fontSize: 11.5, fontFamily: fonts.body.regular, color: colors.mutedForeground }} numberOfLines={1}>{[value.CustomerNo, value.Mobile].filter(Boolean).join(" · ")}</Text>
+          </View>
+          <TouchableOpacity onPress={clear} hitSlop={8}>
+            <Text style={{ fontSize: 13, color: colors.destructive, fontFamily: fonts.body.medium }}>✕</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <TouchableOpacity onPress={() => setOpen(true)} style={{ flexDirection: "row", alignItems: "center", gap: 8, padding: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card }}>
+          <Search size={15} color={colors.mutedForeground} />
+          <Text style={{ flex: 1, fontSize: 13.5, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>Search by name or mobile…</Text>
+        </TouchableOpacity>
+      )}
+      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)" }} onPress={() => setOpen(false)}>
+          <Pressable onPress={() => {}} style={{ margin: 24, marginTop: 80, backgroundColor: colors.card, borderRadius: 16, borderWidth: 1, borderColor: colors.border, maxHeight: "70%" }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, padding: 12, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+              <Search size={16} color={colors.mutedForeground} />
+              <TextInput autoFocus value={query} onChangeText={onType} placeholder="Name or mobile number…"
+                placeholderTextColor={`${colors.mutedForeground}99`}
+                style={{ flex: 1, fontSize: 14, fontFamily: fonts.body.regular, color: colors.foreground }} />
+              {loading ? <ActivityIndicator size="small" color={colors.mutedForeground} /> : null}
+            </View>
+            <ScrollView keyboardShouldPersistTaps="handled">
+              {results.length === 0 && query.trim().length >= 2 && !loading ? (
+                <Text style={{ padding: 16, fontSize: 13, color: colors.mutedForeground, fontFamily: fonts.body.regular, textAlign: "center" }}>No customers found</Text>
+              ) : null}
+              {results.filter((r) => !excludeId || Number(r.Id) !== excludeId).map((r) => (
+                <TouchableOpacity key={r.Id} onPress={() => pick(r)} style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 14, borderTopWidth: 1, borderTopColor: colors.border }}>
+                  <User size={14} color={CRM} />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={{ fontSize: 13.5, fontFamily: fonts.body.medium, color: colors.foreground }} numberOfLines={1}>{r.CustomerName}</Text>
+                    <Text style={{ fontSize: 11.5, fontFamily: fonts.body.regular, color: colors.mutedForeground }} numberOfLines={1}>{[r.CustomerNo, r.Mobile, r.PanNo].filter(Boolean).join(" · ")}</Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+    </View>
+  );
+}
+
+// ── Resale / Buy-back dialog ─────────────────────────────────────────────────
+// Opens from the booking detail's After-sales section (crm-resales create right).
+// Sends POST /api/crm/resales/deal.
+export function ResaleDealDialog({ bookingId, sellerId, onClose }: {
+  bookingId: number;
+  sellerId?: number;
+  onClose: () => void;
+}) {
+  const [kind, setKind] = useState<"Resale" | "BuyBack">("Resale");
+  const [buyer, setBuyer] = useState<Row | null>(null);
+  const [agreed, setAgreed] = useState("");
+  const [fee, setFee] = useState("");
+  const [tds, setTds] = useState("");
+  const [bbGst, setBbGst] = useState("");
+  const [stamp, setStamp] = useState("");
+  const [resaleDate, setResaleDate] = useState("");
+  const [notes, setNotes] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    if (kind === "Resale" && !buyer) return toast.error("Choose the new buyer");
+    if (!(parseFloat(agreed) > 0)) return toast.error(kind === "BuyBack" ? "Enter the buy-back price" : "Enter the agreed value");
+    setBusy(true);
+    try {
+      const body: Record<string, unknown> = {
+        FromBookingId: bookingId, Kind: kind, AgreedValue: parseFloat(agreed),
+        ...(kind === "Resale" ? { ToCustomerId: buyer!.Id } : {}),
+        ...(fee.trim() && kind === "Resale" ? { DeveloperFeeAmount: parseFloat(fee) } : {}),
+        ...(tds.trim() && kind === "BuyBack" ? { TdsAmount: parseFloat(tds) } : {}),
+        ...(bbGst.trim() && kind === "BuyBack" ? { BuyBackGstAmount: parseFloat(bbGst) } : {}),
+        ...(stamp.trim() && kind === "BuyBack" ? { StampDutyAmount: parseFloat(stamp) } : {}),
+        ...(resaleDate.trim() ? { ResaleDate: resaleDate } : {}),
+        ...(notes.trim() ? { Notes: notes.trim() } : {}),
+      };
+      const r = await crmSend("/api/crm/resales/deal", "POST", body) as Row;
+      toast.success(r?.message ?? "Case opened");
+      onClose();
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", padding: 16 }}>
+        <View style={{ maxHeight: "92%", backgroundColor: colors.card, borderRadius: 18, borderWidth: 1, borderColor: colors.border }}>
+          <ScrollView contentContainerStyle={{ padding: 18, gap: 4 }} keyboardShouldPersistTaps="handled">
+            <Text style={{ fontSize: 16, fontFamily: fonts.heading.bold, color: colors.foreground, marginBottom: 10 }}>Resale / Buy-back</Text>
+            <Chips label="Type" options={["Resale", "BuyBack"] as const} value={kind} onChange={(v) => { setKind(v); setBuyer(null); }}
+              labelOf={(v) => v === "BuyBack" ? "Buy-back (we buy it back)" : "Resale (new buyer)"} />
+            {kind === "Resale" ? (
+              <CustomerSearchPicker label="New buyer *" value={buyer} onChange={setBuyer} excludeId={sellerId} />
+            ) : null}
+            <NumberField label={kind === "BuyBack" ? "Buy-back price (₹) *" : "Agreed value (₹) *"} value={agreed} onChangeText={setAgreed} />
+            {kind === "Resale" ? (
+              <NumberField label="Developer fee (₹)" value={fee} onChangeText={setFee} />
+            ) : (
+              <>
+                <NumberField label="TDS amount (₹)" value={tds} onChangeText={setTds} />
+                <NumberField label="Buy-back GST (₹)" value={bbGst} onChangeText={setBbGst} />
+                <NumberField label="Stamp duty (₹)" value={stamp} onChangeText={setStamp} />
+              </>
+            )}
+            <DateField label="Transaction date" value={resaleDate} onChange={setResaleDate} />
+            <RemarksField label="Notes" value={notes} onChangeText={setNotes} />
+            <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+              <ActionKey label="Close" outline tone={colors.mutedForeground} onPress={onClose} />
+              <ActionKey label={busy ? "Opening…" : "Open case"} onPress={submit} />
+            </View>
           </ScrollView>
         </View>
       </View>
