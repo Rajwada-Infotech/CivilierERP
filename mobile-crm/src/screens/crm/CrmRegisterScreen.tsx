@@ -16,7 +16,7 @@ import { openDocument } from "@/utils/documents";
 import { useAuth } from "@/auth/AuthContext";
 import type { MainStackParamList } from "@/navigation/MainStack";
 import { pairParent, registerByKey, type CrmOpen, type CrmRegister } from "./crmRegisters";
-import { ActionKey, CRM, ContactKeys, Pill, useCardStyle } from "./ui";
+import { AccentAvatar, ActionKey, CRM, ContactKeys, Pill, useCardStyle } from "./ui";
 
 const ALL = "All";
 
@@ -247,6 +247,8 @@ export default function CrmRegisterScreen() {
           const mobile = reg.mobile ? reg.mobile(r) : r.Mobile;
           const lines = (reg.lines?.(r) ?? []).filter((l): l is string => typeof l === "string" && l.trim() !== "");
           const footer = !!(amount || mobile || (action && (!action.when || action.when(r))));
+          const avatarText = reg.avatar?.(r);
+          const initText = avatarText ? (avatarText).trim().split(/\s+/).filter(Boolean).slice(0, 2).map((p: string) => p[0]).join("").toUpperCase() || "?" : null;
           return (
             <Pressable
               disabled={!target}
@@ -257,6 +259,7 @@ export default function CrmRegisterScreen() {
             >
               {/* Who and where it stands, then the details, then the money and the keys. */}
               <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
+                {initText ? <AccentAvatar text={initText} size={40} /> : null}
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text numberOfLines={1} style={{ fontSize: 15.5, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{reg.title(r) || "—"}</Text>
                   {reg.sub(r) ? <Text numberOfLines={1} style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 3, fontVariant: ["tabular-nums"] }}>{reg.sub(r)}</Text> : null}

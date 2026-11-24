@@ -85,8 +85,8 @@ export function useCardStyle() {
   const b = useBrand();
   return {
     borderRadius: 22, backgroundColor: b.surfaceCard,
-    borderWidth: b.isDark ? 1 : 0, borderColor: b.border,
-    shadowColor: "#0F111A", shadowOpacity: b.isDark ? 0 : 0.06, shadowRadius: 16,
+    borderWidth: 1, borderColor: b.border,
+    shadowColor: "#0F111A", shadowOpacity: b.isDark ? 0 : 0.04, shadowRadius: 8,
     shadowOffset: { width: 0, height: 6 }, elevation: b.isDark ? 0 : 2,
   } as const;
 }

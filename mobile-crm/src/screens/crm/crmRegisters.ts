@@ -63,6 +63,8 @@ export interface CrmRegister {
   open?: (r: Row) => CrmOpen | null;
   /** The buyer's mobile, for the card's Call / WhatsApp keys. Default: the row's Mobile. */
   mobile?: (r: Row) => string | null | undefined;
+  /** Initials text for an avatar shown on the card, e.g. the customer's name. */
+  avatar?: (r: Row) => string | null | undefined;
   /** The row's date, for the period filter and the date sort (newest first). */
   dateOf?: (r: Row) => string | null | undefined;
   /** The row's amount, for the amount sort. */
@@ -236,8 +238,9 @@ export const CRM_REGISTERS: CrmRegister[] = [
     key: "customer-360", about: "One customer, everything", icon: Building2, label: "Customer 360", group: "After-Sales", pages: ["crm-customer-360"], path: "/api/crm/customer-360",
     rows: list, id: (r) => String(r.Id),
     title: (r) => r.CustomerName, sub: (r) => joinDot(r.CustomerNo, r.Mobile),
-    amount: (r) => (Number(r.TotalOutstanding) > 0 ? { label: "Outstanding", value: money(r.TotalOutstanding) } : null),
-    lines: (r) => [r.Units, joinDot(plural(r.ActiveBookingCount, "active booking"), `Paid ${money(r.TotalPaid)}`)],
+    avatar: (r) => r.CustomerName,
+    amount: (r) => (Number(r.TotalOutstanding) > 0 ? { label: "Outstanding", value: money(r.TotalOutstanding) } : { label: "Paid", value: money(r.TotalPaid) }),
+    lines: (r) => [r.Units, Number(r.ActiveBookingCount) > 0 ? plural(r.ActiveBookingCount, "active booking") : null],
     searchIn: (r) => [r.CustomerName, r.Mobile, r.CustomerNo, r.Units, r.City],
     open: (r) => ({ to: "customer", customerId: Number(r.Id), title: r.CustomerName }),
     dateOf: (r) => r.CreatedAt, amountOf: (r) => r.TotalOutstanding, projectOf: () => null,
