@@ -74,63 +74,29 @@ function formatPreviewValue(value: unknown): string {
 
 type Bank = { BId: number; BName: string; BBranch?: string; BAccountLast4?: string };
 
-function PaymentModePicker({ modes, selected, onSelect }: {
-  modes: string[];
-  selected: string;
-  onSelect: (m: string) => void;
+// SheetPicker renders a Modal — on iOS a Modal inside a pageSheet Modal is clipped.
+// These components render only the trigger field; the caller renders the SheetPicker
+// outside FormPage so the picker modal stacks above the sheet, not inside it.
+
+function PaymentModeField({ modes, selected, onOpen }: {
+  modes: string[]; selected: string; onOpen: () => void;
 }) {
-  const [open, setOpen] = useState(false);
   return (
-    <>
-      <PickerField
-        label="Payment mode"
-        value={selected}
-        placeholder="Select payment mode"
-        onPress={() => setOpen(true)}
-        wide
-        disabled={modes.length === 0}
-      />
-      <SheetPicker visible={open} title="Payment mode" onClose={() => setOpen(false)}>
-        {modes.map((m) => (
-          <OptionRow key={m} label={m} selected={selected === m} onPress={() => { onSelect(m); setOpen(false); }} />
-        ))}
-      </SheetPicker>
-    </>
+    <PickerField label="Payment mode" value={selected} placeholder="Select payment mode"
+      onPress={onOpen} wide disabled={modes.length === 0} />
   );
 }
 
-function BankPicker({ label = "Company bank account", banks, selected, onSelect }: {
-  label?: string;
-  banks: Bank[];
-  selected: number | null;
-  onSelect: (id: number) => void;
+function BankField({ label = "Company bank account", banks, selected, onOpen }: {
+  label?: string; banks: Bank[]; selected: number | null; onOpen: () => void;
 }) {
-  const [open, setOpen] = useState(false);
   const chosen = banks.find((b) => b.BId === selected);
   const displayValue = chosen
     ? [chosen.BName, chosen.BAccountLast4 ? `····${chosen.BAccountLast4}` : null].filter(Boolean).join(" · ")
     : "";
   return (
-    <>
-      <PickerField
-        label={label}
-        value={displayValue}
-        placeholder="Select bank account"
-        onPress={() => setOpen(true)}
-        wide
-      />
-      <SheetPicker visible={open} title={label} onClose={() => setOpen(false)}>
-        {banks.map((b) => (
-          <OptionRow
-            key={b.BId}
-            label={b.BName}
-            sub={[b.BBranch, b.BAccountLast4 ? `····${b.BAccountLast4}` : null].filter(Boolean).join(" · ") || undefined}
-            selected={selected === b.BId}
-            onPress={() => { onSelect(b.BId); setOpen(false); }}
-          />
-        ))}
-      </SheetPicker>
-    </>
+    <PickerField label={label} value={displayValue} placeholder="Select bank account"
+      onPress={onOpen} wide />
   );
 }
 
@@ -153,6 +119,8 @@ export function ApprovalInboxDetailModal({
   const [financeBank, setFinanceBank] = useState<number | null>(null);
   const [financeMode, setFinanceMode] = useState<string>("");
   const [receivedPaymentBank, setReceivedPaymentBank] = useState<number | null>(null);
+  const [bankPickerOpen, setBankPickerOpen] = useState(false);
+  const [modePickerOpen, setModePickerOpen] = useState(false);
 
   const cfg = item ? MODULE_CONFIG[item.Module] : undefined;
   const isFinanceRefund = item?.Module === FINANCE_APPROVE_MODULE;
@@ -199,6 +167,8 @@ export function ApprovalInboxDetailModal({
     setFinanceBank(null);
     setFinanceMode("");
     setReceivedPaymentBank(null);
+    setBankPickerOpen(false);
+    setModePickerOpen(false);
     if (!cfg?.apiEndpoint) return;
     setLoading(true);
     let cancelled = false;
@@ -402,6 +372,7 @@ export function ApprovalInboxDetailModal({
   );
 
   return (
+    <>
     <FormPage
       visible={!!item}
       onClose={onClose}
@@ -457,7 +428,7 @@ export function ApprovalInboxDetailModal({
           {!projectId ? (
             <Body size={12.5} color={S.graphite}>{loading ? "Loading payment details…" : "Could not read the project — set the deposit bank from the web app."}</Body>
           ) : projectBanks && projectBanks.length > 0 ? (
-            <BankPicker banks={projectBanks} selected={receivedPaymentBank} onSelect={setReceivedPaymentBank} />
+            <BankField banks={projectBanks} selected={receivedPaymentBank} onOpen={() => setBankPickerOpen(true)} />
           ) : (
             <Body size={12.5} color={S.graphite}>{"Loading bank accounts…"}</Body>
           )}
@@ -468,11 +439,11 @@ export function ApprovalInboxDetailModal({
       {isFinanceRefund && pending && !notYourLevel && (
         <Panel title="Refund payout details" icon={<Banknote size={14} color={S.ink} />}>
           {projectBanks && projectBanks.length > 0 ? (
-            <BankPicker banks={projectBanks} selected={financeBank} onSelect={setFinanceBank} />
+            <BankField banks={projectBanks} selected={financeBank} onOpen={() => setBankPickerOpen(true)} />
           ) : (
             <Body size={12.5} color={S.graphite}>{!projectId ? (loading ? "Loading refund details…" : "No project — pick bank on web") : "Loading banks…"}</Body>
           )}
-          <PaymentModePicker modes={paymentModes ?? []} selected={financeMode} onSelect={setFinanceMode} />
+          <PaymentModeField modes={paymentModes ?? []} selected={financeMode} onOpen={() => setModePickerOpen(true)} />
         </Panel>
       )}
 
@@ -480,5 +451,40 @@ export function ApprovalInboxDetailModal({
         <Text style={{ fontFamily: fonts.body.regular, fontSize: 12, color: S.graphite }}>{`This record is ${item.Status.toLowerCase()}; there is nothing to act on.`}</Text>
       )}
     </FormPage>
+    {/* SheetPickers rendered OUTSIDE FormPage — a Modal inside a pageSheet Modal is clipped on iOS. */}
+    {projectBanks && projectBanks.length > 0 && (
+      <SheetPicker
+        visible={bankPickerOpen}
+        title="Company bank account"
+        onClose={() => setBankPickerOpen(false)}
+      >
+        {projectBanks.map((b) => {
+          const activeSel = isReceivedPayment ? receivedPaymentBank : financeBank;
+          const setActiveSel = isReceivedPayment ? setReceivedPaymentBank : setFinanceBank;
+          return (
+            <OptionRow
+              key={b.BId}
+              label={b.BName}
+              sub={[b.BBranch, b.BAccountLast4 ? `····${b.BAccountLast4}` : null].filter(Boolean).join(" · ") || undefined}
+              selected={activeSel === b.BId}
+              onPress={() => { setActiveSel(b.BId); setBankPickerOpen(false); }}
+            />
+          );
+        })}
+      </SheetPicker>
+    )}
+    {paymentModes && paymentModes.length > 0 && (
+      <SheetPicker
+        visible={modePickerOpen}
+        title="Payment mode"
+        onClose={() => setModePickerOpen(false)}
+      >
+        {paymentModes.map((m) => (
+          <OptionRow key={m} label={m} selected={financeMode === m} onPress={() => { setFinanceMode(m); setModePickerOpen(false); }} />
+        ))}
+      </SheetPicker>
+    )}
+    </>
   );
 }
+
