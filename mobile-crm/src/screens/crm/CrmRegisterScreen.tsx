@@ -43,6 +43,7 @@ export function useCrmOpen() {
     else if (o.to === "application") nav.navigate("CrmApplicationForm", { applicationId: o.applicationId });
     else if (o.to === "construction-updates") nav.navigate("CrmConstructionUpdates", { projectId: o.projectId, projectName: o.projectName });
     else if (o.to === "oc-cc-board") nav.navigate("CrmOcCcBoard", undefined);
+    else if (o.to === "cancellation") nav.navigate("CrmCancellation", { cancellationId: o.cancellationId, title: o.title });
     else openDocument(o.path, o.name).catch((e: Error) => Alert.alert("Could not open", e.message));
   };
 }
