@@ -618,7 +618,8 @@ router.get("/", cache("grns", 300), async (req, res) => {
       .input("finYear", sql.NVarChar(20), finYearFilter)
       .input("companyId", sql.Int, companyId)
       .input("search", sql.NVarChar(220), search)
-      .input("status", sql.NVarChar(30), status).query(`
+      .input("status", sql.NVarChar(30), status)
+      .input("projectId", sql.Int, parseInt(req.query.projectId, 10) || null).query(`
       SELECT
         grn.GRNID,
         grn.GRNNo,
@@ -692,6 +693,7 @@ router.get("/", cache("grns", 300), async (req, res) => {
       ))
         AND (@companyId IS NULL OR p.CompanyId = @companyId)${projectPredicate(req.projectScope, "p.ProjectId")}
         AND (@status IS NULL OR grn.Status = @status)
+        AND (@projectId IS NULL OR p.ProjectId = @projectId)
         AND (@search IS NULL OR grn.DocNo LIKE @search OR grn.GRNNo LIKE @search OR p.PurchaseOrderNo LIKE @search
           OR p.DocNo LIKE @search OR s.LHeadName LIKE @search OR grn.SourceTransferDocNo LIKE @search OR p.SourceMRDocNo LIKE @search)
       ORDER BY grn.GRNID DESC
