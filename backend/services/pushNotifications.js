@@ -111,7 +111,8 @@ async function dropTokens(tokens) {
 }
 
 /** Delivers one message to these tokens in Expo-sized batches; drops tokens Expo reports as dead. Never throws. */
-async function sendToTokens(tokens, { title, body, data } = {}) {
+/** `channelId`: the Android channel (default "default"; "calls" rings for an incoming call). `ttl` seconds before Expo drops it. */
+async function sendToTokens(tokens, { title, body, data, channelId, ttl } = {}) {
   const result = { sent: 0, failed: 0 };
   if (!title || !tokens.length) return result;
   const headers = { "Content-Type": "application/json", Accept: "application/json" };
@@ -127,7 +128,8 @@ async function sendToTokens(tokens, { title, body, data } = {}) {
       data: data || {},
       sound: "default",
       priority: "high",
-      channelId: "default",
+      channelId: channelId || "default",
+      ...(ttl ? { ttl } : {}),
     }));
     try {
       const res = await fetch(EXPO_PUSH_URL, { method: "POST", headers, body: JSON.stringify(messages) });

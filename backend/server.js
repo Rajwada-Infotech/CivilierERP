@@ -14,6 +14,9 @@ const { startFollowupReminderEngine } = require("./services/fixedAssetFollowupRe
 const { startSiteVisitReminderEngine } = require("./services/saSiteVisitReminders");
 const { startAutoDepreciationEngine } = require("./services/fixedAssetAutoDepreciation");
 const { startPoPaymentReminderEngine } = require("./services/poPaymentReminders");
+const { startSecurityResidentSyncEngine } = require("./services/securityResidentSync");
+const { startVisitorSweepEngine } = require("./services/securityVisitors");
+const { startTrackingSweepEngine } = require("./services/securityTracking");
 const { startDueDemandEngine } = require("./services/crmDemandScheduler");
 const authMiddleware = require("./middleware/auth");
 const { attachRateLimitUser, rateLimitKey, loginRateLimitKey } = require("./middleware/rateLimitIdentity");
@@ -221,6 +224,8 @@ const ALL_ROUTES = [
   { path: "/api/maintenance-bills", file: "./routes/maintenanceBill" },
   { path: "/api/maintenance-key-custodian", file: "./routes/maintenanceKeyCustodian" },
   { path: "/api/security-attendance", file: "./routes/securityAttendance" },
+  // Civilier Security app (mobile-security-intercom): guard / security admin / resident, by role name.
+  { path: "/api/security", file: "./routes/securityIntercom" },
   { path: "/api/electricity-maintenance", file: "./routes/electricityMaintenance" },
   { path: "/api/item-groups", file: "./routes/itemGroup" },
   { path: "/api/item-master", file: "./routes/itemMaster" },
@@ -629,6 +634,8 @@ async function createApp() {
   // including login itself — was rejected with "No token provided" before
   // crmPortal.js's own router ever ran.
   app.use("/api/crm-portal", require("./routes/crmPortal"));
+  // Civilier Security app for residents: the customer-portal sign-in (its own auth), so it sits before the staff wall too.
+  app.use("/api/security-portal", require("./routes/securityPortal"));
   // Channel partners' systems push leads with an API key (Admin → Integrations),
   // never a staff login — so it sits before the staff auth wall like the portal.
   app.use("/api/public/partner-leads", require("./routes/publicPartnerLeads"));
@@ -788,6 +795,9 @@ async function startServer() {
       startSiteVisitReminderEngine();
       startAutoDepreciationEngine();
       startPoPaymentReminderEngine();
+      startSecurityResidentSyncEngine();
+      startVisitorSweepEngine();
+      startTrackingSweepEngine();
       startDueDemandEngine();
     });
 
