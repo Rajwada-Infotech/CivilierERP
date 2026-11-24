@@ -25,7 +25,8 @@ export type CrmOpen =
   | { to: "oc-cc-board" }
   | { to: "cancellation"; cancellationId: number; title: string }
   | { to: "refund"; refundId: number; title: string }
-  | { to: "invoice"; invoiceId: number; title: string };
+  | { to: "invoice"; invoiceId: number; title: string }
+  | { to: "resale"; resaleId: number; title: string };
 
 /** Welcome-call outcomes and their words — the web's (src/pages/CRM/welcomeCalls/config.tsx OUTCOMES / OUTCOME_LABEL),
  * the server's list (crmWelcomeCalls.js OUTCOMES). */
@@ -556,7 +557,7 @@ export const CRM_REGISTERS: CrmRegister[] = [
       r.CreatedAt && fmtDate(r.CreatedAt),
     ],
     searchIn: (r) => [r.FromBookingNo, r.ToBookingNo, r.FromCustomerName, r.ToCustomerName, r.Kind, r.Status],
-    open: (r) => (r.FromBookingId ? { to: "booking", bookingId: Number(r.FromBookingId), title: r.FromBookingNo || "Booking" } : null),
+    open: (r) => ({ to: "resale" as const, resaleId: Number(r.Id), title: r.FromCustomerName || r.FromBookingNo || "Resale" }),
     dateOf: (r) => r.CreatedAt, amountOf: (r) => r.DeveloperFeeAmount,
     empty: "No resale cases.",
   },

@@ -29,6 +29,11 @@ export function useCrmCanOpen() {
       (o.to === "booking" ? canAccessPage("crm-bookings") || canAccessPage("crm-payments")
         : o.to === "ticket" ? canAccessPage("crm-service-tickets")
         : o.to === "construction-updates" ? canAccessPage("crm-construction-updates")
+        : o.to === "oc-cc-board" ? canAccessPage("crm-oc-cc")
+        : o.to === "cancellation" ? canAccessPage("crm-cancellations")
+        : o.to === "refund" ? canAccessPage("crm-refunds")
+        : o.to === "invoice" ? canAccessPage("crm-invoices")
+        : o.to === "resale" ? canAccessPage("crm-resales")
         : canAccessPage("crm-customer-360"))));
 }
 
@@ -46,6 +51,7 @@ export function useCrmOpen() {
     else if (o.to === "cancellation") nav.navigate("CrmCancellation", { cancellationId: o.cancellationId, title: o.title });
     else if (o.to === "refund") nav.navigate("CrmRefund", { refundId: o.refundId, title: o.title });
     else if (o.to === "invoice") nav.navigate("CrmInvoice", { invoiceId: o.invoiceId, title: o.title });
+    else if (o.to === "resale") nav.navigate("CrmResale", { resaleId: o.resaleId, title: o.title });
     else openDocument(o.path, o.name).catch((e: Error) => Alert.alert("Could not open", e.message));
   };
 }
