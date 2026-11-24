@@ -23,7 +23,8 @@ export type CrmOpen =
   | { to: "document"; path: string; name: string }
   | { to: "construction-updates"; projectId: number; projectName: string }
   | { to: "oc-cc-board" }
-  | { to: "cancellation"; cancellationId: number; title: string };
+  | { to: "cancellation"; cancellationId: number; title: string }
+  | { to: "refund"; refundId: number; title: string };
 
 /** Welcome-call outcomes and their words — the web's (src/pages/CRM/welcomeCalls/config.tsx OUTCOMES / OUTCOME_LABEL),
  * the server's list (crmWelcomeCalls.js OUTCOMES). */
@@ -261,7 +262,8 @@ export const CRM_REGISTERS: CrmRegister[] = [
       joinDot(r.ProjectName, r.RequestedDate && `Requested ${fmtDate(r.RequestedDate)}`),
     ],
     searchIn: (r) => [r.RefundNo, r.ApplicantName, r.BookingNo, r.UnitNo, r.Status],
-    open: toBooking, dateOf: (r) => r.RequestedDate, amountOf: (r) => r.NetAmount ?? r.GrossAmount,
+    open: (r) => ({ to: "refund" as const, refundId: Number(r.Id), title: r.RefundNo || r.BookingNo || "Refund" }),
+    dateOf: (r) => r.RequestedDate, amountOf: (r) => r.NetAmount ?? r.GrossAmount,
     empty: "No refunds.",
   },
   {

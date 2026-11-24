@@ -35,6 +35,7 @@ import CrmMutationScreen from "@/screens/crm/CrmMutationScreen";
 import CrmConstructionUpdatesScreen from "@/screens/crm/CrmConstructionUpdatesScreen";
 import CrmOcCcBoardScreen from "@/screens/crm/CrmOcCcBoardScreen";
 import CrmCancellationScreen from "@/screens/crm/CrmCancellationScreen";
+import CrmRefundScreen from "@/screens/crm/CrmRefundScreen";
 import Customer360Screen from "@/screens/crm/Customer360Screen";
 import TicketScreen from "@/screens/crm/TicketScreen";
 import { NewTicketScreen, CustomerFormScreen, ApplicationFormScreen, WelcomeChecklistScreen, PossessionScreen, PaymentScreen, WelcomeCallScreen } from "@/screens/crm/CrmForms";
@@ -87,6 +88,7 @@ export type MainStackParamList = {
   CrmConstructionUpdates: { projectId: number; projectName?: string };
   CrmOcCcBoard: undefined;
   CrmCancellation: { cancellationId: number; title?: string };
+  CrmRefund: { refundId: number; title?: string };
 };
 
 const Stack = createNativeStackNavigator<MainStackParamList>();
@@ -202,6 +204,7 @@ export default function MainStack() {
         <Stack.Screen name="CrmConstructionUpdates" component={CrmConstructionUpdatesScreen} options={({ route }) => ({ title: route.params.projectName || "Construction Updates" })} />
         <Stack.Screen name="CrmOcCcBoard" component={CrmOcCcBoardScreen} options={{ title: "OC / CC Board" }} />
         <Stack.Screen name="CrmCancellation" component={CrmCancellationScreen} options={({ route }) => ({ title: route.params.title || "Cancellation" })} />
+        <Stack.Screen name="CrmRefund" component={CrmRefundScreen} options={({ route }) => ({ title: route.params.title || "Refund" })} />
       </Stack.Navigator>
     </ShellMenusProvider>
   );
