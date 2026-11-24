@@ -663,9 +663,11 @@ export function MRForm({ m }: { m: MRState }) {
               ? "Saved"
               : isSaving
                 ? "Saving…"
-                : editingId
-                  ? "Update request"
-                  : "Save request"}
+                : m.amend.amending
+                  ? "Review amendment"
+                  : editingId
+                    ? "Update request"
+                    : "Save request"}
           </button>
         </div>
       </div>

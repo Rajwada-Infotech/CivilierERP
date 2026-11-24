@@ -3,7 +3,7 @@
 // once approved, is applied — the document and its chain (a PO's GRNs, their ledger postings) update.
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
-export type AmendableDocType = "purchase-order" | "expense-booking" | "payment" | "received-payment" | "journal-voucher" | "fund-transfer" | "boq" | "work-order" | "work-done";
+export type AmendableDocType = "purchase-order" | "material-request" | "vehicle-in-out" | "grn" | "expense-booking" | "payment" | "received-payment" | "journal-voucher" | "fund-transfer" | "boq" | "work-order" | "work-done";
 export type AmendmentStatus = "Draft" | "Pending" | "Approved" | "Rejected";
 
 export interface CascadeEntry {

@@ -1,7 +1,7 @@
 // Constants, small parts (panels, cards, pills) and the register columns shared by the GRN page and its parts.
 import React, { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Trash2, Pencil, FileText, Eye, Receipt, Clock, CheckCircle2, AlertCircle, AlertTriangle, CopyPlus, ArrowLeftRight } from "lucide-react";
+import { Trash2, Pencil, FilePenLine, FileText, Eye, Receipt, Clock, CheckCircle2, AlertCircle, AlertTriangle, CopyPlus, ArrowLeftRight } from "lucide-react";
 import { printStatusLabel } from "@/utils/printStatus";
 import { type ExportColumn } from "@/lib/export";
 import { Input } from "@/components/ui/input";
@@ -441,9 +441,13 @@ export function LinkedExpenseBookings({ grnId }: { grnId: number }) {
 // ─── Module-level refs (same pattern as original) ─────────────────────────────
 // The register columns are defined outside the page component, so the page hands them its
 // query client, handlers, rights and approval trails through this one object (set on every render).
+// Only a Draft, Pending or Rejected GRN is edited; an approved one changes through Amend.
+export const isEditableStatus = (s: string | null | undefined) => ["Draft", "Pending", "Rejected"].includes(s || "Draft");
+
 export const bridge = {
   queryClient: null as unknown as ReturnType<typeof useQueryClient>,
   onEdit: (() => {}) as (grn: any) => void,
+  onAmend: (() => {}) as (grn: any) => void,
   onView: (() => {}) as (grn: any) => void,
   deleteMutation: { mutate: () => {} } as { mutate: (id: string) => void },
   handleDeleteGrn: (() => {}) as (id: string) => void,
@@ -659,13 +663,23 @@ export const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
           >
             <Eye size={15} />
           </button>
-          {bridge.canEdit && !isTransferGRN(grn) && (
+          {bridge.canEdit && !isTransferGRN(grn) && isEditableStatus(grn.Status) && (
             <button
               onClick={(e) => { e.stopPropagation(); bridge.onEdit(grn); }}
               className="p-1 text-primary hover:bg-primary/10 transition-colors"
               title="Edit this GRN"
             >
               <Pencil size={15} />
+            </button>
+          )}
+          {bridge.canEdit && !isTransferGRN(grn) && grn.Status === "Approved" && (
+            <button
+              onClick={(e) => { e.stopPropagation(); bridge.onAmend(grn); }}
+              className="p-1 text-primary hover:bg-primary/10 transition-colors"
+              title="Amend — any change, with a reason; stock and accounts follow once the amendment is approved"
+              aria-label="Amend this GRN"
+            >
+              <FilePenLine size={15} />
             </button>
           )}
           {bridge.canDelete && (

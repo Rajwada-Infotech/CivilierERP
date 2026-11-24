@@ -115,6 +115,7 @@ export default function VehicleInOut() {
       </SheetShell>
 
         <VIOViewModal m={m} />
+        {m.amend.dialog}
 
       <VIODebitNote m={m} />
 

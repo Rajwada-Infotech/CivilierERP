@@ -6,8 +6,7 @@ const { getPool, sql } = require("../db");
 const { projectPredicate, projectAllowed, assertProjectAllowed } = require("../services/projectScope");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
-const { transition, guardEditAnyStage, restartApprovalCycle, getRecordStatus } = require("../services/approvalService");
-const { resolveAllowPostApproval } = require("../middleware/permissions");
+const { transition, restartApprovalCycle, getRecordStatus } = require("../services/approvalService");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
@@ -1367,9 +1366,10 @@ router.put(
       }
 
       const currentStatus = await getRecordStatus("purchase-orders", id);
-      const allowPostApproval = await resolveAllowPostApproval(req, "purchase-orders");
-      // Pending is editable and stays Pending; Approved (with the post-approval right) goes back for approval.
-      await guardEditAnyStage("purchase-orders", id, { allowPostApproval });
+      // Only a Draft, Pending or Rejected PO is edited. Once approved it changes only through Amend (an approved
+      // amendment request, services/docAmendment.js), for every role.
+      if (currentStatus && !["Draft", "Pending", "Rejected"].includes(currentStatus))
+        return res.status(409).json({ error: `This Purchase Order is ${currentStatus}, so it can't be edited. Use Amend to change it.` });
       const wasApproved = currentStatus === "Approved";
       const wasRejected = currentStatus === "Rejected";
       const wasPending = currentStatus === "Pending";

@@ -30,6 +30,7 @@ export interface DbItem {
   M_CostCenterId: number | null;
   CostCenterName: string | null;
   M_DaysOfSupply: number | null;
+  M_IsActive?: boolean; // false = disabled: kept on existing documents, left out of new-entry item pickers
 }
 
 export const getItems = async (): Promise<DbItem[]> => {

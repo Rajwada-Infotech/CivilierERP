@@ -14,6 +14,9 @@ const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em
 const TAG = "inline-flex items-center font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 border whitespace-nowrap";
 const DOC_LABEL: Record<string, string> = {
   "purchase-order": "Purchase Order",
+  "material-request": "Material Request",
+  "vehicle-in-out": "Vehicle In/Out",
+  grn: "GRN",
   "expense-booking": "Invoice",
   payment: "Payment",
   "received-payment": "Received Payment",
