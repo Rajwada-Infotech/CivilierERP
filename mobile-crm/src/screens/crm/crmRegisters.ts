@@ -20,7 +20,8 @@ export type CrmOpen =
   | { to: "customer"; customerId: number; title: string }
   | { to: "ticket"; ticketId: number }
   | { to: "application"; applicationId: number }
-  | { to: "document"; path: string; name: string };
+  | { to: "document"; path: string; name: string }
+  | { to: "construction-updates"; projectId: number; projectName: string };
 
 /** Welcome-call outcomes and their words — the web's (src/pages/CRM/welcomeCalls/config.tsx OUTCOMES / OUTCOME_LABEL),
  * the server's list (crmWelcomeCalls.js OUTCOMES). */
@@ -533,6 +534,7 @@ export const CRM_REGISTERS: CrmRegister[] = [
       Number(r.late) > 0 && `${r.late} running late`,
     ],
     searchIn: (r) => [r.projectName], amountOf: (r) => r.pct, projectOf: (r) => r.projectName, mobile: () => null,
+    open: (r) => ({ to: "construction-updates" as const, projectId: Number(r.projectId), projectName: String(r.projectName) }),
     empty: "No projects.",
   },
   // ── Resale ─────────────────────────────────────────────────────────────────

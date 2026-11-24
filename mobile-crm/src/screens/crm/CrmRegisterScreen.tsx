@@ -28,6 +28,7 @@ export function useCrmCanOpen() {
     !!o && (o.to === "document" || (o.to === "application" ? canDoAction("crm-applications", "edit") :
       (o.to === "booking" ? canAccessPage("crm-bookings") || canAccessPage("crm-payments")
         : o.to === "ticket" ? canAccessPage("crm-service-tickets")
+        : o.to === "construction-updates" ? canAccessPage("crm-construction-updates")
         : canAccessPage("crm-customer-360"))));
 }
 
@@ -40,6 +41,7 @@ export function useCrmOpen() {
     else if (o.to === "customer") nav.navigate("CrmCustomer", { customerId: o.customerId, title: o.title });
     else if (o.to === "ticket") nav.navigate("CrmTicket", { ticketId: o.ticketId });
     else if (o.to === "application") nav.navigate("CrmApplicationForm", { applicationId: o.applicationId });
+    else if (o.to === "construction-updates") nav.navigate("CrmConstructionUpdates", { projectId: o.projectId, projectName: o.projectName });
     else openDocument(o.path, o.name).catch((e: Error) => Alert.alert("Could not open", e.message));
   };
 }
