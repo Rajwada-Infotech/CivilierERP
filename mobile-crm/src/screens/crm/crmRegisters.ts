@@ -163,7 +163,21 @@ export const CRM_REGISTERS: CrmRegister[] = [
     empty: "No bookings waiting for a welcome call.",
   },
   {
-    key: "booking-amendments", about: "Amendments to booking terms", icon: FilePenLine, label: "Booking Amendments", group: "Buyers & Bookings", pages: ["crm-booking-amendment"], path: "/api/crm/booking-amendments",
+    key: "customer-bank-details", about: "KYC and bank details per booking", icon: FileText, label: "Customer Bank Details", group: "Buyers & Bookings", pages: ["crm-customer-bank-details"], path: "/api/crm/customer-bank-details",
+    rows: list, id: (r) => String(r.BookingId),
+    title: (r) => r.ApplicantName, sub: (r) => joinDot(r.BookingNo, r.UnitNo, r.ProjectName),
+    status: (r) => r.KycStatus || r.BookingStatus,
+    lines: (r) => [
+      r.Mobile,
+      r.BankName && joinDot(r.BankName, r.BranchName),
+    ],
+    searchIn: (r) => [r.ApplicantName, r.BookingNo, r.UnitNo, r.ProjectName, r.Mobile, r.BankName],
+    open: (r) => (r.BookingId ? { to: "booking", bookingId: Number(r.BookingId), title: r.BookingNo || "Booking" } : null),
+    dateOf: (r) => r.CreatedAt,
+    empty: "No bank details on file.",
+  },
+  {
+    key: "booking-amendments", about: "Amendments to booking terms", icon: FilePenLine, label: "Booking Amendments", group: "Buyers & Bookings", pages: ["crm-bookings"], path: "/api/crm/booking-amendments",
     rows: list, id: (r) => String(r.Id),
     title: (r) => r.ApplicantName, sub: (r) => joinDot(r.AmendmentNo || r.BookingNo, r.UnitNo, r.ProjectName),
     status: (r) => r.Status,
@@ -176,7 +190,7 @@ export const CRM_REGISTERS: CrmRegister[] = [
     empty: "No booking amendments.",
   },
   {
-    key: "unit-changes", about: "Requests to swap to a different unit", icon: ArrowRightLeft, label: "Unit Changes", group: "Buyers & Bookings", pages: ["crm-unit-change"], path: "/api/crm/bookings/unit-changes",
+    key: "unit-changes", about: "Requests to swap to a different unit", icon: ArrowRightLeft, label: "Unit Changes", group: "Buyers & Bookings", pages: ["crm-bookings"], path: "/api/crm/bookings/unit-changes",
     rows: list, id: (r) => String(r.Id),
     title: (r) => r.CustomerName, sub: (r) => joinDot(r.RequestNo, r.Mobile),
     status: (r) => r.Status,
@@ -220,7 +234,7 @@ export const CRM_REGISTERS: CrmRegister[] = [
     empty: "No invoices.",
   },
   {
-    key: "credit-notes", about: "GST credit notes issued to buyers", icon: FileMinus, label: "Credit Notes", group: "Finance", pages: ["crm-credit-notes"], path: "/api/crm/refunds/gst-notes",
+    key: "credit-notes", about: "GST credit notes issued to buyers", icon: FileMinus, label: "Credit Notes", group: "Finance", pages: ["crm-refunds"], path: "/api/crm/refunds/gst-notes",
     rows: list, id: (r) => String(r.Id),
     title: (r) => r.NoteNo || r.ApplicantName, sub: (r) => joinDot(r.ApplicantName, r.BookingNo, r.UnitNo),
     status: (r) => r.Status,
@@ -291,6 +305,19 @@ export const CRM_REGISTERS: CrmRegister[] = [
   },
   // ── Legal & Possession ─────────────────────────────────────────────────────
   {
+    key: "legal-milestones", about: "Legal step tracker per booking", icon: ListChecks, label: "Legal Milestones", group: "Legal & Possession", pages: ["crm-legal-milestones"], path: "/api/crm/legal-milestones",
+    rows: (b) => (Array.isArray(b) ? b : list(b?.rows)), id: (r) => String(r.Id),
+    title: (r) => r.ApplicantName, sub: (r) => joinDot(r.BookingNo, r.UnitNo, r.ProjectName),
+    status: (r) => r.AgreementStatus || r.Status,
+    lines: (r) => [
+      r.AgreementNo && `Agreement ${r.AgreementNo}`,
+      r.CurrentStep && `Step: ${r.CurrentStep}`,
+    ],
+    searchIn: (r) => [r.ApplicantName, r.BookingNo, r.UnitNo, r.AgreementNo, r.ProjectName],
+    open: toBooking, dateOf: (r) => r.UpdatedAt || r.CreatedAt,
+    empty: "No legal milestone records.",
+  },
+  {
     key: "agreements", about: "Agreement to sell records", icon: ScrollText, label: "Agreements", group: "Legal & Possession", pages: ["crm-agreements"], path: "/api/crm/agreements",
     rows: list, id: (r) => String(r.Id),
     title: (r) => r.ApplicantName, sub: (r) => joinDot(r.AgreementNo, r.BookingNo, r.UnitNo),
@@ -328,6 +355,19 @@ export const CRM_REGISTERS: CrmRegister[] = [
     empty: "No sale deed records.",
   },
   {
+    key: "mutation", about: "Property mutation after sale deed", icon: UserCog, label: "Property Mutation", group: "Legal & Possession", pages: ["crm-mutation"], path: "/api/crm/mutation",
+    rows: list, id: (r) => String(r.Id),
+    title: (r) => r.ApplicantName, sub: (r) => joinDot(r.BookingNo, r.UnitNo, r.ProjectName),
+    status: (r) => r.Status,
+    lines: (r) => [
+      r.DeedNo && `Deed ${r.DeedNo}`,
+      joinDot(r.RegistrationNo && `Reg ${r.RegistrationNo}`, r.DocsRequired && `${r.DocsVerified ?? 0}/${r.DocsRequired} docs`),
+    ],
+    searchIn: (r) => [r.ApplicantName, r.BookingNo, r.UnitNo, r.DeedNo, r.RegistrationNo, r.Status],
+    open: toBooking, dateOf: (r) => r.CreatedAt,
+    empty: "No mutation records.",
+  },
+  {
     key: "possession", about: "Checklist, notice and handover", icon: KeyRound, label: "Possession & Handover", group: "Legal & Possession",
     pages: ["crm-pre-possession", "crm-possession-notice", "crm-handover"], path: "/api/crm/pre-possession/board", serverSearch: true,
     rows: (b) => list(b?.rows), id: (r) => String(r.BookingId),
@@ -340,6 +380,22 @@ export const CRM_REGISTERS: CrmRegister[] = [
     ],
     open: toBooking, amountOf: (r) => r.Balance,
     empty: "No bookings on the possession board.",
+  },
+  // ── Finance (continued) ────────────────────────────────────────────────────
+  {
+    key: "loan-tracking", about: "Home loan and bank co-ordination", icon: Wallet, label: "Home Loan Tracking", group: "Finance", pages: ["crm-loan-details"], path: "/api/crm/loan-summary",
+    rows: list, id: (r) => String(r.BookingId),
+    title: (r) => r.ApplicantName, sub: (r) => joinDot(r.BookingNo, r.UnitNo, r.ProjectName),
+    status: (r) => r.SanctionStatus,
+    amount: (r) => (r.LoanAmount ? { label: "Loan amount", value: money(r.LoanAmount) } : null),
+    lines: (r) => [
+      joinDot(r.BankName, r.BranchName, r.RmName && `RM: ${r.RmName}`),
+      joinDot(r.SanctionDate && `Sanctioned ${fmtDate(r.SanctionDate)}`, r.LoanAccountNo),
+    ],
+    searchIn: (r) => [r.ApplicantName, r.BookingNo, r.UnitNo, r.BankName, r.SanctionStatus, r.LoanAccountNo],
+    open: (r) => (r.BookingId ? { to: "booking", bookingId: Number(r.BookingId), title: r.BookingNo || "Booking" } : null),
+    amountOf: (r) => r.LoanAmount,
+    empty: "No home loan records.",
   },
   // ── Brokerage ──────────────────────────────────────────────────────────────
   {
@@ -355,6 +411,21 @@ export const CRM_REGISTERS: CrmRegister[] = [
     searchIn: (r) => [r.BrokerName, r.ApplicantName, r.BookingNo, r.UnitNo, r.ProjectName, r.Status],
     open: toBooking, amountOf: (r) => r.ComputedAmount,
     empty: "No brokerage records.",
+  },
+  {
+    key: "broker-payments", about: "Payments made to brokers", icon: Handshake, label: "Broker Payments", group: "Brokerage", pages: ["crm-brokerage"], path: "/api/crm/brokerage/payments",
+    rows: list, id: (r) => String(r.Id),
+    title: (r) => r.BrokerName || r.BrokerFirm, sub: (r) => joinDot(r.BookingNo, r.UnitNo, r.ProjectName),
+    status: (r) => r.BrokerageStatus,
+    amount: (r) => ({ label: "Paid", value: money(r.Amount) }),
+    lines: (r) => [
+      joinDot(r.PaidDate && fmtDate(r.PaidDate), r.PaymentMode, r.TransactionRef),
+      joinDot(r.BrokerFirm, r.ComputedAmount && `Total commission ${money(r.ComputedAmount)}`),
+    ],
+    searchIn: (r) => [r.BrokerName, r.BrokerFirm, r.BookingNo, r.PaymentMode, r.TransactionRef],
+    open: (r) => (r.BookingId ? { to: "booking", bookingId: Number(r.BookingId), title: r.BookingNo || "Booking" } : null),
+    dateOf: (r) => r.PaidDate, amountOf: (r) => r.Amount,
+    empty: "No broker payments.",
   },
   // ── After-Sales ────────────────────────────────────────────────────────────
   {
