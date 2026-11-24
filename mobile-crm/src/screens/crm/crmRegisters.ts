@@ -5,14 +5,14 @@
 import type { Row } from "@/api/crmApi";
 import { useAuth } from "@/auth/AuthContext";
 import {
-  ArrowRightLeft, Ban, Building2, ClipboardList, FileCheck2, FileMinus, FilePenLine, FileText, Handshake, HardHat,
-  KeyRound, ListChecks, PhoneCall, PhoneIncoming, Receipt, ReceiptIndianRupee, Repeat2, ScrollText,
-  ShieldCheck, Ticket, Undo2, UserCog, UserRound, Users, Wallet, type LucideIcon,
+  ArrowRightLeft, Award, Ban, Building2, Car, ClipboardList, FileCheck2, FileMinus, FilePenLine, FileText,
+  Grid3x3, Handshake, HardHat, KeyRound, ListChecks, PhoneCall, PhoneIncoming, Receipt, ReceiptIndianRupee,
+  Repeat2, ScrollText, ShieldCheck, Ticket, Undo2, UserCog, UserRound, Users, Wallet, type LucideIcon,
 } from "lucide-react-native";
 import { fmtDate, joinDot, money } from "./ui";
 
-export type CrmGroup = "Buyers & Bookings" | "Finance" | "Legal & Possession" | "Brokerage" | "After-Sales" | "Resale";
-export const CRM_GROUPS: CrmGroup[] = ["Buyers & Bookings", "Finance", "Legal & Possession", "Brokerage", "After-Sales", "Resale"];
+export type CrmGroup = "Buyers & Bookings" | "Units & Parking" | "Finance" | "Legal & Possession" | "Brokerage" | "After-Sales" | "Resale";
+export const CRM_GROUPS: CrmGroup[] = ["Buyers & Bookings", "Units & Parking", "Finance", "Legal & Possession", "Brokerage", "After-Sales", "Resale"];
 
 /** Where a card goes when tapped. */
 export type CrmOpen =
@@ -380,6 +380,61 @@ export const CRM_REGISTERS: CrmRegister[] = [
     ],
     open: toBooking, amountOf: (r) => r.Balance,
     empty: "No bookings on the possession board.",
+  },
+  // ── Units & Parking ────────────────────────────────────────────────────────
+  {
+    // unitMaster GET / (no page right, all users) has LockBookingNo + LockHoldId → derive status.
+    key: "unit-matrix", about: "All units with availability status", icon: Grid3x3, label: "Unit Availability", group: "Units & Parking", pages: ["crm-unit-matrix"], path: "/api/unit-master?isActive=1",
+    rows: list, id: (r) => String(r.Id),
+    title: (r) => r.UnitName, sub: (r) => joinDot(r.ProjectName, r.BlockName, r.FloorNo != null && `Floor ${r.FloorNo}`),
+    status: (r) => !r.IsActive ? "Blocked" : r.LockBookingNo ? "Booked" : r.LockHoldId ? "On Hold" : "Available",
+    lines: (r) => [
+      joinDot(r.UnitType, r.UnitKind, r.AreaSqFt && `${r.AreaSqFt} sq ft`),
+      r.LockBookingNo && `Booking: ${r.LockBookingNo}`,
+    ],
+    searchIn: (r) => [r.UnitName, r.ProjectName, r.BlockName, r.UnitType, r.UnitKind, r.LockBookingNo],
+    open: (r) => (r.LockBookingId ? { to: "booking", bookingId: Number(r.LockBookingId), title: r.LockBookingNo || "Booking" } : null),
+    projectOf: (r) => r.ProjectName,
+    empty: "No units found.",
+  },
+  {
+    // parkingSlotMaster GET / (no page right) has LockBookingNo + LockHoldId.
+    key: "parking-matrix", about: "All parking slots with availability status", icon: Car, label: "Parking Availability", group: "Units & Parking", pages: ["crm-parking-matrix"], path: "/api/parking-slot-master",
+    rows: list, id: (r) => String(r.Id),
+    title: (r) => r.SlotNo, sub: (r) => joinDot(r.ProjectName, r.BlockName, r.ParkingType),
+    status: (r) => !r.IsActive ? "Blocked" : r.LockBookingNo ? "Booked" : r.LockHoldId ? "On Hold" : "Available",
+    lines: (r) => [
+      r.LockBookingNo && `Booking: ${r.LockBookingNo}`,
+    ],
+    searchIn: (r) => [r.SlotNo, r.ProjectName, r.BlockName, r.ParkingType, r.LockBookingNo],
+    open: (r) => (r.LockAllotmentBookingId ? { to: "booking", bookingId: Number(r.LockAllotmentBookingId), title: r.LockBookingNo || "Booking" } : null),
+    projectOf: (r) => r.ProjectName,
+    empty: "No parking slots found.",
+  },
+  {
+    key: "parking-booking", about: "Parking allotted to bookings", icon: Car, label: "Parking Bookings", group: "Units & Parking", pages: ["crm-parking-booking"], path: "/api/crm/parking",
+    rows: list, id: (r) => String(r.Id),
+    title: (r) => r.ApplicantName, sub: (r) => joinDot(r.SlotNo, r.BookingNo, r.ProjectName),
+    status: (r) => r.PaymentStatus,
+    lines: (r) => [
+      joinDot(r.ParkingType || r.CurrentParkingType, r.BlockName),
+    ],
+    searchIn: (r) => [r.ApplicantName, r.BookingNo, r.SlotNo, r.ProjectName, r.PaymentStatus],
+    open: toBooking,
+    empty: "No parking allotments.",
+  },
+  {
+    key: "oc-cc", about: "Occupancy and completion certificates by project", icon: Award, label: "OC / CC", group: "Units & Parking", pages: ["crm-oc-cc"], path: "/api/crm/oc-cc",
+    rows: list, id: (r) => String(r.Id),
+    title: (r) => r.ProjectName, sub: (r) => joinDot(r.BlockName || "Whole project", r.CertType),
+    status: (r) => r.Status,
+    lines: (r) => [
+      joinDot(r.IssuingAuthority, r.ReceivedDate && `Received ${fmtDate(r.ReceivedDate)}`),
+      r.BookingCount && `${r.BookingCount} bookings`,
+    ],
+    searchIn: (r) => [r.ProjectName, r.BlockName, r.CertType, r.Status, r.IssuingAuthority],
+    mobile: () => null,
+    empty: "No OC/CC records.",
   },
   // ── Finance (continued) ────────────────────────────────────────────────────
   {
