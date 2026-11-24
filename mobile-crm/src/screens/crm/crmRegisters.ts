@@ -5,13 +5,14 @@
 import type { Row } from "@/api/crmApi";
 import { useAuth } from "@/auth/AuthContext";
 import {
-  Building2, ClipboardList, FileCheck2, HardHat, KeyRound, ListChecks, PhoneCall, PhoneIncoming, ReceiptIndianRupee,
-  Ticket, UserRound, Users, Wallet, type LucideIcon,
+  ArrowRightLeft, Ban, Building2, ClipboardList, FileCheck2, FileMinus, FilePenLine, FileText, Handshake, HardHat,
+  KeyRound, ListChecks, PhoneCall, PhoneIncoming, Receipt, ReceiptIndianRupee, Repeat2, ScrollText,
+  ShieldCheck, Ticket, Undo2, UserCog, UserRound, Users, Wallet, type LucideIcon,
 } from "lucide-react-native";
 import { fmtDate, joinDot, money } from "./ui";
 
-export type CrmGroup = "Buyers & Bookings" | "Finance" | "Legal & Possession" | "After-Sales";
-export const CRM_GROUPS: CrmGroup[] = ["Buyers & Bookings", "Finance", "Legal & Possession", "After-Sales"];
+export type CrmGroup = "Buyers & Bookings" | "Finance" | "Legal & Possession" | "Brokerage" | "After-Sales" | "Resale";
+export const CRM_GROUPS: CrmGroup[] = ["Buyers & Bookings", "Finance", "Legal & Possession", "Brokerage", "After-Sales", "Resale"];
 
 /** Where a card goes when tapped. */
 export type CrmOpen =
@@ -162,6 +163,34 @@ export const CRM_REGISTERS: CrmRegister[] = [
     empty: "No bookings waiting for a welcome call.",
   },
   {
+    key: "booking-amendments", about: "Amendments to booking terms", icon: FilePenLine, label: "Booking Amendments", group: "Buyers & Bookings", pages: ["crm-booking-amendment"], path: "/api/crm/booking-amendments",
+    rows: list, id: (r) => String(r.Id),
+    title: (r) => r.ApplicantName, sub: (r) => joinDot(r.AmendmentNo || r.BookingNo, r.UnitNo, r.ProjectName),
+    status: (r) => r.Status,
+    lines: (r) => [
+      r.Reason && `Reason: ${r.Reason}`,
+      r.CreatedAt && `Requested ${fmtDate(r.CreatedAt)}`,
+    ],
+    searchIn: (r) => [r.ApplicantName, r.BookingNo, r.AmendmentNo, r.Status, r.UnitNo, r.ProjectName],
+    open: toBooking, dateOf: (r) => r.CreatedAt,
+    empty: "No booking amendments.",
+  },
+  {
+    key: "unit-changes", about: "Requests to swap to a different unit", icon: ArrowRightLeft, label: "Unit Changes", group: "Buyers & Bookings", pages: ["crm-unit-change"], path: "/api/crm/bookings/unit-changes",
+    rows: list, id: (r) => String(r.Id),
+    title: (r) => r.CustomerName, sub: (r) => joinDot(r.RequestNo, r.Mobile),
+    status: (r) => r.Status,
+    lines: (r) => [
+      joinDot(r.SourceUnitName || r.SourceBookingNo, "→", r.TargetUnitName || r.TargetBookingNo),
+      r.Reason && `Reason: ${r.Reason}`,
+      joinDot(r.SourceProjectName, r.CreatedAt && `Requested ${fmtDate(r.CreatedAt)}`),
+    ],
+    searchIn: (r) => [r.CustomerName, r.Mobile, r.RequestNo, r.SourceBookingNo, r.TargetBookingNo, r.Status],
+    open: (r) => (r.SourceBookingId ? { to: "booking", bookingId: Number(r.SourceBookingId), title: r.SourceBookingNo || "Booking" } : null),
+    dateOf: (r) => r.CreatedAt,
+    empty: "No unit change requests.",
+  },
+  {
     key: "call-history", about: "Welcome calls made", icon: PhoneIncoming, label: "Call History", group: "Buyers & Bookings", pages: ["crm-welcome-calls"], path: "/api/crm/welcome-calls",
     rows: list, id: (r) => String(r.Id),
     title: (r) => r.ApplicantName, sub: (r) => joinDot(r.BookingNo, r.ProjectName, r.UnitNo),
@@ -176,6 +205,48 @@ export const CRM_REGISTERS: CrmRegister[] = [
     open: toBooking, empty: "No welcome calls logged.",
   },
   // ── Finance ────────────────────────────────────────────────────────────────
+  {
+    key: "invoices", about: "Tax invoices raised on bookings", icon: Receipt, label: "Invoices", group: "Finance", pages: ["crm-invoices"], path: "/api/crm/invoices",
+    rows: list, id: (r) => String(r.Id),
+    title: (r) => r.InvoiceNo, sub: (r) => joinDot(r.ApplicantName, r.BookingNo, r.UnitNo),
+    status: (r) => r.Status,
+    amount: (r) => ({ label: r.InvoiceType || "Amount", value: money(r.Amount) }),
+    lines: (r) => [
+      joinDot(r.InvoiceType, r.InvoiceDate && fmtDate(r.InvoiceDate)),
+      joinDot(r.ProjectName, r.BookingNo),
+    ],
+    searchIn: (r) => [r.InvoiceNo, r.ApplicantName, r.BookingNo, r.UnitNo, r.InvoiceType, r.Status],
+    open: toBooking, dateOf: (r) => r.InvoiceDate, amountOf: (r) => r.Amount,
+    empty: "No invoices.",
+  },
+  {
+    key: "credit-notes", about: "GST credit notes issued to buyers", icon: FileMinus, label: "Credit Notes", group: "Finance", pages: ["crm-credit-notes"], path: "/api/crm/refunds/gst-notes",
+    rows: list, id: (r) => String(r.Id),
+    title: (r) => r.NoteNo || r.ApplicantName, sub: (r) => joinDot(r.ApplicantName, r.BookingNo, r.UnitNo),
+    status: (r) => r.Status,
+    amount: (r) => (r.Amount ? { label: "Amount", value: money(r.Amount) } : null),
+    lines: (r) => [
+      r.NoteDate && `Issued ${fmtDate(r.NoteDate)}`,
+      joinDot(r.ProjectName, r.BookingNo),
+    ],
+    searchIn: (r) => [r.NoteNo, r.ApplicantName, r.BookingNo, r.UnitNo, r.Status],
+    open: toBooking, dateOf: (r) => r.NoteDate, amountOf: (r) => r.Amount,
+    empty: "No credit notes.",
+  },
+  {
+    key: "refunds", about: "Refund requests and payouts", icon: Undo2, label: "Refunds", group: "Finance", pages: ["crm-refunds"], path: "/api/crm/refunds",
+    rows: (b) => (Array.isArray(b) ? b : list(b?.rows)), id: (r) => String(r.Id),
+    title: (r) => r.ApplicantName, sub: (r) => joinDot(r.RefundNo, r.BookingNo, r.UnitNo),
+    status: (r) => r.Status,
+    amount: (r) => ({ label: "Net refund", value: money(r.NetAmount ?? r.GrossAmount) }),
+    lines: (r) => [
+      joinDot(r.GrossAmount && `Gross ${money(r.GrossAmount)}`, r.NetAmount && `Net ${money(r.NetAmount)}`),
+      joinDot(r.ProjectName, r.RequestedDate && `Requested ${fmtDate(r.RequestedDate)}`),
+    ],
+    searchIn: (r) => [r.RefundNo, r.ApplicantName, r.BookingNo, r.UnitNo, r.Status],
+    open: toBooking, dateOf: (r) => r.RequestedDate, amountOf: (r) => r.NetAmount ?? r.GrossAmount,
+    empty: "No refunds.",
+  },
   {
     key: "demands", about: "Milestones demanded from buyers", icon: ReceiptIndianRupee, label: "Demands", group: "Finance", pages: ["crm-payments"], path: "/api/crm/payments/demands",
     rows: (b) => list(b?.demands), id: (r) => String(r.Id),
@@ -220,6 +291,43 @@ export const CRM_REGISTERS: CrmRegister[] = [
   },
   // ── Legal & Possession ─────────────────────────────────────────────────────
   {
+    key: "agreements", about: "Agreement to sell records", icon: ScrollText, label: "Agreements", group: "Legal & Possession", pages: ["crm-agreements"], path: "/api/crm/agreements",
+    rows: list, id: (r) => String(r.Id),
+    title: (r) => r.ApplicantName, sub: (r) => joinDot(r.AgreementNo, r.BookingNo, r.UnitNo),
+    status: (r) => r.Status,
+    amount: (r) => (r.GrandTotal ? { label: "Total", value: money(r.GrandTotal) } : null),
+    lines: (r) => [
+      joinDot(r.AgreementDate && `Dated ${fmtDate(r.AgreementDate)}`, r.ProjectName),
+    ],
+    searchIn: (r) => [r.AgreementNo, r.ApplicantName, r.BookingNo, r.UnitNo, r.ProjectName, r.Status],
+    open: toBooking, dateOf: (r) => r.AgreementDate, amountOf: (r) => r.GrandTotal,
+    empty: "No agreements.",
+  },
+  {
+    key: "noc", about: "No Objection Certificates", icon: ShieldCheck, label: "NOC", group: "Legal & Possession", pages: ["crm-noc"], path: "/api/crm/noc",
+    rows: (b) => (Array.isArray(b) ? b : list(b?.rows)), id: (r) => String(r.Id),
+    title: (r) => r.ApplicantName, sub: (r) => joinDot(r.NocNo, r.BookingNo, r.UnitNo),
+    status: (r) => r.Status,
+    lines: (r) => [
+      joinDot(r.NocType, r.ProjectName),
+    ],
+    searchIn: (r) => [r.NocNo, r.ApplicantName, r.BookingNo, r.UnitNo, r.NocType, r.Status, r.ProjectName],
+    open: toBooking, dateOf: (r) => r.CreatedAt,
+    empty: "No NOC records.",
+  },
+  {
+    key: "sales-deed", about: "Sale deed and registration records", icon: FileText, label: "Sale Deed", group: "Legal & Possession", pages: ["crm-sales-deed"], path: "/api/crm/sales-deed",
+    rows: list, id: (r) => String(r.Id),
+    title: (r) => r.ApplicantName, sub: (r) => joinDot(r.DeedNo, r.BookingNo, r.UnitNo),
+    status: (r) => r.Status,
+    lines: (r) => [
+      joinDot(r.ProjectName, r.CreatedAt && `Created ${fmtDate(r.CreatedAt)}`),
+    ],
+    searchIn: (r) => [r.DeedNo, r.ApplicantName, r.BookingNo, r.UnitNo, r.ProjectName, r.Status],
+    open: toBooking, dateOf: (r) => r.CreatedAt,
+    empty: "No sale deed records.",
+  },
+  {
     key: "possession", about: "Checklist, notice and handover", icon: KeyRound, label: "Possession & Handover", group: "Legal & Possession",
     pages: ["crm-pre-possession", "crm-possession-notice", "crm-handover"], path: "/api/crm/pre-possession/board", serverSearch: true,
     rows: (b) => list(b?.rows), id: (r) => String(r.BookingId),
@@ -233,7 +341,35 @@ export const CRM_REGISTERS: CrmRegister[] = [
     open: toBooking, amountOf: (r) => r.Balance,
     empty: "No bookings on the possession board.",
   },
+  // ── Brokerage ──────────────────────────────────────────────────────────────
+  {
+    key: "brokerage", about: "Broker commissions on bookings", icon: Handshake, label: "Brokerage", group: "Brokerage", pages: ["crm-brokerage"], path: "/api/crm/brokerage",
+    rows: list, id: (r) => String(r.Id),
+    title: (r) => r.BrokerName || r.ApplicantName, sub: (r) => joinDot(r.BookingNo, r.UnitNo, r.ProjectName),
+    status: (r) => r.Status,
+    amount: (r) => (r.ComputedAmount ? { label: "Commission", value: money(r.ComputedAmount) } : null),
+    lines: (r) => [
+      r.ApplicantName && `Buyer: ${r.ApplicantName}`,
+      joinDot(r.ProjectName, r.BookingNo),
+    ],
+    searchIn: (r) => [r.BrokerName, r.ApplicantName, r.BookingNo, r.UnitNo, r.ProjectName, r.Status],
+    open: toBooking, amountOf: (r) => r.ComputedAmount,
+    empty: "No brokerage records.",
+  },
   // ── After-Sales ────────────────────────────────────────────────────────────
+  {
+    key: "cancellations", about: "Booking cancellation requests", icon: Ban, label: "Cancellations", group: "After-Sales", pages: ["crm-cancellations"], path: "/api/crm/cancellations",
+    rows: list, id: (r) => String(r.Id),
+    title: (r) => r.ApplicantName, sub: (r) => joinDot(r.CancellationNo, r.BookingNo, r.UnitNo),
+    status: (r) => r.Status,
+    amount: (r) => (r.RefundAmount ? { label: "Refund amount", value: money(r.RefundAmount) } : null),
+    lines: (r) => [
+      joinDot(r.ProjectName, r.RequestedDate && `Requested ${fmtDate(r.RequestedDate)}`),
+    ],
+    searchIn: (r) => [r.CancellationNo, r.ApplicantName, r.BookingNo, r.UnitNo, r.Status],
+    open: toBooking, dateOf: (r) => r.RequestedDate, amountOf: (r) => r.RefundAmount,
+    empty: "No cancellations.",
+  },
   {
     key: "customer-360", about: "One customer, everything", icon: Building2, label: "Customer 360", group: "After-Sales", pages: ["crm-customer-360"], path: "/api/crm/customer-360",
     rows: list, id: (r) => String(r.Id),
@@ -272,6 +408,46 @@ export const CRM_REGISTERS: CrmRegister[] = [
     ],
     searchIn: (r) => [r.projectName], amountOf: (r) => r.pct, projectOf: (r) => r.projectName, mobile: () => null,
     empty: "No projects.",
+  },
+  // ── Resale ─────────────────────────────────────────────────────────────────
+  {
+    key: "resales", about: "Property resale and buy-back cases", icon: Repeat2, label: "Resales", group: "Resale", pages: ["crm-resales"], path: "/api/crm/resales",
+    rows: list, id: (r) => String(r.Id),
+    title: (r) => r.FromCustomerName, sub: (r) => joinDot(r.FromBookingNo, "→", r.ToBookingNo || r.ToCustomerName),
+    status: (r) => r.Status,
+    lines: (r) => [
+      joinDot(r.Kind, r.DeveloperFeeAmount && `Fee ${money(r.DeveloperFeeAmount)}`),
+      r.CreatedAt && fmtDate(r.CreatedAt),
+    ],
+    searchIn: (r) => [r.FromBookingNo, r.ToBookingNo, r.FromCustomerName, r.ToCustomerName, r.Kind, r.Status],
+    open: (r) => (r.FromBookingId ? { to: "booking", bookingId: Number(r.FromBookingId), title: r.FromBookingNo || "Booking" } : null),
+    dateOf: (r) => r.CreatedAt, amountOf: (r) => r.DeveloperFeeAmount,
+    empty: "No resale cases.",
+  },
+  {
+    key: "transfer-deeds", about: "Transfer deeds for resale cases", icon: ScrollText, label: "Transfer Deeds", group: "Resale", pages: ["crm-transfer-deeds"], path: "/api/crm/transfer-deeds",
+    rows: list, id: (r) => String(r.Id),
+    title: (r) => r.ApplicantName || r.BookingNo, sub: (r) => joinDot(r.DeedNo, r.BookingNo),
+    status: (r) => r.Status,
+    lines: (r) => [
+      joinDot(r.ProjectName, r.UnitNo),
+      r.CreatedAt && fmtDate(r.CreatedAt),
+    ],
+    searchIn: (r) => [r.DeedNo, r.ApplicantName, r.BookingNo, r.Status],
+    open: toBooking, dateOf: (r) => r.CreatedAt,
+    empty: "No transfer deeds.",
+  },
+  {
+    key: "ownership-changes", about: "Co-owner and nominee changes", icon: UserCog, label: "Ownership Changes", group: "Resale", pages: ["crm-ownership-changes"], path: "/api/crm/ownership-changes",
+    rows: list, id: (r) => String(r.Id),
+    title: (r) => r.ApplicantName, sub: (r) => joinDot(r.BookingNo, r.UnitNo),
+    status: (r) => r.Status,
+    lines: (r) => [
+      joinDot(r.ProjectName, r.CreatedAt && fmtDate(r.CreatedAt)),
+    ],
+    searchIn: (r) => [r.ApplicantName, r.BookingNo, r.UnitNo, r.Status],
+    open: toBooking, dateOf: (r) => r.CreatedAt,
+    empty: "No ownership change records.",
   },
 ];
 
