@@ -33,6 +33,7 @@ import CrmNocScreen from "@/screens/crm/CrmNocScreen";
 import CrmSaleDeedScreen from "@/screens/crm/CrmSaleDeedScreen";
 import CrmMutationScreen from "@/screens/crm/CrmMutationScreen";
 import CrmConstructionUpdatesScreen from "@/screens/crm/CrmConstructionUpdatesScreen";
+import CrmOcCcBoardScreen from "@/screens/crm/CrmOcCcBoardScreen";
 import Customer360Screen from "@/screens/crm/Customer360Screen";
 import TicketScreen from "@/screens/crm/TicketScreen";
 import { NewTicketScreen, CustomerFormScreen, ApplicationFormScreen, WelcomeChecklistScreen, PossessionScreen, PaymentScreen, WelcomeCallScreen } from "@/screens/crm/CrmForms";
@@ -83,6 +84,7 @@ export type MainStackParamList = {
   CrmSaleDeed: { bookingId: number; title?: string };
   CrmMutation: { bookingId: number; title?: string };
   CrmConstructionUpdates: { projectId: number; projectName?: string };
+  CrmOcCcBoard: undefined;
 };
 
 const Stack = createNativeStackNavigator<MainStackParamList>();
@@ -196,6 +198,7 @@ export default function MainStack() {
         <Stack.Screen name="CrmSaleDeed" component={CrmSaleDeedScreen} options={{ title: "Sale Deed" }} />
         <Stack.Screen name="CrmMutation" component={CrmMutationScreen} options={{ title: "Mutation" }} />
         <Stack.Screen name="CrmConstructionUpdates" component={CrmConstructionUpdatesScreen} options={({ route }) => ({ title: route.params.projectName || "Construction Updates" })} />
+        <Stack.Screen name="CrmOcCcBoard" component={CrmOcCcBoardScreen} options={{ title: "OC / CC Board" }} />
       </Stack.Navigator>
     </ShellMenusProvider>
   );

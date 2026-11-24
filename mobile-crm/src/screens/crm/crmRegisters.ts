@@ -21,7 +21,8 @@ export type CrmOpen =
   | { to: "ticket"; ticketId: number }
   | { to: "application"; applicationId: number }
   | { to: "document"; path: string; name: string }
-  | { to: "construction-updates"; projectId: number; projectName: string };
+  | { to: "construction-updates"; projectId: number; projectName: string }
+  | { to: "oc-cc-board" };
 
 /** Welcome-call outcomes and their words — the web's (src/pages/CRM/welcomeCalls/config.tsx OUTCOMES / OUTCOME_LABEL),
  * the server's list (crmWelcomeCalls.js OUTCOMES). */
@@ -436,6 +437,7 @@ export const CRM_REGISTERS: CrmRegister[] = [
     searchIn: (r) => [r.ProjectName, r.BlockName, r.CertType, r.Status, r.IssuingAuthority],
     mobile: () => null,
     empty: "No OC/CC records.",
+    open: () => ({ to: "oc-cc-board" as const }),
   },
   // ── Finance (continued) ────────────────────────────────────────────────────
   {
