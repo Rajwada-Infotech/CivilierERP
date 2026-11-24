@@ -387,6 +387,8 @@ export default function BookingDetailScreen() {
         ),
       } : null;
     })(),
+    canAccessPage("crm-noc") && { key: "noc", label: "NOC", icon: FileText,
+      go: () => nav.navigate("CrmNoc", { bookingId: id, title: `NOC — ${title}` }) },
     seesLoan && loanQ.data && { key: "loan", label: "Home loan", icon: Landmark, badge: !loan?.SanctionStatus || loan.SanctionStatus === "NotApplied" ? "Not applied" : loan.SanctionStatus,
       tone: loan?.SanctionStatus === "Sanctioned" || loan?.SanctionStatus === "Disbursed" ? "#10b981" : loan?.SanctionStatus === "Applied" ? "#f59e0b" : undefined,
       body: <>
