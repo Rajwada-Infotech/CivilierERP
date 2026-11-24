@@ -13,7 +13,7 @@ import { fetchWithAuth } from "@/services/fetchWithAuth";
 import { useRoute, type RouteProp } from "@react-navigation/native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { ArrowLeftRight, Banknote, Check, CheckCircle2, ChevronRight, FileText, KeyRound, Landmark, PhoneCall, Smartphone, Ticket, Wallet } from "lucide-react-native";
+import { ArrowLeftRight, Banknote, Check, CheckCircle2, ChevronRight, FileText, KeyRound, Landmark, PhoneCall, Scale, Smartphone, Ticket, Wallet } from "lucide-react-native";
 import { useAuth } from "@/auth/AuthContext";
 import { crmGet, crmSend, getBooking, getBookingLifecycle, getBookingPayments, type Row } from "@/api/crmApi";
 import { toast } from "@/components/Toast";
@@ -60,7 +60,8 @@ export default function BookingDetailScreen() {
   const onRefresh = async () => {
     setRefreshing(true);
     await Promise.all([seesBooking && bookingQ.refetch(), seesBooking && lifeQ.refetch(), seesMoney && payQ.refetch(),
-      seesReceipts && receiptsQ.refetch(), seesInvoices && invoicesQ.refetch(), seesBooking && docsQ.refetch(), seesTickets && ticketsQ.refetch()]);
+      seesReceipts && receiptsQ.refetch(), seesInvoices && invoicesQ.refetch(), seesBooking && docsQ.refetch(), seesTickets && ticketsQ.refetch(),
+      seesLegalMil && legalMilQ.refetch()]);
     setRefreshing(false);
   };
 
@@ -187,6 +188,9 @@ export default function BookingDetailScreen() {
   // On-account deposits still holding money, and the web's gate for applying them by hand: the booking funded in
   // full, and only the next outstanding milestone, once its demand is raised (CrmPaymentMilestones.tsx canManuallyApplyOnAccount).
   const oaQ = useQuery({ queryKey: ["crm-booking-oa", id], queryFn: () => crmGet<{ payments: Row[]; availableBalance: number }>(`/api/crm/payments/booking/${id}/on-account`), enabled: canPay });
+  const seesLegalMil = canAccessPage("crm-legal-milestones");
+  const legalMilQ = useQuery({ queryKey: ["crm-booking-legal-mil", id], enabled: seesLegalMil,
+    queryFn: () => crmGet<Row | null>(`/api/crm/legal-milestones/booking/${id}`) });
   const deposits = (oaQ.data?.payments ?? []).filter((d) => Number(d.AvailableBalance) > 0.005);
   const applyTarget = (() => {
     const ms = payQ.data?.milestones ?? [];
@@ -280,6 +284,70 @@ export default function BookingDetailScreen() {
                 </>
               ) : <Kv label="Agreement" value="Not drafted yet" />}
       </> },
+    (seesLegalMil || bookingQ.data?.agreement) && (() => {
+      const lm = legalMilQ.data;
+      const agr = bookingQ.data?.agreement;
+      // Colour and label for the dot next to a legal step status
+      const dotColor = (status: string | null | undefined) => {
+        if (!status) return colors.border;
+        const s = status.toLowerCase();
+        if (["executed","completed","issued","received","registered","confirmed","approved","done"].some((x) => s.includes(x))) return "#10b981";
+        if (["rejected","cancelled"].some((x) => s.includes(x))) return colors.destructive;
+        return "#f59e0b";
+      };
+      type LStep = { key: string; label: string; status: string | null | undefined; note?: string | null; show: boolean };
+      const steps: LStep[] = lm ? [
+        { key: "agreement",  label: "Agreement",        status: lm.AgreementStatus,    note: lm.AgreementNo,  show: true },
+        { key: "afs-qp",     label: "AFS Query Payment",status: lm.AfsQPStatus,        note: lm.AfsQPNo,      show: !!lm.AfsQPId },
+        { key: "afs-reg",    label: "AFS Registration", status: lm.AfsRegistryStatus,  note: lm.AfsRegNo,     show: !!(lm.AfsRegistryId || lm.AfsQPId) },
+        { key: "noc",        label: `NOC (${lm.NocResolvedType || "Organisation"})`, status: lm.BankNocStatus || lm.OrgNocStatus, note: lm.BankNocNo || lm.OrgNocNo, show: true },
+        { key: "occc",       label: "OC / CC",          status: lm.OcCcReceived ? "Received" : null,           note: null,           show: true },
+        { key: "possession", label: "Possession",       status: lm.HandoverStatus || lm.PossessionNoticeStatus || lm.PrePossessionStatus, note: null, show: true },
+        { key: "sale-deed",  label: "Sale Deed",        status: lm.SalesDeedId ? (lm.RegistryStatus || "In Progress") : null, note: lm.DeedNo, show: true },
+        { key: "registry",   label: "Registry",         status: lm.RegistryStatus,     note: lm.RegNo,        show: !!(lm.SalesDeedId || lm.QueryPaymentId) },
+        { key: "mutation",   label: "Mutation",         status: lm.MutationStatus,     note: lm.MutationNo,   show: lm.RegistryStatus === "Completed" || !!lm.MutationId },
+      ].filter((s) => s.show) : agr ? [
+        { key: "agreement",  label: "Agreement",        status: agr.Status,            note: agr.AgreementNo, show: true },
+      ] : [];
+      // Badge = furthest meaningful step
+      const badge = (() => {
+        if (!lm && !agr) return null;
+        if (lm?.MutationStatus) return lm.MutationStatus === "Completed" ? "Mutation Done" : "Mutation";
+        if (lm?.RegistryStatus === "Completed") return "Deed Registered";
+        if (lm?.SalesDeedId) return "Sale Deed";
+        if (lm?.HandoverStatus) return words(lm.HandoverStatus);
+        if (lm?.BankNocStatus || lm?.OrgNocStatus) return "NOC";
+        const agrStatus = lm?.AgreementStatus || agr?.Status;
+        if (agrStatus) return agrStatus === "Executed" || agrStatus === "Registered" ? "Agreement Executed" : words(agrStatus);
+        return "Not started";
+      })();
+      const badgeTone = (() => {
+        const s = badge?.toLowerCase() ?? "";
+        if (["registered","done","executed","received"].some((x) => s.includes(x))) return "#10b981";
+        if (!badge || badge === "Not started") return undefined;
+        return "#f59e0b";
+      })();
+      return steps.length ? {
+        key: "legal",
+        label: "Legal journey",
+        icon: Scale,
+        badge,
+        tone: badgeTone,
+        body: (
+          <View style={{ gap: 0 }}>
+            {steps.map((s, i) => (
+              <View key={s.key} style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 9, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: colors.border }}>
+                <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: dotColor(s.status), borderWidth: s.status ? 0 : 1, borderColor: colors.mutedForeground }} />
+                <Text style={{ flex: 1, fontSize: 13, fontFamily: fonts.body.medium, color: colors.foreground }}>{s.label}</Text>
+                <Text numberOfLines={1} style={{ maxWidth: 140, fontSize: 12, fontFamily: fonts.body.regular, color: s.status ? (dotColor(s.status) === "#10b981" ? "#10b981" : dotColor(s.status) === colors.destructive ? colors.destructive : "#f59e0b") : colors.mutedForeground, textAlign: "right" }}>
+                  {s.status ? joinDot(words(s.status), s.note) : "—"}
+                </Text>
+              </View>
+            ))}
+          </View>
+        ),
+      } : null;
+    })(),
     seesLoan && loanQ.data && { key: "loan", label: "Home loan", icon: Landmark, badge: !loan?.SanctionStatus || loan.SanctionStatus === "NotApplied" ? "Not applied" : loan.SanctionStatus,
       tone: loan?.SanctionStatus === "Sanctioned" || loan?.SanctionStatus === "Disbursed" ? "#10b981" : loan?.SanctionStatus === "Applied" ? "#f59e0b" : undefined,
       body: <>
