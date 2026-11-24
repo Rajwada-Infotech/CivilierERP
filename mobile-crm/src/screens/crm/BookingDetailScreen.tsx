@@ -13,7 +13,7 @@ import { fetchWithAuth } from "@/services/fetchWithAuth";
 import { useRoute, type RouteProp } from "@react-navigation/native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { ArrowLeftRight, Banknote, Check, CheckCircle2, ChevronRight, FileText, KeyRound, Landmark, PhoneCall, Scale, Smartphone, Ticket, Wallet } from "lucide-react-native";
+import { ArrowLeftRight, Banknote, Check, CheckCircle2, ChevronRight, FileText, KeyRound, Landmark, PhoneCall, Scale, Smartphone, Ticket, Wallet, XCircle } from "lucide-react-native";
 import { useAuth } from "@/auth/AuthContext";
 import { crmGet, crmSend, getBooking, getBookingLifecycle, getBookingPayments, type Row } from "@/api/crmApi";
 import { toast } from "@/components/Toast";
@@ -162,6 +162,25 @@ export default function BookingDetailScreen() {
   };
   // Change unit: the web booking page's menu item (staff who may edit bookings, not for a plot sale).
   const [changeUnit, setChangeUnit] = useState(false);
+  // Cancellation: raise a cancellation request on this booking (crm-cancellations create right).
+  const canCancelBooking = live && canDoAction("crm-cancellations", "create");
+  const [cancelDialog, setCancelDialog] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelPct, setCancelPct] = useState("");
+  const [busyCancel, setBusyCancel] = useState(false);
+  const submitCancel = async () => {
+    if (!cancelReason.trim()) return toast.error("Enter the reason for cancellation");
+    const pct = cancelPct.trim() ? parseFloat(cancelPct) : undefined;
+    if (pct !== undefined && (isNaN(pct) || pct < 0 || pct > 100)) return toast.error("Cancellation charge must be 0 – 100%");
+    setBusyCancel(true);
+    try {
+      await crmSend("/api/crm/cancellations", "POST", { BookingId: id, Reason: cancelReason.trim(), ...(pct !== undefined ? { DeductionPercent: pct } : {}) });
+      toast.success("Cancellation request raised");
+      setCancelDialog(false); setCancelReason(""); setCancelPct("");
+      ["crm-booking", "crm"].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setBusyCancel(false); }
+  };
   // Home loan, as the web's Loan Tracking page keeps it (crm-loan-details; PUT /bookings/:id/loan).
   const seesLoan = canAccessPage("crm-loan-details");
   const loanQ = useQuery({ queryKey: ["crm-loan-summary"], enabled: seesLoan, staleTime: 60_000,
@@ -412,6 +431,7 @@ export default function BookingDetailScreen() {
               )}
       </> },
     canEditBooking && b && !b.IsPlotSale && { key: "unit", label: "Change unit", icon: ArrowLeftRight, go: () => setChangeUnit(true) },
+    canCancelBooking && { key: "cancel", label: "Cancel booking", icon: XCircle, tone: colors.destructive, go: () => setCancelDialog(true) },
   ].filter(Boolean) as never;
   if (!seesBooking && !seesMoney) {
     return <View style={{ flex: 1, backgroundColor: colors.background, padding: 16 }}><Empty text="You don't have a right on Bookings or Payment Milestones." /></View>;
@@ -815,6 +835,27 @@ export default function BookingDetailScreen() {
             </Section>
           ) : null}
           {changeUnit && b ? <ChangeUnitDialog booking={{ ...pb, ...b }} onClose={() => setChangeUnit(false)} /> : null}
+      {cancelDialog ? (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setCancelDialog(false)}>
+          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", padding: 16 }}>
+            <View style={{ backgroundColor: colors.card, borderRadius: 18, borderWidth: 1, borderColor: colors.border }}>
+              <ScrollView contentContainerStyle={{ padding: 18, gap: 10 }} keyboardShouldPersistTaps="handled">
+                <Text style={{ fontSize: 16, fontFamily: fonts.heading.bold, color: colors.destructive }}>Cancel booking</Text>
+                <Text style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginBottom: 4 }}>
+                  A cancellation request is raised and goes for approval. The booking is not cancelled until it is approved.
+                </Text>
+                <RemarksField label="Reason (required)" value={cancelReason} onChangeText={setCancelReason} />
+                <TextField label="Cancellation charge %" value={cancelPct} keyboardType="numeric"
+                  placeholder="Leave blank for default from policy" onChangeText={setCancelPct} />
+                <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
+                  <ActionKey label="Close" outline tone={colors.mutedForeground} onPress={() => setCancelDialog(false)} />
+                  <ActionKey label={busyCancel ? "Raising…" : "Raise request"} tone={colors.destructive} onPress={submitCancel} />
+                </View>
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+      ) : null}
         </>
       )}
       <ApplyOnAccountPrompt milestone={applyTo} deposits={deposits} busy={busyMs != null} onClose={() => setApplyTo(null)}
