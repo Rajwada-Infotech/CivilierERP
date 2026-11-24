@@ -65,19 +65,31 @@ export const runApprovalAction = async (
   endpoint: string,
   recordId: string,
   action: "approve" | "reject",
-  opts?: { note?: string; actionPathSuffix?: string },
+  opts?: { note?: string; actionPathSuffix?: string; approveBody?: Record<string, unknown> },
 ) => {
   const path = opts?.actionPathSuffix
     ? `${endpoint}/${recordId}/${opts.actionPathSuffix}/${action}`
     : `${endpoint}/${recordId}/${action}`;
+  const bodyData = action === "reject" ? { note: opts?.note ?? "" } : (opts?.approveBody ?? undefined);
   const res = await fetchWithAuth(path, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: action === "reject" ? JSON.stringify({ note: opts?.note ?? "" }) : undefined,
+    body: bodyData ? JSON.stringify(bodyData) : undefined,
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
   return data;
+};
+
+/** Accounts sets the deposit bank on a CRM-linked Received Payment before it can be approved. */
+export const setReceivedPaymentDepositBank = async (id: string, bankId: number): Promise<void> => {
+  const res = await fetchWithAuth(`/api/received-payment/${id}/deposit-bank`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ RPDepositBankId: bankId }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
 };
 
 /** An engineer confirming their own Civil Work DPR task assignment (web: confirmEngineerAssignment). */

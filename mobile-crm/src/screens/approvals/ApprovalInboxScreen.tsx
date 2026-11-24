@@ -9,6 +9,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, ScrollView } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import type { MainStackParamList } from "@/navigation/MainStack";
 import { ArrowDownWideNarrow, ArrowUpWideNarrow, ChevronDown, ChevronRight, ClipboardCheck, RefreshCw, SlidersHorizontal } from "lucide-react-native";
 import { sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
@@ -59,6 +62,7 @@ function InboxRow({ item, onPress }: { item: InboxItem; onPress: () => void }) {
 
 export default function ApprovalInboxScreen() {
   const queryClient = useQueryClient();
+  const nav = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const [activeModules, setActiveModules] = useState<string[]>([]);
   const [dateSort, setDateSort] = useState<"desc" | "asc">("desc");
   const [docSearch, setDocSearch] = useState("");
@@ -288,7 +292,15 @@ export default function ApprovalInboxScreen() {
         </ScrollView>
       </SheetPicker>
 
-      <ApprovalInboxDetailModal item={selected} onClose={() => setSelected(null)} onActionDone={handleActionDone} />
+      <ApprovalInboxDetailModal
+        item={selected}
+        onClose={() => setSelected(null)}
+        onActionDone={handleActionDone}
+        onOpenBooking={(bookingId, title) => {
+          setSelected(null);
+          nav.navigate("CrmBooking", { bookingId, title });
+        }}
+      />
     </View>
   );
 }

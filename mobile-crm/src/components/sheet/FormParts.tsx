@@ -78,7 +78,7 @@ export function SheetPicker({
               <X size={14} color={S.ink} />
             </IconKey>
           </View>
-          {children}
+          <ScrollView bounces={false} keyboardShouldPersistTaps="handled">{children}</ScrollView>
           {footer}
         </Pressable>
       </Pressable>

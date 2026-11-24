@@ -108,12 +108,10 @@ export const needsBankReview = (item: Pick<InboxItem, "Module" | "Status" | "Nee
   item.Module === "received-payment" && item.Status === "Pending" && !!item.NeedsReview;
 
 /**
- * Modules whose one-tap Approve can't succeed (a booking's review checklist, a refund's company bank) or shouldn't be
- * blind (a brokerage's amount is only editable before approval). The web hands these to their own review page; this app
- * has no such page, so it says where to finish the approval. Reject is unaffected.
+ * Modules whose standard one-tap Approve needs extra context from the approver.
+ * crm-bookings: tap "Open Booking" to review and approve on the booking detail screen.
+ * crm-refunds-finance: Finance picks a company bank + payment mode before approving (panel shown in detail modal).
+ * (crm-brokerage uses standard approve/reject — the full record is shown in the detail.)
  */
-export const REVIEW_INSTEAD: Record<string, string> = {
-  "crm-bookings": "Approve this booking after its review checklist, in the web app.",
-  "crm-brokerage": "Review the brokerage amount and approve it in the web app.",
-  "crm-refunds-finance": "Finance approval needs the company bank picked, in the web app.",
-};
+export const OPEN_BOOKING_MODULES = new Set(["crm-bookings"]);
+export const FINANCE_APPROVE_MODULE = "crm-refunds-finance";

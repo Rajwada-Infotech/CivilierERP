@@ -6,20 +6,23 @@
 //   Approve / Reject (Reject asks for a reason)      — the usual case
 //   Confirm                                          — an engineer confirming their own Civil Work DPR assignment
 //   "Waiting on level n of m"                        — named on the workflow, but not at its current level
-//   a note instead of Approve                        — a received payment still waiting for its deposit bank, and the
-//                                                      modules whose approval needs a review step (bookings, brokerage,
-//                                                      refunds at finance) that only the web app has. Reject still works.
+//   crm-bookings: "Open Booking" button — opens BookingDetailScreen where approve/reject live (checklist + action together)
+//   crm-refunds-finance: bank + payment-mode pickers before Approve (raises the payout voucher on submit)
+//   received-payment still waiting for Accounts to set the deposit bank: notice shown, Reject still works
 import { useEffect, useState } from "react";
 import { View, Text, Alert } from "react-native";
+import { useQuery } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { CheckCircle2, ClipboardList, Download, FileText, XCircle } from "lucide-react-native";
+import { Banknote, CheckCircle2, ClipboardList, Download, FileText, Home, XCircle } from "lucide-react-native";
 import { sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { formatINR } from "@/utils/formatCurrency";
-import { confirmEngineerAssignment, fetchRecordDetail, runApprovalAction, type InboxItem } from "@/api/approvalInboxApi";
+import { fetchWithAuth } from "@/services/fetchWithAuth";
+import { confirmEngineerAssignment, fetchRecordDetail, runApprovalAction, setReceivedPaymentDepositBank, type InboxItem } from "@/api/approvalInboxApi";
 import { Body, Field, InfoGrid, Input, Key, Label, Notice, Panel, SheetMark, Skel, statusTone } from "@/components/sheet/Sheet";
 import { FormPage, LineList, fmtDate } from "@/components/sheet/Register";
-import { MODULE_CONFIG, REVIEW_INSTEAD, SUB_GATE_SUFFIX, needsBankReview } from "./approvalInboxConfig";
+import { OptionRow, PickerField, SheetPicker } from "@/components/sheet/FormParts";
+import { FINANCE_APPROVE_MODULE, MODULE_CONFIG, OPEN_BOOKING_MODULES, SUB_GATE_SUFFIX, needsBankReview } from "./approvalInboxConfig";
 import { downloadApprovalPdf, type PdfLine } from "./approvalPdf";
 import { shareBoqPdf, type BoqPdfRecord } from "./boqPdf";
 
@@ -69,9 +72,76 @@ function formatPreviewValue(value: unknown): string {
   return str;
 }
 
+type Bank = { BId: number; BName: string; BBranch?: string; BAccountLast4?: string };
+
+function PaymentModePicker({ modes, selected, onSelect }: {
+  modes: string[];
+  selected: string;
+  onSelect: (m: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <PickerField
+        label="Payment mode"
+        value={selected}
+        placeholder="Select payment mode"
+        onPress={() => setOpen(true)}
+        wide
+        disabled={modes.length === 0}
+      />
+      <SheetPicker visible={open} title="Payment mode" onClose={() => setOpen(false)}>
+        {modes.map((m) => (
+          <OptionRow key={m} label={m} selected={selected === m} onPress={() => { onSelect(m); setOpen(false); }} />
+        ))}
+      </SheetPicker>
+    </>
+  );
+}
+
+function BankPicker({ label = "Company bank account", banks, selected, onSelect }: {
+  label?: string;
+  banks: Bank[];
+  selected: number | null;
+  onSelect: (id: number) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const chosen = banks.find((b) => b.BId === selected);
+  const displayValue = chosen
+    ? [chosen.BName, chosen.BAccountLast4 ? `····${chosen.BAccountLast4}` : null].filter(Boolean).join(" · ")
+    : "";
+  return (
+    <>
+      <PickerField
+        label={label}
+        value={displayValue}
+        placeholder="Select bank account"
+        onPress={() => setOpen(true)}
+        wide
+      />
+      <SheetPicker visible={open} title={label} onClose={() => setOpen(false)}>
+        {banks.map((b) => (
+          <OptionRow
+            key={b.BId}
+            label={b.BName}
+            sub={[b.BBranch, b.BAccountLast4 ? `····${b.BAccountLast4}` : null].filter(Boolean).join(" · ") || undefined}
+            selected={selected === b.BId}
+            onPress={() => { onSelect(b.BId); setOpen(false); }}
+          />
+        ))}
+      </SheetPicker>
+    </>
+  );
+}
+
 export function ApprovalInboxDetailModal({
-  item, onClose, onActionDone,
-}: { item: InboxItem | null; onClose: () => void; onActionDone: (recordId: string, module: string) => void }) {
+  item, onClose, onActionDone, onOpenBooking,
+}: {
+  item: InboxItem | null;
+  onClose: () => void;
+  onActionDone: (recordId: string, module: string) => void;
+  onOpenBooking?: (bookingId: number, title?: string) => void;
+}) {
   const insets = useSafeAreaInsets();
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(false);
@@ -80,8 +150,45 @@ export function ApprovalInboxDetailModal({
   const [rejectNote, setRejectNote] = useState("");
   const [acting, setActing] = useState<"approve" | "reject" | "confirm" | null>(null);
   const [downloading, setDownloading] = useState(false);
+  const [financeBank, setFinanceBank] = useState<number | null>(null);
+  const [financeMode, setFinanceMode] = useState<string>("");
+  const [receivedPaymentBank, setReceivedPaymentBank] = useState<number | null>(null);
 
   const cfg = item ? MODULE_CONFIG[item.Module] : undefined;
+  const isFinanceRefund = item?.Module === FINANCE_APPROVE_MODULE;
+  const isBookingApproval = item ? OPEN_BOOKING_MODULES.has(item.Module) : false;
+
+  const isReceivedPayment = item?.Module === "received-payment";
+  // Computed early (before early return) so queries can use it in their enabled flag.
+  const bankReviewBlocked = item ? needsBankReview(item) : false;
+
+  // Finance refund and received-payment both need a project bank picker.
+  // received-payment detail uses RPProjectId; refund uses ProjectId.
+  const projectId = detail
+    ? (detail.ProjectId ?? detail.projectId ?? detail.RPProjectId ?? null)
+    : null;
+  const needsBankPicker = (isFinanceRefund || (isReceivedPayment && bankReviewBlocked)) && !!projectId;
+  const { data: projectBanks } = useQuery<{ BId: number; BName: string; BBranch?: string; BAccountLast4?: string }[]>({
+    queryKey: ["project-banks", projectId],
+    queryFn: async () => {
+      const res = await fetchWithAuth(`/api/crm/project-banks/for-project/${projectId}?excludeCash=1`);
+      if (!res.ok) return [];
+      const d = await res.json().catch(() => []);
+      return Array.isArray(d) ? d : [];
+    },
+    enabled: needsBankPicker,
+  });
+  const { data: paymentModes } = useQuery<string[]>({
+    queryKey: ["finance-payment-modes"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/crm/refunds/payment-modes");
+      if (!res.ok) return [];
+      const d = await res.json().catch(() => ({}));
+      // Response is { modes: string[], transfer: string[] }
+      return Array.isArray(d?.modes) ? d.modes : [];
+    },
+    enabled: isFinanceRefund,
+  });
 
   useEffect(() => {
     if (!item) return;
@@ -89,6 +196,9 @@ export function ApprovalInboxDetailModal({
     setFetchFailed(false);
     setRejecting(false);
     setRejectNote("");
+    setFinanceBank(null);
+    setFinanceMode("");
+    setReceivedPaymentBank(null);
     if (!cfg?.apiEndpoint) return;
     setLoading(true);
     let cancelled = false;
@@ -161,14 +271,17 @@ export function ApprovalInboxDetailModal({
   const pending = item.Status === "Pending";
   const engineerConfirm = item.Module === "work-allocation-engineer";
   const notYourLevel = pending && item._canAct === false;
-  const approveBlockedNote = needsBankReview(item) ? "Waiting for Accounts to set the deposit bank on the Received Payment page (web app)." : REVIEW_INSTEAD[item.Module];
 
   const doAction = async (action: "approve" | "reject") => {
     setActing(action);
     try {
+      const approveBody = (action === "approve" && isFinanceRefund)
+        ? { RefundBankLHeadId: financeBank ?? undefined, PaymentMode: financeMode || undefined }
+        : undefined;
       await runApprovalAction(cfg?.apiEndpoint ?? `/api/${item.Module}`, item.RecordId, action, {
         note: action === "reject" ? rejectNote : undefined,
         actionPathSuffix: SUB_GATE_SUFFIX[item.Module],
+        approveBody,
       });
       onActionDone(item.RecordId, item.Module);
       onClose();
@@ -217,24 +330,74 @@ export function ApprovalInboxDetailModal({
         </View>
       </>,
     )
-  ) : (
+  ) : bankReviewBlocked ? (
+    foot(
+      <View style={{ flexDirection: "row", gap: 10 }}>
+        <Key tone="red" label="Reject" icon={<XCircle size={13} color="#ffffff" />} onPress={() => setRejecting(true)} disabled={acting !== null} />
+        <Key
+          tone="ink"
+          label={acting === "approve" ? "Saving…" : "Set Bank & Approve"}
+          icon={<CheckCircle2 size={13} color={S.paper} />}
+          onPress={async () => {
+            if (!receivedPaymentBank) {
+              Alert.alert("Select a deposit bank", "Pick the bank account the cheque will be deposited to before approving.");
+              return;
+            }
+            setActing("approve");
+            try {
+              await setReceivedPaymentDepositBank(item.RecordId, receivedPaymentBank);
+              await runApprovalAction(cfg?.apiEndpoint ?? "/api/received-payment", item.RecordId, "approve", {
+                actionPathSuffix: SUB_GATE_SUFFIX[item.Module],
+              });
+              onActionDone(item.RecordId, item.Module);
+              onClose();
+            } catch (e: any) {
+              Alert.alert("Could not complete", e.message || "Something went wrong.");
+            } finally {
+              setActing(null);
+            }
+          }}
+          disabled={acting !== null}
+          style={{ flex: 1 }}
+        />
+      </View>,
+    )
+  ) : isBookingApproval ? (
     foot(
       <>
-        {!!approveBlockedNote ? (
-          <>
-            <View style={{ borderRadius: 10, borderWidth: 1, borderColor: "rgba(245,158,11,0.35)", backgroundColor: "rgba(245,158,11,0.08)", padding: 12, gap: 3 }}>
-              <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 13, color: S.ink }}>{"Approval requires the web app"}</Text>
-              <Body size={12.5} color={S.ink2}>{approveBlockedNote}</Body>
-            </View>
-            <Key tone="red" label="Reject" icon={<XCircle size={13} color="#ffffff" />} onPress={() => setRejecting(true)} disabled={acting !== null} style={{ alignSelf: "flex-start", minWidth: 110 }} />
-          </>
-        ) : (
-          <View style={{ flexDirection: "row", gap: 10 }}>
-            <Key tone="red" label="Reject" icon={<XCircle size={13} color="#ffffff" />} onPress={() => setRejecting(true)} disabled={acting !== null} />
-            <Key tone="ink" label={acting === "approve" ? "Approving…" : "Approve"} icon={<CheckCircle2 size={13} color={S.paper} />} onPress={() => doAction("approve")} disabled={acting !== null} style={{ flex: 1 }} />
-          </View>
-        )}
+        <View style={{ borderRadius: 10, borderWidth: 1, borderColor: S.line15, backgroundColor: S.wash, padding: 12, gap: 4 }}>
+          <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 13, color: S.ink }}>{"Review booking before approving"}</Text>
+          <Body size={12.5} color={S.ink2}>{"Open the booking to check the figures, documents, and payment schedule — then approve or reject from there."}</Body>
+        </View>
+        <View style={{ flexDirection: "row", gap: 10 }}>
+          <Key tone="red" label="Reject" icon={<XCircle size={13} color="#ffffff" />} onPress={() => setRejecting(true)} disabled={acting !== null} />
+          <Key
+            tone="ink"
+            label="Open Booking"
+            icon={<Home size={13} color={S.paper} />}
+            onPress={() => {
+              onClose();
+              onOpenBooking?.(Number(item.RecordId), item.Reference ?? undefined);
+            }}
+            disabled={acting !== null}
+            style={{ flex: 1 }}
+          />
+        </View>
       </>,
+    )
+  ) : (
+    foot(
+      <View style={{ flexDirection: "row", gap: 10 }}>
+        <Key tone="red" label="Reject" icon={<XCircle size={13} color="#ffffff" />} onPress={() => setRejecting(true)} disabled={acting !== null} />
+        <Key
+          tone="ink"
+          label={acting === "approve" ? "Approving…" : isFinanceRefund ? "Approve Refund" : "Approve"}
+          icon={<CheckCircle2 size={13} color={S.paper} />}
+          onPress={() => doAction("approve")}
+          disabled={acting !== null}
+          style={{ flex: 1 }}
+        />
+      </View>,
     )
   );
 
@@ -286,6 +449,32 @@ export function ApprovalInboxDetailModal({
           <InfoGrid items={extraFields.map(([k, v]) => ({ label: labelizeKey(k), value: formatPreviewValue(v) }))} />
         )}
       </Panel>
+
+      {/* Received payment: Accounts picks the deposit bank before approving. */}
+      {isReceivedPayment && pending && bankReviewBlocked && !notYourLevel && (
+        <Panel title="Deposit bank" icon={<Banknote size={14} color={S.ink} />}>
+          <Body size={12.5} color={S.ink2}>{"The cheque is received — pick the company bank account it will be deposited to. This is saved and the payment is approved in one step."}</Body>
+          {!projectId ? (
+            <Body size={12.5} color={S.graphite}>{loading ? "Loading payment details…" : "Could not read the project — set the deposit bank from the web app."}</Body>
+          ) : projectBanks && projectBanks.length > 0 ? (
+            <BankPicker banks={projectBanks} selected={receivedPaymentBank} onSelect={setReceivedPaymentBank} />
+          ) : (
+            <Body size={12.5} color={S.graphite}>{"Loading bank accounts…"}</Body>
+          )}
+        </Panel>
+      )}
+
+      {/* Finance refund: bank + payment-mode pickers live in the scrollable body so they don't overflow a fixed footer. */}
+      {isFinanceRefund && pending && !notYourLevel && (
+        <Panel title="Refund payout details" icon={<Banknote size={14} color={S.ink} />}>
+          {projectBanks && projectBanks.length > 0 ? (
+            <BankPicker banks={projectBanks} selected={financeBank} onSelect={setFinanceBank} />
+          ) : (
+            <Body size={12.5} color={S.graphite}>{!projectId ? (loading ? "Loading refund details…" : "No project — pick bank on web") : "Loading banks…"}</Body>
+          )}
+          <PaymentModePicker modes={paymentModes ?? []} selected={financeMode} onSelect={setFinanceMode} />
+        </Panel>
+      )}
 
       {!pending && (
         <Text style={{ fontFamily: fonts.body.regular, fontSize: 12, color: S.graphite }}>{`This record is ${item.Status.toLowerCase()}; there is nothing to act on.`}</Text>
