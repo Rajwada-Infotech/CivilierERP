@@ -26,7 +26,8 @@ export type CrmOpen =
   | { to: "cancellation"; cancellationId: number; title: string }
   | { to: "refund"; refundId: number; title: string }
   | { to: "invoice"; invoiceId: number; title: string }
-  | { to: "resale"; resaleId: number; title: string };
+  | { to: "resale"; resaleId: number; title: string }
+  | { to: "money-receipt"; receiptId: number; title: string };
 
 /** Welcome-call outcomes and their words — the web's (src/pages/CRM/welcomeCalls/config.tsx OUTCOMES / OUTCOME_LABEL),
  * the server's list (crmWelcomeCalls.js OUTCOMES). */
@@ -294,7 +295,7 @@ export const CRM_REGISTERS: CrmRegister[] = [
       joinDot(fmtDate(r.ReceivedDate), r.PaymentMode, r.ChequeNo || r.TransactionRef),
       r.BouncedReason ? `Bounced: ${r.BouncedReason}` : r.RPRejectionNote && `Sent back: ${r.RPRejectionNote}`,
     ],
-    open: (r) => ({ to: "document", path: `/api/crm/money-receipts/${r.Id}/pdf`, name: r.ReceiptNo || "Money Receipt" }),
+    open: (r) => ({ to: "money-receipt" as const, receiptId: Number(r.Id), title: r.ReceiptNo || "Money Receipt" }),
     dateOf: (r) => r.ReceivedDate, amountOf: (r) => r.Amount,
     empty: "No money receipts.",
   },
