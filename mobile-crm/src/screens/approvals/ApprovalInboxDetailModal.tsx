@@ -220,13 +220,20 @@ export function ApprovalInboxDetailModal({
   ) : (
     foot(
       <>
-        {!!approveBlockedNote && <Body size={12} color={S.graphite}>{approveBlockedNote}</Body>}
-        <View style={{ flexDirection: "row", gap: 10 }}>
-          <Key tone="red" label="Reject" icon={<XCircle size={13} color="#ffffff" />} onPress={() => setRejecting(true)} disabled={acting !== null} style={{ flex: approveBlockedNote ? 1 : undefined }} />
-          {!approveBlockedNote && (
+        {!!approveBlockedNote ? (
+          <>
+            <View style={{ borderRadius: 10, borderWidth: 1, borderColor: "rgba(245,158,11,0.35)", backgroundColor: "rgba(245,158,11,0.08)", padding: 12, gap: 3 }}>
+              <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 13, color: S.ink }}>{"Approval requires the web app"}</Text>
+              <Body size={12.5} color={S.ink2}>{approveBlockedNote}</Body>
+            </View>
+            <Key tone="red" label="Reject" icon={<XCircle size={13} color="#ffffff" />} onPress={() => setRejecting(true)} disabled={acting !== null} style={{ alignSelf: "flex-start", minWidth: 110 }} />
+          </>
+        ) : (
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            <Key tone="red" label="Reject" icon={<XCircle size={13} color="#ffffff" />} onPress={() => setRejecting(true)} disabled={acting !== null} />
             <Key tone="ink" label={acting === "approve" ? "Approving…" : "Approve"} icon={<CheckCircle2 size={13} color={S.paper} />} onPress={() => doAction("approve")} disabled={acting !== null} style={{ flex: 1 }} />
-          )}
-        </View>
+          </View>
+        )}
       </>,
     )
   );

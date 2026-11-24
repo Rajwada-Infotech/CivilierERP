@@ -14,7 +14,7 @@ import { sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { formatINR } from "@/utils/formatCurrency";
 import { fetchInbox, type InboxItem } from "@/api/approvalInboxApi";
-import { Body, IconKey, Key, Label, Notice, Press, SearchBox, SheetMark, SheetShell, StatRow, statusTone } from "@/components/sheet/Sheet";
+import { Body, IconKey, Key, Label, Notice, Press, SearchBox, SheetMark, SheetShell, statusTone } from "@/components/sheet/Sheet";
 import { OptionRow, SheetPicker } from "@/components/sheet/FormParts";
 import { RegisterBox, RegisterLoading, SheetPage, fmtDate } from "@/components/sheet/Register";
 import { ALL_MODULES, CATEGORY_LABEL, CATEGORY_ORDER, DISPLAY_GROUP, MODULE_CONFIG, categoryOf, moduleOrderOf, type CategoryId } from "./approvalInboxConfig";
@@ -23,33 +23,34 @@ import { ApprovalInboxDetailModal } from "./ApprovalInboxDetailModal";
 const statusText = (item: InboxItem) => (item._stage ? `${item.Status} · ${item._stage.label}` : item.Status);
 const markOf = (status?: string | null) => (/draft/i.test(status || "") ? "draft" : statusTone(status || "Pending")) as "draft" | "done" | "waiting" | "stopped";
 
-function InboxRow({ item, onPress, last }: { item: InboxItem; onPress: () => void; last: boolean }) {
+function InboxRow({ item, onPress }: { item: InboxItem; onPress: () => void }) {
   const party = item.SupplierName || item.ContractorName || item.CreatedBy || "—";
   const activity = item.Module === "civilworkdpr-approval" ? item.ActivityName?.trim() || null : null;
   const transfer = item.Module === "goods-receipt" && item.SourceTransferDocNo;
   return (
     <Press
       onPress={onPress}
-      style={(pressed) => ({ paddingVertical: 11, paddingLeft: 30, paddingRight: 4, gap: 5, borderBottomWidth: last ? 0 : 1, borderBottomColor: S.ruleSoft, backgroundColor: pressed ? S.blueWash : "transparent" })}
+      style={(pressed) => ({ marginTop: 8, borderRadius: 10, borderWidth: 1, borderColor: S.line15, backgroundColor: pressed ? S.blueWash : S.paper, padding: 12, gap: 6 })}
     >
       <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
-        <Text style={{ flex: 1, minWidth: 0, fontFamily: fonts.heading.semibold, fontSize: 13, letterSpacing: 0.2, color: S.ink }}>
+        <Text style={{ flex: 1, minWidth: 0, fontFamily: fonts.heading.semibold, fontSize: 13, color: S.ink }}>
           {item.Reference || `#${item.RecordId}`}
-          <Text style={{ color: S.graphite, fontFamily: fonts.body.regular, fontSize: 11.5, letterSpacing: 0 }}>{`  ${fmtDate(item.RecordDate)}`}</Text>
+          {"  "}
+          <Text style={{ fontFamily: fonts.body.regular, fontSize: 11, color: S.graphite }}>{fmtDate(item.RecordDate)}</Text>
         </Text>
         {/* A material request has no amount (pricing comes with its PO): no "₹0.00". */}
         {item.Amount != null ? (
-          <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 13.5, color: S.ink, fontVariant: ["tabular-nums"] }}>{formatINR(item.Amount, { decimals: 2 })}</Text>
+          <Text style={{ fontFamily: fonts.heading.bold, fontSize: 14, color: S.ink, fontVariant: ["tabular-nums"] }}>{formatINR(item.Amount, { decimals: 0 })}</Text>
         ) : activity ? (
           <Text numberOfLines={1} style={{ maxWidth: "45%", fontFamily: fonts.body.medium, fontSize: 12, color: S.ink }}>{activity}</Text>
         ) : null}
       </View>
-      <Text numberOfLines={1} style={{ fontFamily: fonts.body.medium, fontSize: 12.5, color: S.ink2 }}>
+      <Text numberOfLines={1} style={{ fontFamily: fonts.body.regular, fontSize: 12.5, color: S.ink2 }}>
         {transfer ? `Transfer ${item.SourceTransferDocNo}${item.FromGodownName && item.ToGodownName ? ` · ${item.FromGodownName} → ${item.ToGodownName}` : ""}` : party}
       </Text>
-      <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 12 }}>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
         <SheetMark text={statusText(item)} tone={markOf(item.Status)} />
-        {item.Status === "Pending" && item._canAct === false && <Label>{`Waiting on level ${item._currentLevel}${item._totalLevels ? ` of ${item._totalLevels}` : ""}`}</Label>}
+        {item.Status === "Pending" && item._canAct === false && <Label>{`Waiting · level ${item._currentLevel}${item._totalLevels ? `/${item._totalLevels}` : ""}`}</Label>}
         {!!item.RejectedBy && <Label color={S.red}>{`Rejected · ${item.RejectedBy}`}</Label>}
       </View>
     </Press>
@@ -74,8 +75,6 @@ export default function ApprovalInboxScreen() {
   });
 
   // A fresh fetch is the truth about what is pending, so the rows hidden on approve / reject come back into its hands.
-  // (A Civil Work DPR rung keeps its id across rework attempts: without this, rejecting attempt 1 hid attempt 2 for the
-  // rest of the session.)
   const lastFetch = useRef(dataUpdatedAt);
   useEffect(() => {
     if (dataUpdatedAt !== lastFetch.current) {
@@ -114,6 +113,21 @@ export default function ApprovalInboxScreen() {
     [items],
   );
 
+  // Auto-expand Sales / CRM modules once — most relevant category in this app.
+  const hasAutoExpanded = useRef(false);
+  useEffect(() => {
+    if (!isLoading && grouped.length > 0 && !hasAutoExpanded.current) {
+      hasAutoExpanded.current = true;
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        grouped.forEach(({ cat, modules }) => {
+          if (cat === "sales") modules.forEach(([mod]) => next.add(`${cat}:${mod}`));
+        });
+        return next;
+      });
+    }
+  }, [isLoading, grouped]);
+
   const countOf = (mod: string) => allItems.filter((i) => i.Module === mod).length;
   const toggle = (key: string) =>
     setExpanded((prev) => {
@@ -136,13 +150,16 @@ export default function ApprovalInboxScreen() {
           subtitle="Every record waiting on your approval, across all modules, grouped by the kind of document."
           action={<Key label={isFetching ? "Reading…" : "Refresh"} icon={<RefreshCw size={13} color={S.ink} />} onPress={() => void refetch()} disabled={isFetching} style={{ alignSelf: "flex-start" }} />}
         >
-          <StatRow
-            items={[
-              { label: "Waiting", value: isLoading ? "…" : allItems.length.toLocaleString("en-IN"), note: allItems.length ? "records for you to act on" : "nothing waiting" },
-              { label: "Types", value: isLoading ? "…" : String(new Set(allItems.map((i) => i.Module)).size), note: "kinds of document waiting" },
-              { label: "Showing", value: isLoading ? "…" : items.length.toLocaleString("en-IN"), note: filtering ? "after search and filter" : "everything" },
-            ]}
-          />
+          <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8, paddingVertical: 4 }}>
+            <Text style={{ fontFamily: fonts.heading.bold, fontSize: 28, color: S.ink, fontVariant: ["tabular-nums"] }}>
+              {isLoading ? "…" : (filtering ? items : allItems).length.toLocaleString("en-IN")}
+            </Text>
+            <Text style={{ fontFamily: fonts.body.regular, fontSize: 13, color: S.graphite }}>
+              {isLoading ? "" : filtering
+                ? `showing · ${allItems.length} total across ${new Set(allItems.map((i) => i.Module)).size} types`
+                : `waiting across ${new Set(allItems.map((i) => i.Module)).size} types`}
+            </Text>
+          </View>
 
           <RegisterBox>
             <SearchBox value={docSearch} onChange={setDocSearch} placeholder="Search by document number (e.g. JV-2026-00067)…" />
@@ -181,14 +198,17 @@ export default function ApprovalInboxScreen() {
                 </Body>
               </View>
             ) : (
-              <View style={{ borderTopWidth: 1, borderTopColor: S.rule }}>
+              <View>
                 {grouped.map(({ cat, count, modules }) => (
                   <View key={cat}>
                     {/* The category heading only when the list spans more than one. */}
                     {grouped.length > 1 && (
-                      <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: S.ruleSoft }}>
-                        <Label color={S.ink}>{CATEGORY_LABEL[cat as CategoryId]}</Label>
-                        <Label>{String(count)}</Label>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, paddingTop: 16 }}>
+                        <Text style={{ fontFamily: fonts.heading.bold, fontSize: 10.5, color: S.graphite, letterSpacing: 0.8, textTransform: "uppercase" }}>
+                          {CATEGORY_LABEL[cat as CategoryId]}
+                        </Text>
+                        <View style={{ flex: 1, height: 1, backgroundColor: S.ruleSoft }} />
+                        <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 11, color: S.graphite }}>{count}</Text>
                       </View>
                     )}
                     {modules.map(([mod, modItems]) => {
@@ -197,21 +217,21 @@ export default function ApprovalInboxScreen() {
                       const cfg = MODULE_CONFIG[mod];
                       const Icon = cfg?.icon ?? ClipboardCheck;
                       return (
-                        <View key={key} style={{ borderBottomWidth: 1, borderBottomColor: S.line15 }}>
+                        <View key={key} style={{ borderBottomWidth: 1, borderBottomColor: S.ruleSoft, paddingBottom: open ? 10 : 0 }}>
                           <Press
                             onPress={() => toggle(key)}
-                            style={(pressed) => ({ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, backgroundColor: pressed ? S.blueWash : "transparent" })}
+                            style={(pressed) => ({ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 12, backgroundColor: pressed ? S.blueWash : "transparent" })}
                           >
-                            {open ? <ChevronDown size={13} color={S.graphite} /> : <ChevronRight size={13} color={S.graphite} />}
-                            <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: S.blueTint, alignItems: "center", justifyContent: "center" }}>
-                              <Icon size={15} color={S.blue} />
+                            {open ? <ChevronDown size={14} color={S.graphite} /> : <ChevronRight size={14} color={S.graphite} />}
+                            <View style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: S.blueTint, alignItems: "center", justifyContent: "center" }}>
+                              <Icon size={16} color={S.blue} />
                             </View>
-                            <Text numberOfLines={1} style={{ flex: 1, fontFamily: fonts.body.semibold, fontSize: 13.5, color: S.ink }}>{cfg?.label ?? modItems[0]?.ModuleLabel ?? mod}</Text>
-                            <View style={{ borderRadius: 999, backgroundColor: S.wash, paddingHorizontal: 8, paddingVertical: 2 }}>
-                              <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 10.5, color: S.graphite, fontVariant: ["tabular-nums"] }}>{modItems.length}</Text>
+                            <Text numberOfLines={1} style={{ flex: 1, fontFamily: fonts.heading.semibold, fontSize: 14, color: S.ink }}>{cfg?.label ?? modItems[0]?.ModuleLabel ?? mod}</Text>
+                            <View style={{ borderRadius: 999, backgroundColor: S.blueTint, paddingHorizontal: 9, paddingVertical: 3 }}>
+                              <Text style={{ fontFamily: fonts.heading.bold, fontSize: 11, color: S.blue, fontVariant: ["tabular-nums"] }}>{modItems.length}</Text>
                             </View>
                           </Press>
-                          {open && modItems.map((item, i) => <InboxRow key={`${item.Module}-${item.RecordId}`} item={item} last={i === modItems.length - 1} onPress={() => setSelected(item)} />)}
+                          {open && modItems.map((item) => <InboxRow key={`${item.Module}-${item.RecordId}`} item={item} onPress={() => setSelected(item)} />)}
                         </View>
                       );
                     })}
