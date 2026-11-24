@@ -45,6 +45,7 @@ export function useCrmOpen() {
     else if (o.to === "oc-cc-board") nav.navigate("CrmOcCcBoard", undefined);
     else if (o.to === "cancellation") nav.navigate("CrmCancellation", { cancellationId: o.cancellationId, title: o.title });
     else if (o.to === "refund") nav.navigate("CrmRefund", { refundId: o.refundId, title: o.title });
+    else if (o.to === "invoice") nav.navigate("CrmInvoice", { invoiceId: o.invoiceId, title: o.title });
     else openDocument(o.path, o.name).catch((e: Error) => Alert.alert("Could not open", e.message));
   };
 }
