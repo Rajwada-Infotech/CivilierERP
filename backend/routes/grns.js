@@ -1363,8 +1363,10 @@ router.post("/", requirePageRight("grn-master", "create"), validateBody(grnBodyS
   try {
     const userEmail = req.user?.email || req.user?.name || null;
     const pool = getPool();
-    if (req.projectScope && req.body?.POID && !projectAllowed(req.projectScope, await poProjectOf(parseInt(req.body.POID, 10)))) {
-      return res.status(403).json({ error: "You don't have access to this project." });
+    // A GRN's project is its PO's: a project-restricted user must raise it against a PO of their projects
+    // (a GRN without a PO has no project and would be hidden from them once saved).
+    if (req.projectScope && (!req.body?.POID || !projectAllowed(req.projectScope, await poProjectOf(parseInt(req.body.POID, 10))))) {
+      return res.status(403).json({ error: req.body?.POID ? "You don't have access to this project." : "Select a Purchase Order of your project." });
     }
     const { GRNID: grnId, DocNo: docNo } = await createGRNInternal(pool, req.body, userEmail);
     const grnNo = docNo;
@@ -1478,6 +1480,11 @@ router.put(
     }
 
     const pool = getPool();
+
+    // Project access: re-linking may not move the GRN to a PO outside the user's projects (or to no PO).
+    if (req.projectScope && (!poId || !projectAllowed(req.projectScope, await poProjectOf(parseInt(poId, 10))))) {
+      return res.status(403).json({ error: poId ? "You don't have access to this project." : "Select a Purchase Order of your project." });
+    }
 
     // ── Guard: a GRN can only be linked to an Approved PO ──────────────────────
     if (poId) {
@@ -2643,7 +2650,7 @@ router.post(
         SELECT
           st.TransferID, st.DocNo, st.TransferDate,
           st.FromGodownID, fg.GodownName AS FromGodownName,
-          st.ToGodownID,   tg.GodownName AS ToGodownName,
+          st.ToGodownID,   tg.GodownName AS ToGodownName, tg.ProjectID AS ToProjectId,
           st.TransferItems, st.Status
         FROM dbo.StockTransfers st
         JOIN dbo.Godowns fg ON fg.GodownID = st.FromGodownID
@@ -2656,6 +2663,11 @@ router.post(
       }
 
       transfer = trResult.recordset[0];
+
+      // Project access: the receiving godown's project must be one of the user's.
+      if (req.projectScope && !projectAllowed(req.projectScope, transfer.ToProjectId)) {
+        return res.status(403).json({ error: "You don't have access to this project." });
+      }
 
       // Parse TransferItems JSON
       if (
