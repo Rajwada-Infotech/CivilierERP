@@ -39,6 +39,7 @@ import CrmRefundScreen from "@/screens/crm/CrmRefundScreen";
 import CrmInvoiceScreen from "@/screens/crm/CrmInvoiceScreen";
 import CrmResaleScreen from "@/screens/crm/CrmResaleScreen";
 import CrmMoneyReceiptScreen from "@/screens/crm/CrmMoneyReceiptScreen";
+import CrmBrokerageScreen from "@/screens/crm/CrmBrokerageScreen";
 import Customer360Screen from "@/screens/crm/Customer360Screen";
 import TicketScreen from "@/screens/crm/TicketScreen";
 import { NewTicketScreen, CustomerFormScreen, ApplicationFormScreen, WelcomeChecklistScreen, PossessionScreen, PaymentScreen, WelcomeCallScreen } from "@/screens/crm/CrmForms";
@@ -95,6 +96,7 @@ export type MainStackParamList = {
   CrmInvoice: { invoiceId: number; title?: string };
   CrmResale: { resaleId: number; title?: string };
   CrmMoneyReceipt: { receiptId: number; title?: string };
+  CrmBrokerage: { brokerageId: number; title?: string };
 };
 
 const Stack = createNativeStackNavigator<MainStackParamList>();
@@ -214,6 +216,7 @@ export default function MainStack() {
         <Stack.Screen name="CrmInvoice" component={CrmInvoiceScreen} options={({ route }) => ({ title: route.params.title || "Invoice" })} />
         <Stack.Screen name="CrmResale" component={CrmResaleScreen} options={({ route }) => ({ title: route.params.title || "Resale" })} />
         <Stack.Screen name="CrmMoneyReceipt" component={CrmMoneyReceiptScreen} options={({ route }) => ({ title: route.params.title || "Money Receipt" })} />
+        <Stack.Screen name="CrmBrokerage" component={CrmBrokerageScreen} options={({ route }) => ({ title: route.params.title || "Brokerage" })} />
       </Stack.Navigator>
     </ShellMenusProvider>
   );

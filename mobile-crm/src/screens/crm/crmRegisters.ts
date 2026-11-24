@@ -27,7 +27,8 @@ export type CrmOpen =
   | { to: "refund"; refundId: number; title: string }
   | { to: "invoice"; invoiceId: number; title: string }
   | { to: "resale"; resaleId: number; title: string }
-  | { to: "money-receipt"; receiptId: number; title: string };
+  | { to: "money-receipt"; receiptId: number; title: string }
+  | { to: "brokerage"; brokerageId: number; title: string };
 
 /** Welcome-call outcomes and their words — the web's (src/pages/CRM/welcomeCalls/config.tsx OUTCOMES / OUTCOME_LABEL),
  * the server's list (crmWelcomeCalls.js OUTCOMES). */
@@ -474,7 +475,8 @@ export const CRM_REGISTERS: CrmRegister[] = [
       joinDot(r.ProjectName, r.BookingNo),
     ],
     searchIn: (r) => [r.BrokerName, r.ApplicantName, r.BookingNo, r.UnitNo, r.ProjectName, r.Status],
-    open: toBooking, amountOf: (r) => r.ComputedAmount,
+    open: (r) => ({ to: "brokerage" as const, brokerageId: Number(r.Id), title: r.BrokerName || r.BookingNo || "Brokerage" }),
+    amountOf: (r) => r.ComputedAmount,
     empty: "No brokerage records.",
   },
   {
