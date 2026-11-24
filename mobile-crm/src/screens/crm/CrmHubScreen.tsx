@@ -74,7 +74,11 @@ export default function CrmHubScreen() {
       {CRM_GROUPS.map((g) => {
         const items: MenuItem[] = lists.filter((r) => r.group === g).map((r) => ({
           key: r.key, label: r.label, sub: lineOf(r.key), icon: r.icon,
-          onPress: () => nav.navigate("CrmRegister", { register: r.key }),
+          onPress: () => {
+            if (r.key === "unit-matrix") { nav.navigate("CrmUnitMatrix"); return; }
+            if (r.key === "parking-matrix") { nav.navigate("CrmParkingMatrix"); return; }
+            nav.navigate("CrmRegister", { register: r.key });
+          },
         }));
         if (!items.length) return null;
         return (
@@ -86,9 +90,6 @@ export default function CrmHubScreen() {
       })}
 
       {!seesDashboard && !lists.length ? <Empty text="You don't have a right on any CRM page. Ask your admin for Menu Rights." /> : null}
-      <Text style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: b.textSecondary, textAlign: "center", marginTop: 6 }}>
-        Agreements, deeds, invoices and refunds are worked on the web.
-      </Text>
     </Page>
   );
 }

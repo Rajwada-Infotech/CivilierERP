@@ -25,6 +25,8 @@ import ServiceRequestsScreen from "@/screens/tickets/ServiceRequestsScreen";
 import ApprovalInboxScreen from "@/screens/approvals/ApprovalInboxScreen";
 import CrmHubScreen from "@/screens/crm/CrmHubScreen";
 import CrmRegisterScreen from "@/screens/crm/CrmRegisterScreen";
+import UnitMatrixScreen from "@/screens/crm/UnitMatrixScreen";
+import ParkingMatrixScreen from "@/screens/crm/ParkingMatrixScreen";
 import BookingDetailScreen from "@/screens/crm/BookingDetailScreen";
 import Customer360Screen from "@/screens/crm/Customer360Screen";
 import TicketScreen from "@/screens/crm/TicketScreen";
@@ -59,6 +61,8 @@ export type MainStackParamList = {
   // CRM (screens/crm): any list from crmRegisters.ts, one booking, one customer, one ticket, and the
   // forms that change something (CrmForms.tsx).
   CrmRegister: { register: string };
+  CrmUnitMatrix: undefined;
+  CrmParkingMatrix: undefined;
   CrmBooking: { bookingId: number; title?: string };
   CrmCustomer: { customerId: number; title?: string };
   CrmTicket: { ticketId: number };
@@ -165,6 +169,8 @@ export default function MainStack() {
         <Stack.Screen name="Attendance" component={AttendanceScreen} options={{ title: "Security Attendance" }} />
         <Stack.Screen name="Electricity" component={ElectricityScreen} options={{ title: "Electricity Maintenance" }} />
         <Stack.Screen name="CrmRegister" component={CrmRegisterScreen} options={({ route }) => ({ title: (pairParent(route.params.register) ?? registerByKey(route.params.register))?.label ?? "CRM" })} />
+        <Stack.Screen name="CrmUnitMatrix" component={UnitMatrixScreen} options={{ title: "Unit Matrix" }} />
+        <Stack.Screen name="CrmParkingMatrix" component={ParkingMatrixScreen} options={{ title: "Parking Matrix" }} />
         <Stack.Screen name="CrmBooking" component={BookingDetailScreen} options={({ route }) => ({ title: route.params.title || "Booking" })} />
         <Stack.Screen name="CrmCustomer" component={Customer360Screen} options={{ title: "Customer 360" }} />
         <Stack.Screen name="CrmTicket" component={TicketScreen} options={{ title: "Service Ticket" }} />

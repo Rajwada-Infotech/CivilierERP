@@ -383,8 +383,8 @@ export const CRM_REGISTERS: CrmRegister[] = [
   },
   // ── Units & Parking ────────────────────────────────────────────────────────
   {
-    // unitMaster GET / (no page right, all users) has LockBookingNo + LockHoldId → derive status.
-    key: "unit-matrix", about: "All units with availability status", icon: Grid3x3, label: "Unit Availability", group: "Units & Parking", pages: ["crm-unit-matrix"], path: "/api/unit-master?isActive=1",
+    // Opens UnitMatrixScreen (custom nav in CrmHubScreen), not CrmRegisterScreen.
+    key: "unit-matrix", about: "All units with availability status", icon: Grid3x3, label: "Unit Matrix", group: "Units & Parking", pages: ["crm-unit-matrix"], path: "/api/unit-matrix",
     rows: list, id: (r) => String(r.Id),
     title: (r) => r.UnitName, sub: (r) => joinDot(r.ProjectName, r.BlockName, r.FloorNo != null && `Floor ${r.FloorNo}`),
     status: (r) => !r.IsActive ? "Blocked" : r.LockBookingNo ? "Booked" : r.LockHoldId ? "On Hold" : "Available",
@@ -398,8 +398,8 @@ export const CRM_REGISTERS: CrmRegister[] = [
     empty: "No units found.",
   },
   {
-    // parkingSlotMaster GET / (no page right) has LockBookingNo + LockHoldId.
-    key: "parking-matrix", about: "All parking slots with availability status", icon: Car, label: "Parking Availability", group: "Units & Parking", pages: ["crm-parking-matrix"], path: "/api/parking-slot-master",
+    // Opens ParkingMatrixScreen (custom nav in CrmHubScreen), not CrmRegisterScreen.
+    key: "parking-matrix", about: "Parking slots with availability status", icon: Car, label: "Parking Matrix", group: "Units & Parking", pages: ["crm-parking-matrix"], path: "/api/parking-matrix",
     rows: list, id: (r) => String(r.Id),
     title: (r) => r.SlotNo, sub: (r) => joinDot(r.ProjectName, r.BlockName, r.ParkingType),
     status: (r) => !r.IsActive ? "Blocked" : r.LockBookingNo ? "Booked" : r.LockHoldId ? "On Hold" : "Available",
