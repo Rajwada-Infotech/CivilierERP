@@ -14,7 +14,7 @@ import { useState } from "react";
 import { ActivityIndicator, ScrollView, Text, View } from "react-native";
 import { useRoute, type RouteProp } from "@react-navigation/native";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
-import { CalendarDays, FileText } from "lucide-react-native";
+import { CalendarDays, FileText, Users } from "lucide-react-native";
 import { useAuth } from "@/auth/AuthContext";
 import { crmGet, crmSend, type Row } from "@/api/crmApi";
 import { toast } from "@/components/Toast";
@@ -248,12 +248,26 @@ export default function CrmSaleDeedScreen() {
   const [showSchedule, setShowSchedule] = useState(false);
   const [showComplete, setShowComplete] = useState(false);
   const [busyReg, setBusyReg] = useState(false);
+  const [busyApproval, setBusyApproval] = useState(false);
+  const [rejectNote, setRejectNote] = useState("");
+  const [showReject, setShowReject] = useState<"senior" | "director" | null>(null);
+  const [directorNote, setDirectorNote] = useState("");
 
   const invalidate = () => {
     ["crm-deed-ctx", "crm-deed-ref", "crm-registry-booking", "crm-booking-legal-mil", "crm-booking"].forEach((k) =>
       qc.invalidateQueries({ queryKey: [k, bookingId] })
     );
     if (deedRefQ.data?.Id) qc.invalidateQueries({ queryKey: ["crm-deed-detail", deedRefQ.data.Id] });
+  };
+
+  const deedAction = async (path: string, body?: Record<string, unknown>, successMsg?: string) => {
+    setBusyApproval(true);
+    try {
+      await crmSend(path, "PUT", body);
+      toast.success(successMsg ?? "Done");
+      invalidate();
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setBusyApproval(false); }
   };
 
   const startRegistry = async () => {
@@ -355,6 +369,96 @@ export default function CrmSaleDeedScreen() {
           )
         )
       )}
+
+      {/* Approval chain actions */}
+      {deed && canEdit && deed.Status !== "Registered" && deed.Status !== "Cancelled" ? (() => {
+        const sa = deed.SeniorApprovalStatus as string | null;
+        const ca = deed.CustomerApprovalStatus as string | null;
+        const da = deed.DirectorApprovalStatus as string | null;
+        const sentAt = deed.SentToCustomerAt;
+        const deedId = deedRefQ.data!.Id;
+
+        // Which actions are live right now
+        const canSubmit = !sa || sa === "Rejected"; // null or Rejected → can submit
+        const canSrApprove = sa === "Pending" && !!sentAt === false; // before sent-to-customer
+        const canSrReject = sa === "Pending";
+        const canSendCustomer = sa === "Approved" && (!sentAt || ca === "Rejected" || ca === "RecheckRequested");
+        const canDirApprove = ca === "Approved" && da !== "Approved";
+        const canDirReject = ca === "Approved" && da !== "Approved";
+
+        if (!canSubmit && !canSrApprove && !canSrReject && !canSendCustomer && !canDirApprove && !canDirReject) return null;
+
+        return (
+          <Section title="Approval actions">
+            <View style={{ gap: 10 }}>
+              {/* Recheck remark from customer */}
+              {ca === "RecheckRequested" && deed.CustomerRecheckRemarks ? (
+                <View style={{ backgroundColor: b.warningSoft, borderRadius: 10, padding: 10 }}>
+                  <Text style={{ fontSize: 12, fontFamily: fonts.body.medium, color: b.textSecondary }}>Customer recheck request</Text>
+                  <Text style={{ fontSize: 13, fontFamily: fonts.body.regular, color: b.textPrimary, marginTop: 2 }}>{deed.CustomerRecheckRemarks as string}</Text>
+                </View>
+              ) : null}
+              {/* LastRecheckRemarks / rejection notes */}
+              {deed.LastRecheckRemarks ? (
+                <View style={{ backgroundColor: b.dangerSoft, borderRadius: 10, padding: 10 }}>
+                  <Text style={{ fontSize: 12, fontFamily: fonts.body.medium, color: b.textSecondary }}>Last rejection note</Text>
+                  <Text style={{ fontSize: 13, fontFamily: fonts.body.regular, color: b.textPrimary, marginTop: 2 }}>{deed.LastRecheckRemarks as string}</Text>
+                </View>
+              ) : null}
+
+              {/* Submit for Senior Approval */}
+              {canSubmit ? (
+                <ActionKey label={busyApproval ? "Submitting…" : sa === "Rejected" ? "Re-submit for Senior Approval" : "Submit for Senior Approval"}
+                  onPress={() => deedAction(`/api/crm/sales-deed/${deedId}/submit`, undefined, "Submitted for senior approval")} />
+              ) : null}
+
+              {/* Senior Approve / Reject */}
+              {canSrApprove ? (
+                <ActionKey label={busyApproval ? "Approving…" : "Senior Approve"}
+                  onPress={() => deedAction(`/api/crm/sales-deed/${deedId}/approve`, undefined, "Senior approval granted")} />
+              ) : null}
+              {canSrReject && showReject !== "senior" ? (
+                <ActionKey outline tone={b.danger} label="Senior Reject" onPress={() => setShowReject("senior")} />
+              ) : null}
+              {showReject === "senior" ? (
+                <View style={{ gap: 8 }}>
+                  <RemarksField label="Rejection note" value={rejectNote} onChangeText={setRejectNote} />
+                  <View style={{ flexDirection: "row", gap: 8 }}>
+                    <ActionKey tone={b.danger} label={busyApproval ? "Rejecting…" : "Confirm rejection"}
+                      onPress={() => { deedAction(`/api/crm/sales-deed/${deedId}/reject`, { Note: rejectNote }, "Deed rejected"); setShowReject(null); }} />
+                    <ActionKey outline label="Cancel" onPress={() => setShowReject(null)} />
+                  </View>
+                </View>
+              ) : null}
+
+              {/* Send to customer */}
+              {canSendCustomer ? (
+                <ActionKey icon={Users} label={busyApproval ? "Sending…" : sentAt ? "Resend to customer" : "Send to customer"}
+                  onPress={() => deedAction(`/api/crm/sales-deed/${deedId}/send-to-customer`, undefined, "Sent to customer")} />
+              ) : null}
+
+              {/* Director Approve / Reject */}
+              {canDirApprove ? (
+                <ActionKey label={busyApproval ? "Approving…" : "Director Approve"}
+                  onPress={() => deedAction(`/api/crm/sales-deed/${deedId}/director/approve`, directorNote ? { Remarks: directorNote } : undefined, "Director approval granted")} />
+              ) : null}
+              {canDirReject && showReject !== "director" ? (
+                <ActionKey outline tone={b.danger} label="Director Reject" onPress={() => setShowReject("director")} />
+              ) : null}
+              {showReject === "director" ? (
+                <View style={{ gap: 8 }}>
+                  <RemarksField label="Rejection remarks (required)" value={rejectNote} onChangeText={setRejectNote} />
+                  <View style={{ flexDirection: "row", gap: 8 }}>
+                    <ActionKey tone={b.danger} label={busyApproval ? "Rejecting…" : "Confirm rejection"}
+                      onPress={() => { deedAction(`/api/crm/sales-deed/${deedId}/director/reject`, { Remarks: rejectNote }, "Deed rejected by director"); setShowReject(null); }} />
+                    <ActionKey outline label="Cancel" onPress={() => setShowReject(null)} />
+                  </View>
+                </View>
+              ) : null}
+            </View>
+          </Section>
+        );
+      })() : null}
 
       {/* Stamp duty (Query Payment) */}
       {ctx.queryPaymentNo || ctx.queryPaymentStatus ? (
