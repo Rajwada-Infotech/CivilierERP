@@ -1776,6 +1776,67 @@ export function GenerateInvoiceDialog({ bookingId, onClose }: { bookingId: numbe
   );
 }
 
+// ── Ownership change dialog ───────────────────────────────────────────────────
+// Opens from the booking detail's After-sales section (crm-ownership-changes create right).
+// Only valid after the sale deed is registered; the server enforces this and returns a clear error.
+// Sends POST /api/crm/ownership-changes.
+export function OwnershipChangeDialog({ bookingId, fromCustomerId, onClose }: {
+  bookingId: number;
+  fromCustomerId?: number;
+  onClose: () => void;
+}) {
+  const [newOwner, setNewOwner] = useState<Row | null>(null);
+  const [deedNo, setDeedNo] = useState("");
+  const [deedDate, setDeedDate] = useState("");
+  const [regOffice, setRegOffice] = useState("");
+  const [considerationValue, setConsiderationValue] = useState("");
+  const [notes, setNotes] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    if (!newOwner) return toast.error("Choose the new owner");
+    setBusy(true);
+    try {
+      await crmSend("/api/crm/ownership-changes", "POST", {
+        BookingId: bookingId, ToCustomerId: newOwner.Id,
+        ...(deedNo.trim() ? { DeedNo: deedNo.trim() } : {}),
+        ...(deedDate.trim() ? { DeedDate: deedDate } : {}),
+        ...(regOffice.trim() ? { RegOffice: regOffice.trim() } : {}),
+        ...(considerationValue.trim() ? { ConsiderationValue: parseFloat(considerationValue) } : {}),
+        ...(notes.trim() ? { Notes: notes.trim() } : {}),
+      });
+      toast.success("Ownership change opened — submit it for approval when ready");
+      onClose();
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", padding: 16 }}>
+        <View style={{ maxHeight: "92%", backgroundColor: colors.card, borderRadius: 18, borderWidth: 1, borderColor: colors.border }}>
+          <ScrollView contentContainerStyle={{ padding: 18, gap: 4 }} keyboardShouldPersistTaps="handled">
+            <Text style={{ fontSize: 16, fontFamily: fonts.heading.bold, color: colors.foreground, marginBottom: 4 }}>Ownership change</Text>
+            <Text style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginBottom: 10 }}>
+              Records the transfer of ownership after the sale deed is registered.
+            </Text>
+            <CustomerSearchPicker label="New owner *" value={newOwner} onChange={setNewOwner} excludeId={fromCustomerId} />
+            <TextField label="Registered deed no." value={deedNo} onChangeText={setDeedNo} />
+            <DateField label="Deed date" value={deedDate} onChange={setDeedDate} />
+            <TextField label="Registration office" value={regOffice} onChangeText={setRegOffice} />
+            <NumberField label="Consideration value (₹)" value={considerationValue} onChangeText={setConsiderationValue} />
+            <RemarksField label="Notes" value={notes} onChangeText={setNotes} />
+            <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+              <ActionKey label="Close" outline tone={colors.mutedForeground} onPress={onClose} />
+              <ActionKey label={busy ? "Opening…" : "Open record"} onPress={submit} />
+            </View>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 // ── Customer search picker ────────────────────────────────────────────────────
 // Used by resale and ownership-change forms to pick the new buyer/owner.
 // Calls GET /api/crm/customers?search=q (requires crm-customers or crm-resales view right).
