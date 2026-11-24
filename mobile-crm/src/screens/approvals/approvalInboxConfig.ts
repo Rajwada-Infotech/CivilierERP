@@ -6,7 +6,7 @@
 import {
   ClipboardCheck, ClipboardList, Package, PackageOpen, Hammer, Banknote, Truck, Receipt, ArrowDownCircle, ArrowLeftRight,
   ShoppingCart, Building2, Home, Car, FileText, Undo2, Warehouse, Landmark, UserCheck, XCircle, FileWarning, ShieldCheck,
-  FilePenLine,
+  FilePenLine, ArrowRightLeft,
 } from "lucide-react-native";
 import type { InboxItem } from "@/api/approvalInboxApi";
 
@@ -42,7 +42,9 @@ export const MODULE_CONFIG: Record<string, ModuleCfg> = {
   "crm-bookings": { icon: Home, apiEndpoint: "/api/crm/bookings", label: "CRM Bookings" },
   "crm-agreements": { icon: Building2, apiEndpoint: "/api/crm/agreements", label: "CRM Agreements" },
   "crm-agreement-date": { icon: ClipboardList, apiEndpoint: "/api/crm/agreements", label: "CRM Agreement Date" },
+  "crm-sales-deed-senior": { icon: Building2, apiEndpoint: "/api/crm/sales-deed", label: "CRM Sales Deed (Senior)" },
   "crm-sales-deed-director": { icon: Building2, apiEndpoint: "/api/crm/sales-deed", label: "CRM Sales Deed (Director)" },
+  "crm-unit-change": { icon: ArrowRightLeft, apiEndpoint: "/api/crm/bookings/unit-changes", label: "CRM Unit Change" },
   "crm-brokerage": { icon: Receipt, apiEndpoint: "/api/crm/brokerage", label: "CRM Brokerage" },
   "crm-cancellations": { icon: XCircle, apiEndpoint: "/api/crm/cancellations", label: "CRM Cancellations" },
   "crm-noc": { icon: ClipboardCheck, apiEndpoint: "/api/crm/noc", label: "CRM NOC" },
@@ -50,6 +52,8 @@ export const MODULE_CONFIG: Record<string, ModuleCfg> = {
   "crm-transfer-deeds": { icon: ClipboardList, apiEndpoint: "/api/crm/transfer-deeds", label: "Transfer Deed (Legal Head)" },
   "crm-transfer-deed-date": { icon: ClipboardList, apiEndpoint: "/api/crm/transfer-deeds", label: "Transfer Deed (Date)" },
   "crm-resales": { icon: Undo2, apiEndpoint: "/api/crm/resales", label: "Property Resale & Buy-back" },
+  "crm-milestone-waiver": { icon: Undo2, apiEndpoint: "/api/crm/payments/waivers", label: "Milestone Waiver" },
+  "crm-milestone-waiver-reversal": { icon: Undo2, apiEndpoint: "/api/crm/payments/waiver-reversals", label: "Milestone Waiver (reversal)" },
   "crm-credit-notes": { icon: Undo2, apiEndpoint: "/api/crm/refunds/gst-notes", label: "Credit Note" },
   "crm-credit-note-cancel": { icon: Undo2, apiEndpoint: "/api/crm/refunds/gst-notes/cancel-requests", label: "Credit Note (cancel)" },
   "crm-ownership-changes": { icon: Undo2, apiEndpoint: "/api/crm/ownership-changes", label: "Ownership Change" },
@@ -93,9 +97,12 @@ const MODULE_CATEGORY: Record<string, CategoryId> = {
   "work-done": "engineering", boq: "engineering",
   "civilworkdpr-approval": "civilworkdpr", "work-allocation-engineer": "civilworkdpr",
   "sale-orders": "sales", "crm-bookings": "sales", "crm-agreements": "sales", "crm-agreement-date": "sales",
-  "crm-sales-deed-director": "sales", "crm-brokerage": "sales", "crm-cancellations": "sales", "crm-noc": "sales",
+  "crm-sales-deed-senior": "sales", "crm-sales-deed-director": "sales", "crm-unit-change": "sales",
+  "crm-brokerage": "sales", "crm-cancellations": "sales", "crm-noc": "sales",
   "crm-booking-amendment": "sales", "crm-refunds": "sales", "crm-resales": "sales", "crm-transfer-deeds": "sales",
-  "crm-transfer-deed-date": "sales", "crm-ownership-changes": "sales", "crm-credit-notes": "sales", "crm-credit-note-cancel": "sales",
+  "crm-transfer-deed-date": "sales", "crm-ownership-changes": "sales",
+  "crm-milestone-waiver": "sales", "crm-milestone-waiver-reversal": "sales",
+  "crm-credit-notes": "sales", "crm-credit-note-cancel": "sales",
 };
 export const categoryOf = (mod: string): CategoryId => MODULE_CATEGORY[mod] ?? "admin";
 const MODULE_ORDER: Record<string, number> = Object.fromEntries(Object.keys(MODULE_CATEGORY).map((m, i) => [m, i]));
