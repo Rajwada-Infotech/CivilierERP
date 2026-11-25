@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Upload } from "lucide-react";
 import { LegalFileLink } from "@/components/legal/LegalDocumentPreview";
+import { OwnershipFlowchart } from "@/components/legal/OwnershipFlowchart";
 import { askLegal } from "@/components/legal/LegalAsk";
 import { uploadLegalFile } from "@/api/legalMastersApi";
 import {
@@ -14,8 +15,9 @@ const input = "h-9 w-full border border-foreground/30 bg-background px-2 text-sm
 const lbl = "mb-1 block text-[0.625rem] uppercase tracking-[0.08em] text-muted-foreground";
 const fmtDate = (d: unknown) => (d ? new Date(String(d)).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "");
 const BAD = ["Not Found", "Unable to Search", "Unmatched", "Partly matched", "Mismatch", "Missing Owner", "Additional Owner", "Unable to Verify", "Partial Match",
-  "Discrepancy Found", "Additional Document Required", "No", "Damaged"];
-const GOOD = ["Found", "Matched", "Exact Match", "Verified", "Report Received", "Received", "Yes"];
+  "Discrepancy Found", "Additional Document Required", "No", "Damaged", "Case Found", "Further Investigation Required", "Missing Document"];
+const GOOD = ["Found", "Matched", "Exact Match", "Verified", "Report Received", "Received", "Yes", "No Record Found"];
+const SUMMARY_KEYS = ["verification", "result", "status", "match", "available"];
 
 export const useEntryConfig = () => useQuery({ queryKey: ["legal-entry-config"], queryFn: getEntryConfig, staleTime: 3600_000 });
 
@@ -92,7 +94,7 @@ function EntryForm({ cfg, entry, all, onCancel, onSave }: { cfg: EntryConfig; en
 
 /** A one-line summary per activity kind: counts of the main result, and the checks that matter. */
 function Summary({ code, cfg, rows }: { code: string; cfg: EntryConfig; rows: ActivityEntry[] }) {
-  const key = cfg.fields.find((f) => f.type === "select" && f.required && f.key !== "sheetType" && f.key !== "searchBy" && f.key !== "surveyType")?.key;
+  const key = SUMMARY_KEYS.find((k) => cfg.fields.some((f) => f.key === k && f.type === "select")) ?? cfg.fields.find((f) => f.type === "select" && f.required)?.key;
   const counts = key ? rows.reduce<Record<string, number>>((m, r) => { const k = String(r.data[key] ?? "—"); m[k] = (m[k] ?? 0) + 1; return m; }, {}) : {};
   const extra: string[] = [];
   if (code === "DEED-CHAIN" && rows.length > 1) {
@@ -123,7 +125,7 @@ function Summary({ code, cfg, rows }: { code: string; cfg: EntryConfig; rows: Ac
 }
 
 /** The detail entries of one verification activity (searches, applications, mappings, deeds, maps, receipts, surveys). */
-export function ActivityEntriesPanel({ activityId, code, canEdit, onChanged }: { activityId: number; code: string; canEdit: boolean; onChanged: () => void }) {
+export function ActivityEntriesPanel({ activityId, code, canEdit, onChanged, title = "" }: { activityId: number; code: string; canEdit: boolean; onChanged: () => void; title?: string }) {
   const qc = useQueryClient();
   const conf = useEntryConfig();
   const list = useQuery({ queryKey: ["legal-activity-entries", activityId], queryFn: () => getActivityEntries(activityId) });
@@ -149,6 +151,7 @@ export function ActivityEntriesPanel({ activityId, code, canEdit, onChanged }: {
   return (
     <div>
       {cfg.note && <p className="mb-2 text-xs text-muted-foreground">{cfg.note}</p>}
+      {code === "OWNERSHIP-FLOW" && <OwnershipFlowchart activityId={activityId} entries={rows} canEdit={canEdit} title={title || "Historical ownership flowchart"} onChanged={refresh} />}
       <Summary code={code} cfg={cfg} rows={rows} />
       {rows.length ? (
         <div className="mb-2 overflow-x-auto border border-border">

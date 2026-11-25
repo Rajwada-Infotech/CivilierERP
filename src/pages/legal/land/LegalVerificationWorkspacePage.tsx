@@ -111,7 +111,7 @@ function ActivityEditor({ a, canEdit, canOverride, onSaved }: { a: Activity; can
         ))}
         {a.Description && <span className="text-xs text-muted-foreground">{a.Description}</span>}
       </div>
-      {tab === "entries" && hasEntries ? <ActivityEntriesPanel activityId={a.ActivityId} code={a.ActivityCode} canEdit={canEdit} onChanged={onSaved} />
+      {tab === "entries" && hasEntries ? <ActivityEntriesPanel activityId={a.ActivityId} code={a.ActivityCode} canEdit={canEdit} onChanged={onSaved} title={`Historical ownership flowchart${a.VerificationNo ? ` · ${a.VerificationNo}` : ""}`} />
         : tab === "history" ? <History activityId={a.ActivityId} /> : (
         <>
           {a.dependsOn?.length ? (

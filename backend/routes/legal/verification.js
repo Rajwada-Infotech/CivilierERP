@@ -444,6 +444,79 @@ router.post("/activity/:activityId/entries", requirePageRight(PAGE, "edit"), (re
 router.put("/entry/:entryId", requirePageRight(PAGE, "edit"), (req, res) => entryWrite(req, res, "edit"));
 router.delete("/entry/:entryId", requirePageRight(PAGE, "edit"), (req, res) => entryWrite(req, res, "remove"));
 
+// ── Ownership flowchart (phase 3): import from the deed chain, saved versions ─────────────────────
+router.post("/activity/:activityId/import-deed-chain", requirePageRight(PAGE, "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const got = await loadActivity(pool, req, Number(req.params.activityId));
+    if (got.error) return res.status(got.error[0]).json({ error: got.error[1] });
+    if (got.a.ActivityCode !== "OWNERSHIP-FLOW") return res.status(400).json({ error: "Only the ownership flowchart imports the deed chain" });
+    if (got.v.Status === "Closed") return res.status(409).json({ error: "This verification is closed" });
+    const deeds = (await pool.request().input("V", sql.Int, got.a.VerificationId).query(`
+      SELECT x.DataJson FROM dbo.LegalActivityEntry x JOIN dbo.LegalVerificationActivity a ON a.ActivityId = x.ActivityId
+      JOIN dbo.LegalActivityTemplate t ON t.TemplateId = a.TemplateId
+      WHERE a.VerificationId = @V AND t.ActivityCode = N'DEED-CHAIN' AND x.IsActive = 1`)).recordset.map((r) => JSON.parse(r.DataJson));
+    const have = new Set((await pool.request().input("A", sql.Int, got.a.ActivityId)
+      .query("SELECT JSON_VALUE(DataJson, '$.deedNo') AS d FROM dbo.LegalActivityEntry WHERE ActivityId = @A AND IsActive = 1")).recordset.map((r) => r.d).filter(Boolean));
+    let added = 0, skipped = 0;
+    for (const d of deeds) {
+      if (!d.executant || !d.claimant || have.has(d.deedNo)) { skipped++; continue; }
+      const t = String(d.deedType || "").toLowerCase();
+      const type = ["gift", "partition", "settlement", "exchange", "inheritance"].find((k) => t.includes(k));
+      const ok = validateEntry("OWNERSHIP-FLOW", { fromOwner: String(d.executant).slice(0, 200), toOwner: String(d.claimant).slice(0, 200), transferDate: d.deedDate, transferYear: d.regYear,
+        transferType: type ? type[0].toUpperCase() + type.slice(1) : "Sale", deedNo: d.deedNo, deedYear: d.regYear, regOffice: d.regOffice, area: d.area, dag: d.dag,
+        verification: "Unverified", fileId: d.fileId, remarks: "Imported from the deed chain" });
+      if (ok.error) { skipped++; continue; }
+      await pool.request().input("A", sql.Int, got.a.ActivityId).input("J", sql.NVarChar(sql.MAX), JSON.stringify(ok.data)).input("U", sql.Int, userOf(req))
+        .input("H", sql.NVarChar(1000), `Ownership transfer imported: ${entryLabel("OWNERSHIP-FLOW", ok.data)}`.slice(0, 1000)).query(`
+          DECLARE @id TABLE (EntryId INT);
+          INSERT INTO dbo.LegalActivityEntry (ActivityId, DataJson, CreatedBy, UpdatedBy, UpdatedAt) OUTPUT INSERTED.EntryId INTO @id VALUES (@A, @J, @U, @U, SYSUTCDATETIME());
+          INSERT INTO dbo.LegalActivityHistory (ActivityId, Action, Remarks, EntryId, ChangedBy) SELECT @A, N'Entry added', @H, EntryId, @U FROM @id;`);
+      have.add(d.deedNo); added++;
+    }
+    res.json({ message: added ? `${added} transfer${added === 1 ? "" : "s"} imported as Unverified${skipped ? ` · ${skipped} skipped (already there or no executant / claimant)` : ""}` : "Nothing new to import from the deed chain" });
+  } catch (err) {
+    console.error("[legal-verification] import deed chain:", err.message);
+    res.status(500).json({ error: "Could not import the deed chain" });
+  }
+});
+
+router.get("/activity/:activityId/flow-versions", requirePageRight(PAGE, "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const got = await loadActivity(pool, req, Number(req.params.activityId));
+    if (got.error) return res.status(got.error[0]).json({ error: got.error[1] });
+    const rows = (await pool.request().input("A", sql.Int, got.a.ActivityId).query(`
+      SELECT h.HistoryId, h.Remarks, h.OldDataJson, u.name AS SavedBy, h.ChangedAt FROM dbo.LegalActivityHistory h LEFT JOIN dbo.users u ON u.id = h.ChangedBy
+      WHERE h.ActivityId = @A AND h.Action = N'Flowchart version' ORDER BY h.HistoryId DESC`)).recordset;
+    res.json(rows.map((r, i) => ({ versionNo: rows.length - i, HistoryId: r.HistoryId, remarks: r.Remarks, savedBy: r.SavedBy, savedAt: r.ChangedAt, entries: JSON.parse(r.OldDataJson || "[]") })));
+  } catch (err) {
+    console.error("[legal-verification] flow versions:", err.message);
+    res.status(500).json({ error: "Could not load versions" });
+  }
+});
+
+router.post("/activity/:activityId/flow-version", requirePageRight(PAGE, "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const got = await loadActivity(pool, req, Number(req.params.activityId));
+    if (got.error) return res.status(got.error[0]).json({ error: got.error[1] });
+    if (got.a.ActivityCode !== "OWNERSHIP-FLOW") return res.status(400).json({ error: "Only the ownership flowchart has versions" });
+    const entries = (await pool.request().input("A", sql.Int, got.a.ActivityId).query("SELECT EntryId, DataJson FROM dbo.LegalActivityEntry WHERE ActivityId = @A AND IsActive = 1 ORDER BY EntryId"))
+      .recordset.map((r) => ({ EntryId: r.EntryId, data: JSON.parse(r.DataJson) }));
+    if (!entries.length) return res.status(400).json({ error: "Add transfers before saving a version" });
+    const n = (await pool.request().input("A", sql.Int, got.a.ActivityId).query("SELECT COUNT(*) AS n FROM dbo.LegalActivityHistory WHERE ActivityId = @A AND Action = N'Flowchart version'")).recordset[0].n + 1;
+    const note = String(req.body?.remarks || "").trim().slice(0, 800);
+    await pool.request().input("A", sql.Int, got.a.ActivityId).input("J", sql.NVarChar(sql.MAX), JSON.stringify(entries)).input("U", sql.Int, userOf(req))
+      .input("R", sql.NVarChar(1000), `Version ${n} · ${entries.length} transfers${note ? ` · ${note}` : ""}`)
+      .query("INSERT INTO dbo.LegalActivityHistory (ActivityId, Action, Remarks, OldDataJson, ChangedBy) VALUES (@A, N'Flowchart version', @R, @J, @U)");
+    res.status(201).json({ message: `Flowchart version ${n} saved` });
+  } catch (err) {
+    console.error("[legal-verification] flow version:", err.message);
+    res.status(500).json({ error: "Could not save the version" });
+  }
+});
+
 router.get("/:id", requirePageRight(PAGE, "view"), async (req, res) => {
   try {
     const pool = getPool();

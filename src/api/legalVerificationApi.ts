@@ -77,3 +77,9 @@ export const updateActivityEntry = async (entryId: number, data: Record<string, 
   handle<{ message: string }>(await fetchWithAuth(`${BASE}/entry/${entryId}`, json("PUT", { data, updatedAt })));
 export const removeActivityEntry = async (entryId: number, reason: string, updatedAt: string | null) =>
   handle<{ message: string }>(await fetchWithAuth(`${BASE}/entry/${entryId}`, json("DELETE", { reason, updatedAt })));
+
+// ── Ownership flowchart (phase 3) ────────────────────────────────────────────────────────────────
+export interface FlowVersion { versionNo: number; HistoryId: number; remarks: string | null; savedBy: string | null; savedAt: string; entries: { EntryId: number; data: Record<string, string | number | null> }[] }
+export const importDeedChain = async (activityId: number) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/activity/${activityId}/import-deed-chain`, json("POST", {})));
+export const getFlowVersions = async (activityId: number) => handle<FlowVersion[]>(await fetchWithAuth(`${BASE}/activity/${activityId}/flow-versions`));
+export const saveFlowVersion = async (activityId: number, remarks: string) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/activity/${activityId}/flow-version`, json("POST", { remarks })));
