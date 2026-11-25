@@ -449,6 +449,7 @@ export default function Customer360Screen() {
                   title={t.Subject || t.TicketNo || "Service ticket"}
                   sub={joinDot(t.TicketNo, t.Category, fmtDate(t.CreatedAt))}
                   right={t.Status ? <Pill label={t.Status} /> : null}
+                  onPress={canAccessPage("crm-service-tickets") ? () => open({ to: "ticket", ticketId: Number(t.Id) }) : undefined}
                 />
               ))
             )}
@@ -517,6 +518,7 @@ export default function Customer360Screen() {
                   title={joinDot(x.CancellationNo, x.BookingNo) || "Cancellation"}
                   sub={joinDot(fmtDate(x.CreatedAt), x.RefundAmount != null && `Refund ${money(x.RefundAmount)}`)}
                   right={x.Status ? <Pill label={x.Status} /> : null}
+                  onPress={canAccessPage("crm-cancellations") && x.Id ? () => open({ to: "cancellation", cancellationId: Number(x.Id), title: x.CancellationNo || x.BookingNo || "Cancellation" }) : undefined}
                 />
               ))
             )}
