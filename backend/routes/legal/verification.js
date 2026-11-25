@@ -25,6 +25,7 @@ const { writeAudit, nextCodeSql, codePrefix } = require("./legalAudit");
 const { pageable } = require("./paging");
 const projectGuard = require("./projectGuard");
 const { notify } = require("../../services/legalNotify");
+const { ENTRY_CONFIG, validateEntry, publicConfig, entryLabel } = require("./activityEntries");
 
 const router = express.Router();
 router.use(apiRateLimit);
@@ -48,7 +49,8 @@ const ACTIVITY_SELECT = `
          a.AssignedUserId, au.name AS AssignedName, a.Department, a.Priority, a.ExpectedDays,
          CONVERT(char(10), a.StartDate, 23) AS StartDate, CONVERT(char(10), a.DueDate, 23) AS DueDate, CONVERT(char(10), a.CompletedDate, 23) AS CompletedDate,
          a.Findings, a.Remarks, a.HoldReason, a.NextAction, a.ReviewedBy, rv.name AS ReviewedByName, a.ReviewedAt,
-         a.UpdatedAt, uu.name AS UpdatedByName, t.Stage, t.Description
+         a.UpdatedAt, uu.name AS UpdatedByName, t.Stage, t.Description, t.ActivityCode,
+         (SELECT COUNT(*) FROM dbo.LegalActivityEntry x WHERE x.ActivityId = a.ActivityId AND x.IsActive = 1) AS EntryCount
   FROM dbo.LegalVerificationActivity a
   JOIN dbo.LegalActivityTemplate t ON t.TemplateId = a.TemplateId
   LEFT JOIN dbo.users au ON au.id = a.AssignedUserId
@@ -342,6 +344,105 @@ router.post("/activity/:activityId/document", requirePageRight(PAGE, "edit"), as
     res.status(500).json({ error: "Could not attach the document" });
   }
 });
+
+// ── Detail entries (phase 2) ─────────────────────────────────────────────────────────────────────
+router.get("/entry-config", requirePageRight(PAGE, "view"), (_req, res) => res.json(publicConfig()));
+
+const ENTRY_SELECT = `
+  SELECT x.EntryId, x.ActivityId, x.DataJson, x.CreatedAt, cu.name AS CreatedByName, x.UpdatedAt, uu.name AS UpdatedByName
+  FROM dbo.LegalActivityEntry x LEFT JOIN dbo.users cu ON cu.id = x.CreatedBy LEFT JOIN dbo.users uu ON uu.id = x.UpdatedBy`;
+const shapeEntry = (r) => ({ ...r, data: JSON.parse(r.DataJson || "{}"), DataJson: undefined });
+
+/** File names for the file fields of a set of entries. */
+async function withFileNames(pool, code, entries) {
+  const keys = (ENTRY_CONFIG[code]?.fields ?? []).filter((f) => f.type === "file").map((f) => f.key);
+  const ids = [...new Set(entries.flatMap((e) => keys.map((k) => e.data[k]).filter(Number.isFinite)))];
+  if (!ids.length) return entries.map((e) => ({ ...e, files: {} }));
+  const names = (await pool.request().query(`SELECT FileId, FileName FROM dbo.LegalMasterFile WHERE FileId IN (${ids.map(Number).join(",")})`)).recordset;
+  return entries.map((e) => ({ ...e, files: Object.fromEntries(keys.filter((k) => e.data[k]).map((k) => [k, names.find((n) => n.FileId === e.data[k])?.FileName ?? null])) }));
+}
+
+const liveEntryIds = async (conn, activityId, except = null) =>
+  (await conn.request().input("A", sql.Int, activityId).query("SELECT EntryId FROM dbo.LegalActivityEntry WHERE ActivityId = @A AND IsActive = 1")).recordset
+    .map((r) => r.EntryId).filter((id) => id !== except);
+
+router.get("/activity/:activityId/entries", requirePageRight(PAGE, "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const got = await loadActivity(pool, req, Number(req.params.activityId));
+    if (got.error) return res.status(got.error[0]).json({ error: got.error[1] });
+    const rows = (await pool.request().input("A", sql.Int, got.a.ActivityId).query(`${ENTRY_SELECT} WHERE x.ActivityId = @A AND x.IsActive = 1 ORDER BY x.EntryId`)).recordset.map(shapeEntry);
+    res.json(await withFileNames(pool, got.a.ActivityCode, rows));
+  } catch (err) {
+    console.error("[legal-verification] entries:", err.message);
+    res.status(500).json({ error: "Could not load entries" });
+  }
+});
+
+async function entryWrite(req, res, mode) {
+  const pool = getPool();
+  try {
+    let entry = null;
+    let activityId = Number(req.params.activityId);
+    if (mode !== "add") {
+      entry = (await pool.request().input("X", sql.Int, Number(req.params.entryId)).query(`${ENTRY_SELECT} WHERE x.EntryId = @X AND x.IsActive = 1`)).recordset[0];
+      if (!entry) return res.status(404).json({ error: "Entry not found" });
+      activityId = entry.ActivityId;
+    }
+    const got = await loadActivity(pool, req, activityId);
+    if (got.error) return res.status(got.error[0]).json({ error: got.error[1] });
+    const { a, v } = got;
+    if (v.Status === "Closed") return res.status(409).json({ error: "This verification is closed" });
+    const code = a.ActivityCode;
+    if (!ENTRY_CONFIG[code]) return res.status(400).json({ error: "This activity has no detail entries" });
+    const b = req.body || {};
+    if (entry && "updatedAt" in b) {
+      const seen = b.updatedAt ? new Date(b.updatedAt).getTime() : null;
+      const now = entry.UpdatedAt ? new Date(entry.UpdatedAt).getTime() : null;
+      if (seen !== now) return res.status(409).json({ error: `${entry.UpdatedByName ?? "Someone"} changed this entry after you opened it — reload and try again` });
+    }
+    const me = userOf(req);
+    const cfg = ENTRY_CONFIG[code];
+    if (mode === "remove") {
+      const reason = String(b.reason || "").trim().slice(0, 500);
+      if (!reason) return res.status(400).json({ error: "Say why the entry is removed" });
+      if (await pool.request().input("A", sql.Int, a.ActivityId).input("X", sql.Int, entry.EntryId)
+        .query("SELECT 1 AS x FROM dbo.LegalActivityEntry WHERE ActivityId = @A AND IsActive = 1 AND TRY_CAST(JSON_VALUE(DataJson, '$.previousEntryId') AS INT) = @X").then((r) => r.recordset.length))
+        return res.status(409).json({ error: "Another deed points to this one as its previous deed — change that link first" });
+      await pool.request().input("X", sql.Int, entry.EntryId).input("R", sql.NVarChar(500), reason).input("U", sql.Int, me).input("A", sql.Int, a.ActivityId)
+        .input("H", sql.NVarChar(1000), `${cfg.entry} removed: ${entryLabel(code, JSON.parse(entry.DataJson))} — ${reason}`.slice(0, 1000)).input("J", sql.NVarChar(sql.MAX), entry.DataJson).query(`
+          UPDATE dbo.LegalActivityEntry SET IsActive = 0, RemovedReason = @R, UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE EntryId = @X;
+          INSERT INTO dbo.LegalActivityHistory (ActivityId, Action, Remarks, EntryId, OldDataJson, ChangedBy) VALUES (@A, N'Entry removed', @H, @X, @J, @U);`);
+      return res.json({ message: `${cfg.entry} removed` });
+    }
+    const ok = validateEntry(code, b.data, await liveEntryIds(pool, a.ActivityId, entry?.EntryId ?? null));
+    if (ok.error) return res.status(400).json({ error: ok.error });
+    const json = JSON.stringify(ok.data);
+    if (mode === "add") {
+      const r = await pool.request().input("A", sql.Int, a.ActivityId).input("J", sql.NVarChar(sql.MAX), json).input("U", sql.Int, me)
+        .input("H", sql.NVarChar(1000), `${cfg.entry} added: ${entryLabel(code, ok.data)}`.slice(0, 1000)).query(`
+          DECLARE @id TABLE (EntryId INT);
+          INSERT INTO dbo.LegalActivityEntry (ActivityId, DataJson, CreatedBy, UpdatedBy, UpdatedAt) OUTPUT INSERTED.EntryId INTO @id VALUES (@A, @J, @U, @U, SYSUTCDATETIME());
+          INSERT INTO dbo.LegalActivityHistory (ActivityId, Action, Remarks, EntryId, ChangedBy) SELECT @A, N'Entry added', @H, EntryId, @U FROM @id;
+          SELECT EntryId FROM @id;`);
+      if (a.Status === "Not Started") await pool.request().input("A", sql.Int, a.ActivityId).input("U", sql.Int, me).query(`
+          UPDATE dbo.LegalVerificationActivity SET Status = N'In Progress', StartDate = ISNULL(StartDate, CAST(GETDATE() AS DATE)), UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE ActivityId = @A AND Status = N'Not Started';
+          INSERT INTO dbo.LegalActivityHistory (ActivityId, Action, OldStatus, NewStatus, Remarks, ChangedBy) VALUES (@A, N'Updated', N'Not Started', N'In Progress', N'Started by the first entry', @U);`);
+      return res.status(201).json({ message: `${cfg.entry} added`, entryId: r.recordset[0].EntryId });
+    }
+    await pool.request().input("X", sql.Int, entry.EntryId).input("J", sql.NVarChar(sql.MAX), json).input("U", sql.Int, me).input("A", sql.Int, a.ActivityId)
+      .input("O", sql.NVarChar(sql.MAX), entry.DataJson).input("H", sql.NVarChar(1000), `${cfg.entry} changed: ${entryLabel(code, ok.data)}`.slice(0, 1000)).query(`
+        UPDATE dbo.LegalActivityEntry SET DataJson = @J, UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE EntryId = @X;
+        INSERT INTO dbo.LegalActivityHistory (ActivityId, Action, Remarks, EntryId, OldDataJson, ChangedBy) VALUES (@A, N'Entry changed', @H, @X, @O, @U);`);
+    res.json({ message: `${cfg.entry} saved` });
+  } catch (err) {
+    console.error("[legal-verification] entry", mode, err.message);
+    res.status(500).json({ error: "Could not save the entry" });
+  }
+}
+router.post("/activity/:activityId/entries", requirePageRight(PAGE, "edit"), (req, res) => entryWrite(req, res, "add"));
+router.put("/entry/:entryId", requirePageRight(PAGE, "edit"), (req, res) => entryWrite(req, res, "edit"));
+router.delete("/entry/:entryId", requirePageRight(PAGE, "edit"), (req, res) => entryWrite(req, res, "remove"));
 
 router.get("/:id", requirePageRight(PAGE, "view"), async (req, res) => {
   try {

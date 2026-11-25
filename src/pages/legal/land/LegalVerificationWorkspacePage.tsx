@@ -15,6 +15,7 @@ import {
   type Activity, type Workspace,
 } from "@/api/legalVerificationApi";
 import { Progress, WS_TONE } from "./LegalVerificationListPage";
+import { ActivityEntriesPanel, useEntryConfig } from "@/components/legal/ActivityEntriesPanel";
 
 const fmt = (d: string | null | undefined) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—");
 const fmtTime = (d: string) => new Date(d).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -60,7 +61,9 @@ function ActivityEditor({ a, canEdit, canOverride, onSaved }: { a: Activity; can
     startDate: a.StartDate ?? "", dueDate: a.DueDate ?? "", findings: a.Findings ?? "", remarks: a.Remarks ?? "", holdReason: a.HoldReason ?? "", nextAction: a.NextAction ?? "",
   });
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<"details" | "history">("details");
+  const entryCfg = useEntryConfig();
+  const hasEntries = !!entryCfg.data?.[a.ActivityCode];
+  const [tab, setTab] = useState<"entries" | "details" | "history">(a.EntryCount > 0 ? "entries" : "details");
   const set = (k: keyof typeof f, v: string) => setF((o) => ({ ...o, [k]: v }));
 
   const send = async (overrideReason?: string) => {
@@ -101,12 +104,15 @@ function ActivityEditor({ a, canEdit, canOverride, onSaved }: { a: Activity; can
   return (
     <div className="border-t-2 border-foreground bg-card p-3">
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        {(["details", "history"] as const).map((t) => (
-          <button key={t} onClick={() => setTab(t)} className={`h-7 border px-3 text-xs font-semibold uppercase tracking-[0.06em] ${tab === t ? "border-foreground bg-foreground text-background" : "border-foreground/40"}`}>{t}</button>
+        {((hasEntries ? ["entries", "details", "history"] : ["details", "history"]) as ("entries" | "details" | "history")[]).map((t) => (
+          <button key={t} onClick={() => setTab(t)} className={`h-7 border px-3 text-xs font-semibold uppercase tracking-[0.06em] ${tab === t ? "border-foreground bg-foreground text-background" : "border-foreground/40"}`}>
+            {t === "entries" ? `${entryCfg.data?.[a.ActivityCode]?.plural ?? "Entries"} (${a.EntryCount})` : t === "details" ? "Status & result" : "History"}
+          </button>
         ))}
         {a.Description && <span className="text-xs text-muted-foreground">{a.Description}</span>}
       </div>
-      {tab === "history" ? <History activityId={a.ActivityId} /> : (
+      {tab === "entries" && hasEntries ? <ActivityEntriesPanel activityId={a.ActivityId} code={a.ActivityCode} canEdit={canEdit} onChanged={onSaved} />
+        : tab === "history" ? <History activityId={a.ActivityId} /> : (
         <>
           {a.dependsOn?.length ? (
             <p className={`mb-3 text-xs ${a.blocked ? "text-amber-700" : "text-muted-foreground"}`}>
@@ -231,7 +237,8 @@ export default function LegalVerificationWorkspacePage() {
                       className={`grid w-full grid-cols-[2rem_1fr] gap-x-2 gap-y-1 px-3 py-2 text-left hover:bg-primary/5 md:grid-cols-[2rem_2.4fr_1fr_1.2fr_1.2fr_1fr] md:items-center ${a.overdue ? "bg-destructive/5" : ""}`}>
                       <span className="font-mono text-xs text-muted-foreground">{a.ActivityNo}</span>
                       <span className="text-sm font-semibold">{a.ActivityName}{!a.IsMandatory && <span className="ml-1 text-[0.625rem] font-normal uppercase text-muted-foreground">optional</span>}
-                        {a.blocked && <span className="ml-1 text-[0.625rem] font-normal uppercase text-amber-700">waiting</span>}</span>
+                        {a.blocked && <span className="ml-1 text-[0.625rem] font-normal uppercase text-amber-700">waiting</span>}
+                        {a.EntryCount > 0 && <span className="ml-1 text-[0.625rem] font-normal text-muted-foreground">· {a.EntryCount} entr{a.EntryCount === 1 ? "y" : "ies"}</span>}</span>
                       <span className={`col-start-2 text-xs font-semibold md:col-start-auto ${STATUS_TONE[a.Status] ?? ""}`}>{a.Status}</span>
                       <span className={`col-start-2 text-xs md:col-start-auto ${a.Finding && BAD.includes(a.Finding) ? "font-semibold text-destructive" : ""}`}>{a.Finding ?? "—"}</span>
                       <span className="col-start-2 text-xs md:col-start-auto">{a.AssignedName ?? <span className="text-muted-foreground">Not assigned</span>}</span>

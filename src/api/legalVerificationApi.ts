@@ -29,6 +29,7 @@ export interface Activity {
   ExpectedDays: number | null; StartDate: string | null; DueDate: string | null; CompletedDate: string | null;
   Findings: string | null; Remarks: string | null; HoldReason: string | null; NextAction: string | null;
   ReviewedByName: string | null; ReviewedAt: string | null; UpdatedAt: string | null; UpdatedByName: string | null; Stage: string; Description: string | null;
+  ActivityCode: string; EntryCount: number;
   dependsOn?: { DependsOnId: number; ActivityNo: number; ActivityName: string; Status: string; IsMandatory: boolean }[];
   blocked?: boolean; overdue?: boolean; documents?: ActivityDoc[];
   VerificationNo?: string; EnquiryNo?: string;
@@ -57,3 +58,22 @@ export const addActivityDocument = async (activityId: number, body: { fileId: nu
   handle<{ message: string }>(await fetchWithAuth(`${BASE}/activity/${activityId}/document`, json("POST", body)));
 export const getActivityHistory = async (activityId: number) => handle<HistoryRow[]>(await fetchWithAuth(`${BASE}/activity/${activityId}/history`));
 export const getMyTasks = async () => handle<Activity[]>(await fetchWithAuth(`${BASE}/my-tasks`));
+
+// ── Detail entries (phase 2) ─────────────────────────────────────────────────────────────────────
+export interface EntryField {
+  key: string; label: string; type: "text" | "textarea" | "int" | "decimal" | "date" | "select" | "file" | "entry";
+  required?: boolean; max?: number; min?: number; options?: string[]; requireWhen?: { field: string; values: string[] };
+}
+export interface EntryConfig { entry: string; plural: string; note: string | null; fields: EntryField[]; columns: string[] }
+export interface ActivityEntry {
+  EntryId: number; ActivityId: number; data: Record<string, string | number | null>; files: Record<string, string | null>;
+  CreatedAt: string; CreatedByName: string | null; UpdatedAt: string | null; UpdatedByName: string | null;
+}
+export const getEntryConfig = async () => handle<Record<string, EntryConfig>>(await fetchWithAuth(`${BASE}/entry-config`));
+export const getActivityEntries = async (activityId: number) => handle<ActivityEntry[]>(await fetchWithAuth(`${BASE}/activity/${activityId}/entries`));
+export const addActivityEntry = async (activityId: number, data: Record<string, unknown>) =>
+  handle<{ message: string; entryId: number }>(await fetchWithAuth(`${BASE}/activity/${activityId}/entries`, json("POST", { data })));
+export const updateActivityEntry = async (entryId: number, data: Record<string, unknown>, updatedAt: string | null) =>
+  handle<{ message: string }>(await fetchWithAuth(`${BASE}/entry/${entryId}`, json("PUT", { data, updatedAt })));
+export const removeActivityEntry = async (entryId: number, reason: string, updatedAt: string | null) =>
+  handle<{ message: string }>(await fetchWithAuth(`${BASE}/entry/${entryId}`, json("DELETE", { reason, updatedAt })));
