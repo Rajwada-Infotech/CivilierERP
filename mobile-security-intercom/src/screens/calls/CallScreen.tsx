@@ -2,7 +2,7 @@
 // joins the call's room straight away. Incoming: Answer / Decline. During the call: mute, speaker and end.
 // LiveKit's native audio isn't inside Expo Go; there the screen says so and offers the phone dialler instead.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { View, Text, Linking, Animated, Easing } from "react-native";
+import { View, Text, Linking, Animated, Easing, Platform, PermissionsAndroid } from "react-native";
 import { nativeCallsAvailable } from "./callSupport";
 import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import { Mic, MicOff, Phone, PhoneOff, Volume2, Ear } from "lucide-react-native";
@@ -34,6 +34,24 @@ function loadLiveKit(): LiveKit | null {
   }
 }
 
+/** Ask for the microphone (Android asks at run time; iOS asks the first time the call turns the mic on). */
+async function micAllowed(): Promise<boolean> {
+  if (Platform.OS !== "android") return true;
+  try {
+    const perm = PermissionsAndroid.PERMISSIONS.RECORD_AUDIO;
+    if (await PermissionsAndroid.check(perm)) return true;
+    const r = await PermissionsAndroid.request(perm, {
+      title: "Microphone",
+      message: "Civilier Security needs the microphone for calls between residents and the gate.",
+      buttonPositive: "Allow",
+      buttonNegative: "Not now",
+    });
+    return r === PermissionsAndroid.RESULTS.GRANTED;
+  } catch {
+    return false;
+  }
+}
+
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
 function RoundKey({ onPress, bg, children, label, disabled }: { onPress: () => void; bg: string; children: React.ReactNode; label: string; disabled?: boolean }) {
@@ -56,6 +74,7 @@ export default function CallScreen() {
   const [muted, setMuted] = useState(false);
   const [speaker, setSpeaker] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [micDenied, setMicDenied] = useState(false);
   const [now, setNow] = useState(Date.now());
   const room = useRef<any>(null);
   const lk = useRef<LiveKit | null | undefined>(undefined);
@@ -85,6 +104,13 @@ export default function CallScreen() {
     if (lk.current === undefined) lk.current = loadLiveKit();
     if (!lk.current) {
       setError("In-app calls need the installed Civilier Security app — they can't run inside Expo Go. Use the phone for now.");
+      return;
+    }
+    // The microphone needs the person's permission first (Android asks at run time; without it joining the call fails
+    // with "Permission denied").
+    if (!(await micAllowed())) {
+      setMicDenied(true);
+      setError("Civilier Security isn't allowed to use the microphone, so the call can't connect. Allow the microphone in the phone's settings, then call again.");
       return;
     }
     try {
@@ -225,6 +251,11 @@ export default function CallScreen() {
         {error && (
           <View style={{ gap: 8, alignSelf: "stretch" }}>
             <Notice>{error}</Notice>
+            {micDenied && (
+              <Press onPress={() => void Linking.openSettings()} style={(p) => ({ padding: 12, borderWidth: 1, borderColor: S.ink, alignItems: "center", backgroundColor: p ? S.blueWash : "transparent" })}>
+                <Body weight="semibold">Open phone settings</Body>
+              </Press>
+            )}
             {params.dialNumber ? (
               <Press onPress={() => void Linking.openURL(`tel:${params.dialNumber}`)} style={(p) => ({ padding: 12, borderWidth: 1, borderColor: S.ink, alignItems: "center", backgroundColor: p ? S.blueWash : "transparent" })}>
                 <Body weight="semibold">Call {params.dialNumber} by phone instead</Body>
