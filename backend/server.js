@@ -550,27 +550,28 @@ async function createApp() {
     // request. Without this, page load fires ~15 concurrent requests and each
     // one awaits redisZScore + getSystemMetrics + getPredictedRPM, causing
     // 2-3 s queuing before the route handler even starts.
-    let _cachedLimit = 500;
-    let _limitCachedAt = 0;
+    // Per person: the limit depends on that person's engagement score, so it is cached per user (a single shared value
+    // gave everyone the limit of whoever was looked up last). The system load part is shared and cached on its own.
+    const _limitCache = new Map(); // userId -> { limit, at }
+    let _load = { rpm: 0, memoryUsage: 0, at: 0 };
     async function getDynamicLimitCached(userId) {
       const now = Date.now();
-      if (now - _limitCachedAt < 10_000) return _cachedLimit;
+      const hit = _limitCache.get(userId);
+      if (hit && now - hit.at < 10_000) return hit.limit;
       try {
-        const score = Number(
-          (await redisZScore("engagement:score", userId)) || 0,
-        );
-        const metrics = await getSystemMetrics();
-        const predictedRPM = await getPredictedRPM();
-        _cachedLimit = getDynamicLimit(
-          score,
-          predictedRPM || metrics.rpm,
-          metrics.memoryUsage,
-        );
-        _limitCachedAt = now;
+        if (now - _load.at >= 10_000) {
+          const metrics = await getSystemMetrics();
+          const predictedRPM = await getPredictedRPM();
+          _load = { rpm: predictedRPM || metrics.rpm, memoryUsage: metrics.memoryUsage, at: now };
+        }
+        const score = Number((await redisZScore("engagement:score", userId)) || 0);
+        const limit = getDynamicLimit(score, _load.rpm, _load.memoryUsage);
+        _limitCache.set(userId, { limit, at: now });
+        if (_limitCache.size > 5000) _limitCache.delete(_limitCache.keys().next().value);
+        return limit;
       } catch {
-        // keep last cached value
+        return hit?.limit ?? 500;
       }
-      return _cachedLimit;
     }
 
     // The limiter runs before authentication, so req.user does not exist yet: the person is identified from a

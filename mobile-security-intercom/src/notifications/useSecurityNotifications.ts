@@ -41,16 +41,16 @@ async function alertList(openOnly: boolean): Promise<PastAlert[]> {
 
 export function useSecurityNotifications() {
   const { view } = useSecurityView();
-  const resident = useQuery({ queryKey: ["security-pending-mine"], queryFn: getPendingForMe, enabled: view === "customer", refetchInterval: 15000 });
+  const resident = useQuery({ queryKey: ["security-pending-mine"], queryFn: getPendingForMe, enabled: view === "customer", refetchInterval: 30000 });
   const residentDash = useQuery({ queryKey: ["security-dashboard", "customer", null], queryFn: () => fetchSecurityDashboard("customer"), enabled: view === "customer" });
   const allAlerts = useQuery({ queryKey: ["security-all-alerts"], queryFn: () => alertList(false), enabled: view === "admin", refetchInterval: 60000 });
   const guard = useQuery({
     queryKey: ["security-dashboard", "guard", null],
     queryFn: () => fetchSecurityDashboard("guard"),
     enabled: view === "guard",
-    refetchInterval: 15000,
+    refetchInterval: 30000,
   });
-  const alerts = useQuery({ queryKey: ["security-open-alerts"], queryFn: openAlerts, enabled: view === "admin", refetchInterval: 20000 });
+  const alerts = useQuery({ queryKey: ["security-open-alerts"], queryFn: openAlerts, enabled: view === "admin", refetchInterval: 60000 });
   const residentComplaints = useQuery({ queryKey: ["security-my-complaints"], queryFn: myComplaints, enabled: view === "customer", refetchInterval: 120000 });
   // Without the Security Live right the list is refused: then no complaints in the bell.
   const openComplaints = useQuery({

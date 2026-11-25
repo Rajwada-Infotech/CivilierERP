@@ -108,7 +108,7 @@ export default function VisitorStatusScreen() {
     queryKey: ["security-visitor", id],
     queryFn: () => getVisitor(id!),
     enabled: !!id,
-    refetchInterval: (q) => (q.state.data?.status === "PENDING" ? 4000 : false),
+    refetchInterval: (q) => (q.state.data?.status === "PENDING" ? 10000 : false),
   });
   useVisitorEvents(!!id && view !== "customer", (e) => {
     if (e.requestId === id) void refetch();

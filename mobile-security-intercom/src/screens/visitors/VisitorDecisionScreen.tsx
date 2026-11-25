@@ -41,7 +41,7 @@ export default function VisitorDecisionScreen() {
   const { data: v, isLoading, error, refetch } = useQuery<VisitorDetail>({
     queryKey: ["security-visitor-mine", params.id],
     queryFn: () => getVisitorForMe(params.id),
-    refetchInterval: (q) => (q.state.data?.status === "PENDING" ? 5000 : false),
+    refetchInterval: (q) => (q.state.data?.status === "PENDING" ? 15000 : false),
   });
 
   // Another resident answered (or it timed out): show it at once.
