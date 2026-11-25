@@ -29,7 +29,8 @@ export type CrmOpen =
   | { to: "resale"; resaleId: number; title: string }
   | { to: "money-receipt"; receiptId: number; title: string }
   | { to: "brokerage"; brokerageId: number; title: string }
-  | { to: "transfer-deed"; deedId: number; title: string };
+  | { to: "transfer-deed"; deedId: number; title: string }
+  | { to: "ownership-change"; changeId: number; title: string };
 
 /** Welcome-call outcomes and their words — the web's (src/pages/CRM/welcomeCalls/config.tsx OUTCOMES / OUTCOME_LABEL),
  * the server's list (crmWelcomeCalls.js OUTCOMES). */
@@ -588,7 +589,8 @@ export const CRM_REGISTERS: CrmRegister[] = [
       joinDot(r.ProjectName, r.CreatedAt && fmtDate(r.CreatedAt)),
     ],
     searchIn: (r) => [r.ApplicantName, r.BookingNo, r.UnitNo, r.Status],
-    open: toBooking, dateOf: (r) => r.CreatedAt,
+    open: (r) => ({ to: "ownership-change" as const, changeId: Number(r.Id), title: r.ChangeNo || r.BookingNo || "Ownership Change" }),
+    dateOf: (r) => r.CreatedAt,
     empty: "No ownership change records.",
   },
 ];
