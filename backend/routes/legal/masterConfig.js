@@ -1698,6 +1698,51 @@ const MASTERS = {
     ],
   },
 
+  // Legal verification workspace (V2): the activity list, what each waits for, and the reminder days.
+  "verification-activity": {
+    adminOnly: true,
+    title: "Verification Activities", group: "Workflow", pageKey: "legal-verification-activity-master", table: "LegalActivityTemplate", pk: "TemplateId",
+    desc: "The legal verification checklist every new workspace starts with: duration, department and whether it is mandatory.",
+    label: "ActivityName", orderBy: "ActivityNo",
+    unique: [["ActivityNo"], "An activity with this number already exists"],
+    fields: [
+      { name: "ActivityNo", label: "No.", type: "int", required: true, min: 1 },
+      { name: "ActivityCode", label: "Code", type: "text", required: true, max: 20, upper: true },
+      { name: "ActivityName", label: "Activity", type: "text", required: true, max: 150 },
+      { name: "Department", label: "Department", type: "text", max: 80 },
+      { name: "DefaultDays", label: "Expected duration (days)", type: "int", min: 0 },
+      { name: "Stage", label: "Stage", type: "select", required: true, options: ["Verification", "Post-registration"], default: "Verification" },
+      { name: "IsMandatory", label: "Mandatory before legal review", type: "bit", default: true },
+      { name: "Description", label: "Notes", type: "textarea", max: 500 },
+      ACTIVE,
+    ],
+  },
+  "activity-dependency": {
+    adminOnly: true,
+    title: "Activity Dependencies", group: "Workflow", pageKey: "legal-activity-dependency-master", table: "LegalActivityDependency", pk: "DependencyId",
+    desc: "An activity cannot be completed until the activities it depends on are completed (or overridden with a reason).",
+    label: "TemplateId", orderBy: "TemplateId",
+    unique: [["TemplateId", "DependsOnTemplateId"], "This dependency already exists"],
+    fields: [
+      { name: "TemplateId", label: "Activity", type: "ref", ref: "verification-activity", required: true },
+      { name: "DependsOnTemplateId", label: "Waits for", type: "ref", ref: "verification-activity", required: true },
+      { name: "IsMandatory", label: "Blocks completion", type: "bit", default: true },
+      { name: "Remarks", label: "Why", type: "text", max: 300 },
+      ACTIVE,
+    ],
+  },
+  "activity-reminder": {
+    adminOnly: true,
+    title: "Activity Reminder Days", group: "Workflow", pageKey: "legal-activity-reminder-master", table: "LegalActivityReminderRule", pk: "RuleId",
+    desc: "Days before an activity's due date when its assignee is reminded (0 = on the due date). Overdue activities are reminded daily.",
+    label: "DaysBefore", orderBy: "DaysBefore",
+    unique: [["DaysBefore"], "A reminder for this many days already exists"],
+    fields: [
+      { name: "DaysBefore", label: "Days before due date", type: "int", required: true, min: 0, max: 90 },
+      ACTIVE,
+    ],
+  },
+
   // ── Land record, ownership, legal & financial lists ────────────────────────────────────────────
   "copy-type": lookup("copy-type", "Document Copy Type", "Land records", "Certified, online, office copy, photocopy…"),
   "enquiry-source": lookup("enquiry-source", "Enquiry Source", "Land records", "Where a land enquiry came from"),

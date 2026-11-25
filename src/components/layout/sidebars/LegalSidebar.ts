@@ -1,4 +1,4 @@
-import { Judge, Global, Note1, DocumentText, ClipboardTick, Layer } from "iconsax-react";
+import { Judge, Global, Note1, DocumentText, ClipboardTick, Layer, TaskSquare } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
 // Legal navigation — five places:
@@ -13,17 +13,19 @@ export const legalNavItems: NavItem[] = [
   { label: "Dashboard", icon: Judge, path: "/legal", isDashboard: true, pageKey: "legal-dashboard" },
 
   // ── Company Land Records & Verification / Approvals ───────────────────────
+  { label: "My tasks", icon: TaskSquare, path: "/legal/my-tasks", pageKey: "legal-land-enquiry" },
   { label: "Land Flowchart", icon: Layer, path: "/legal/versions", pageKey: "legal-land-master" },
   {
     label: "Pipeline", icon: Note1,
     children: [
       { label: "1 · Enquiries", path: "/legal/land/enquiries", pageKey: "legal-land-enquiry" },
       { label: "2 · Deed search", path: "/legal/land/deed-search", pageKey: "legal-land-enquiry" },
-      { label: "3 · Land conversion", path: "/legal/land/properties?filter=verification", pageKey: "legal-land-master" },
-      { label: "4 · Deed Process", path: "/legal/land/deed-process", pageKey: "legal-land-master" },
-      { label: "5 · LA & ULC", path: "/legal/land/la-ulc", pageKey: "legal-land-master" },
-      { label: "6 · Deed Registration", path: "/legal/deed-registration", pageKey: "legal-approvals" },
-      { label: "7 · Post-registration", path: "/legal/land/post-registration", pageKey: "legal-land-master" },
+      { label: "3 · Legal verification", path: "/legal/land/verification", pageKey: "legal-land-enquiry" },
+      { label: "4 · Land conversion", path: "/legal/land/properties?filter=verification", pageKey: "legal-land-master" },
+      { label: "5 · Deed Process", path: "/legal/land/deed-process", pageKey: "legal-land-master" },
+      { label: "6 · LA & ULC", path: "/legal/land/la-ulc", pageKey: "legal-land-master" },
+      { label: "7 · Deed Registration", path: "/legal/deed-registration", pageKey: "legal-approvals" },
+      { label: "8 · Post-registration", path: "/legal/land/post-registration", pageKey: "legal-land-master" },
     ],
   },
   { label: "Approvals", icon: ClipboardTick, path: "/legal/approvals", pageKey: "legal-approvals" },

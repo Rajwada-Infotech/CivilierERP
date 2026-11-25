@@ -43,6 +43,7 @@ const TYPE_META: Record<string, ReminderMeta> = {
   legal_deed: { icon: Landmark, label: "Deed" },
   legal_search: { icon: CalendarClock, label: "Deed Search" },
   legal_postreg: { icon: Package, label: "Post-Reg" },
+  legal_activity: { icon: ClipboardList, label: "My Tasks" },
 };
 
 const ALL_TABS = [
@@ -61,6 +62,7 @@ const ALL_TABS = [
   "legal_deed",
   "legal_search",
   "legal_postreg",
+  "legal_activity",
 ];
 
 // The reminders panel drawn on the sheet: a square card with an ink border and a hard shadow on the faint grid, a

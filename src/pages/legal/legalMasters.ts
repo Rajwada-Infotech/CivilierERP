@@ -75,6 +75,9 @@ export const LEGAL_MASTERS: LegalMasterEntry[] = [
   S("checklist-item", "Checklist Item", "Deed & Registration", ClipboardTick, "Required / conditional / optional rules"),
   // ── Setup: Workflow ──
   S("approval-authority", "Approval Control", "Workflow", ShieldTick, "Who verifies and who approves at L1 / L2 — admin only"),
+  S("verification-activity", "Verification Activities", "Workflow", ClipboardTick, "The legal verification checklist — admin only", "legal-verification-activity-master"),
+  S("activity-dependency", "Activity Dependencies", "Workflow", Link21, "Which activity waits for which — admin only", "legal-activity-dependency-master"),
+  S("activity-reminder", "Activity Reminder Days", "Workflow", Status, "Days before due when the assignee is reminded — admin only", "legal-activity-reminder-master"),
   // ── Setup: Parties ──
   // We are the company: we buy land from Sellers and sell land to Buyers; Owners are the people in a land's ownership chain.
   // Each list also fills itself when a new name is typed in a purchase, sale or ownership entry.

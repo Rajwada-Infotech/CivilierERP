@@ -93,6 +93,16 @@ router.get("/", async (req, res) => {
     for (const x of r.recordset) add("legal_postreg", x.TaskId, `${x.Task} · ${x.LandCode}`, "Post-registration task", x.DueDate, `/legal/land/post-registration/${x.LandId}`);
   });
 
+  // Verification activities assigned to this user (Legal V2).
+  if (await has(pool, "LegalVerificationActivity")) await run(async () => {
+    const r = await pool.request().input("U", sql.Int, uid).query(`
+      SELECT a.ActivityId, a.ActivityNo, a.ActivityName, a.Status, a.DueDate, a.VerificationId, v.VerificationNo, v.ProjectId
+      FROM dbo.LegalVerificationActivity a JOIN dbo.LegalVerification v ON v.VerificationId = a.VerificationId AND v.Status <> N'Closed'
+      WHERE a.AssignedUserId = @U AND a.Status NOT IN (N'Completed', N'Not Applicable')`);
+    for (const x of r.recordset) if (!req.legalScope || req.legalScope.includes(Number(x.ProjectId)))
+      add("legal_activity", x.ActivityId, `${x.ActivityNo}. ${x.ActivityName}`, `${x.VerificationNo} · ${x.Status}`, x.DueDate, `/legal/land/verification/${x.VerificationId}`);
+  });
+
   res.json(out);
 });
 
