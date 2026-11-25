@@ -791,7 +791,7 @@ export default function BookingDetailScreen() {
               {seesReceipts ? receipts.map((r) => (
                 <View key={`r${r.Id}`}>
                   <LinkRow icon={FileText} title={`Money receipt ${r.ReceiptNo}`} sub={joinDot(money(r.Amount), fmtDate(r.ReceivedDate), r.PaymentMode, r.Status)}
-                    onPress={() => open({ to: "document", path: `/api/crm/money-receipts/${r.Id}/pdf`, name: r.ReceiptNo || "Money Receipt" })} />
+                    onPress={() => nav.navigate("CrmMoneyReceipt", { receiptId: Number(r.Id), title: r.ReceiptNo || "Money Receipt" })} />
                   {/* The web's Money Receipts actions: bounce a pending one, put a bounced one back (CrmMoneyReceipts.tsx). */}
                   {canEditReceipts && r.ReceivedPaymentId == null && (r.Status === "Pending" || r.Status === "Bounced") ? (
                     <View style={{ flexDirection: "row", gap: 8, marginBottom: 8 }}>
@@ -809,7 +809,7 @@ export default function BookingDetailScreen() {
                 <View key={`i${v.Id}`}>
                   <LinkRow icon={FileText} tone="#3b82f6" title={`Invoice ${v.InvoiceNo ?? v.Id}`}
                     sub={joinDot(v.InvoiceType, money(v.TotalAmount ?? v.GrandTotal ?? v.Amount), fmtDate(v.InvoiceDate ?? v.CreatedAt), v.Status)}
-                    onPress={() => open({ to: "document", path: `/api/crm/bookings/${id}/invoices/${v.Id}/pdf`, name: v.InvoiceNo || "Invoice" })} />
+                    onPress={() => nav.navigate("CrmInvoice", { invoiceId: Number(v.Id), title: v.InvoiceNo || "Invoice" })} />
                   {canInvoice && v.Status !== "Void" ? (
                     <View style={{ flexDirection: "row", marginBottom: 8 }}>
                       <ActionKey label="Void" outline tone={colors.destructive} onPress={() => setVoidFor(v)} />
