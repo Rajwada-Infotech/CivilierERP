@@ -14,6 +14,7 @@ export const legalNavItems: NavItem[] = [
 
   // ── Company Land Records & Verification / Approvals ───────────────────────
   { label: "My tasks", icon: TaskSquare, path: "/legal/my-tasks", pageKey: "legal-land-enquiry" },
+  { label: "Verification reports", icon: DocumentText, path: "/legal/verification/reports", pageKey: "legal-land-enquiry" },
   { label: "Land Flowchart", icon: Layer, path: "/legal/versions", pageKey: "legal-land-master" },
   {
     label: "Pipeline", icon: Note1,

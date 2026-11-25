@@ -36,7 +36,7 @@ export interface Activity {
 }
 export interface Workspace extends VerificationSummary {
   rs: { RsKhatianNo: string; RsDagNo: string }[]; lr: { LrKhatianNo: string; LrDagNo: string }[];
-  activities: Activity[]; canOverride: boolean;
+  activities: Activity[]; canOverride: boolean; canEdit?: boolean; searchOnly?: boolean;
 }
 export interface HistoryRow {
   HistoryId: number; Action: string; OldStatus: string | null; NewStatus: string | null; OldFinding: string | null; NewFinding: string | null;
@@ -98,3 +98,18 @@ export const reopenVerification = async (id: number, reason: string) => handle<{
 export const getVerificationByLand = async (landId: number) =>
   handle<(VerificationSummary & { lastReview: { VersionNo: number; Decision: string; Remarks: string | null; SnapshotHash: string | null; ReviewedBy: string | null; ReviewedAt: string } | null;
     issues: { ActivityNo: number; ActivityName: string; Status: string; Finding: string | null }[] }) | null>(await fetchWithAuth(`${BASE}/by-land/${landId}`));
+
+// ── Dashboard and reports (phase 5) ──────────────────────────────────────────────────────────────
+const RBASE = "/api/legal/verification-reports";
+export interface VerificationDashboard {
+  enquiries: number; verifications: number; active: number; readyForReview: number; verified: number; returned: number;
+  overdueActivities: number; onHoldActivities: number; discrepancies: number; pendingMutation: number; pendingConversion: number;
+  byActivity: { no: number; name: string; open: number; overdue: number }[];
+}
+export interface LegalReport { key: string; title: string; subtitle?: string; note?: string; columns: { key: string; label: string }[]; rows: Record<string, unknown>[] }
+export const getVerificationDashboard = async (project: string) => handle<VerificationDashboard | null>(await fetchWithAuth(`${RBASE}/dashboard?project=${encodeURIComponent(project)}`));
+export const getReportList = async () => handle<{ key: string; title: string; needsVerification: boolean }[]>(await fetchWithAuth(`${RBASE}/list`));
+export const getReport = async (key: string, q: { project: string; from?: string; to?: string; verificationId?: number | null }) => {
+  const qs = new URLSearchParams(Object.entries(q).filter(([, v]) => v !== undefined && v !== null && v !== "").map(([k, v]) => [k, String(v)])).toString();
+  return handle<LegalReport>(await fetchWithAuth(`${RBASE}/${key}?${qs}`));
+};

@@ -18,7 +18,7 @@
  */
 const express = require("express");
 const { getPool, sql } = require("../../db");
-const { requirePageRight } = require("../../middleware/requirePageRight");
+const { requirePageRight, hasAnyPageAction } = require("../../middleware/requirePageRight");
 const apiRateLimit = require("../../middleware/apiRateLimit");
 const { canAct, isAdmin, userOf } = require("./approvalAuthority");
 const { writeAudit, nextCodeSql, codePrefix } = require("./legalAudit");
@@ -38,6 +38,19 @@ const FINDINGS = ["Found", "Not Found", "Matched", "Mismatched", "Discrepancy Fo
 const PRIORITIES = ["Low", "Normal", "High", "Urgent"];
 const DONE = ["Completed", "Not Applicable"];
 const BAD_FINDINGS = ["Mismatched", "Discrepancy Found", "Additional Documents Required", "Unable to Verify"];
+
+/**
+ * Edit right on an activity: the enquiry page's edit right, or a Search Executive (Approval Control) — who may then
+ * change only the search activities (Department = Search); the handler checks that with req.searchOnly.
+ */
+const editOrSearch = async (req, res, next) => {
+  try {
+    if (await hasAnyPageAction(req, PAGE, ["edit"])) return next();
+    if (await canAct(req, "Search Executive", null)) { req.searchOnly = true; return next(); }
+    return res.status(403).json({ error: "You cannot change verification activities" });
+  } catch (e) { return next(e); }
+};
+const searchBlocked = (req, a) => (req.searchOnly && a.Department !== "Search" ? "A Search Executive can change only the search activities" : null);
 
 const ready = async (pool) => !!(await pool.request().query("SELECT OBJECT_ID('dbo.LegalVerificationActivity', 'U') AS t")).recordset[0].t;
 const inScope = (req, projectId) => !req.legalScope || (projectId != null && req.legalScope.includes(Number(projectId)));
@@ -226,12 +239,14 @@ router.get("/activity/:activityId/history", requirePageRight(PAGE, "view"), asyn
   }
 });
 
-router.put("/activity/:activityId", requirePageRight(PAGE, "edit"), async (req, res) => {
+router.put("/activity/:activityId", editOrSearch, async (req, res) => {
   const pool = getPool();
   try {
     const got = await loadActivity(pool, req, Number(req.params.activityId));
     if (got.error) return res.status(got.error[0]).json({ error: got.error[1] });
     const { a, v } = got;
+    const sb = searchBlocked(req, a);
+    if (sb) return res.status(403).json({ error: sb });
     if (v.Status === "Closed" || v.Status === "Verified") return res.status(409).json({ error: v.Status === "Verified" ? "This verification is verified — a Legal Reviewer must reopen it before changes" : "This verification is closed" });
     const b = req.body || {};
     // Optimistic concurrency: refused if someone else saved the activity after it was opened.
@@ -252,6 +267,7 @@ router.put("/activity/:activityId", requirePageRight(PAGE, "edit"), async (req, 
       holdReason: b.holdReason === undefined ? a.HoldReason : String(b.holdReason || "").slice(0, 500) || null,
       nextAction: b.nextAction === undefined ? a.NextAction : String(b.nextAction || "").slice(0, 500) || null,
     };
+    if (req.searchOnly && next.assignedUserId !== a.AssignedUserId) return res.status(403).json({ error: "A Search Executive cannot reassign activities" });
     if (!STATUSES.includes(next.status)) return res.status(400).json({ error: "Unknown status" });
     if (next.finding && !FINDINGS.includes(next.finding)) return res.status(400).json({ error: "Unknown finding" });
     if (!PRIORITIES.includes(next.priority)) return res.status(400).json({ error: "Unknown priority" });
@@ -270,8 +286,8 @@ router.put("/activity/:activityId", requirePageRight(PAGE, "edit"), async (req, 
         const reason = String(b.overrideReason || "").trim();
         const list = open.map((p) => `${p.ActivityNo}. ${p.ActivityName} (${p.Status})`).join(", ");
         if (!reason) return res.status(409).json({ error: `Waiting for: ${list}`, blockedBy: open, needsOverride: true });
-        if (!(isAdmin(req) || (await canAct(req, "Verifier", null)) || (await canAct(req, "Legal Reviewer", null))))
-          return res.status(403).json({ error: `Waiting for: ${list}. Only a Verifier, Legal Reviewer or admin may override` });
+        if (!(isAdmin(req) || (await canAct(req, "Verifier", null)) || (await canAct(req, "Legal Reviewer", null)) || (await canAct(req, "Legal Admin", null))))
+          return res.status(403).json({ error: `Waiting for: ${list}. Only a Verifier, Legal Reviewer, Legal Admin or admin may override` });
         override = `Dependency overridden (${list}): ${reason.slice(0, 600)}`;
       }
     }
@@ -328,11 +344,13 @@ router.put("/activity/:activityId", requirePageRight(PAGE, "edit"), async (req, 
   }
 });
 
-router.post("/activity/:activityId/document", requirePageRight(PAGE, "edit"), async (req, res) => {
+router.post("/activity/:activityId/document", editOrSearch, async (req, res) => {
   try {
     const pool = getPool();
     const got = await loadActivity(pool, req, Number(req.params.activityId));
     if (got.error) return res.status(got.error[0]).json({ error: got.error[1] });
+    const sb = searchBlocked(req, got.a);
+    if (sb) return res.status(403).json({ error: sb });
     const fileId = Number(req.body?.fileId);
     if (!fileId) return res.status(400).json({ error: "Upload a file first" });
     const title = String(req.body?.title || "").trim().slice(0, 200) || null;
@@ -393,6 +411,8 @@ async function entryWrite(req, res, mode) {
     const got = await loadActivity(pool, req, activityId);
     if (got.error) return res.status(got.error[0]).json({ error: got.error[1] });
     const { a, v } = got;
+    const sb = searchBlocked(req, a);
+    if (sb) return res.status(403).json({ error: sb });
     if (v.Status === "Closed" || v.Status === "Verified") return res.status(409).json({ error: v.Status === "Verified" ? "This verification is verified — a Legal Reviewer must reopen it before changes" : "This verification is closed" });
     const code = a.ActivityCode;
     if (!ENTRY_CONFIG[code]) return res.status(400).json({ error: "This activity has no detail entries" });
@@ -441,9 +461,9 @@ async function entryWrite(req, res, mode) {
     res.status(500).json({ error: "Could not save the entry" });
   }
 }
-router.post("/activity/:activityId/entries", requirePageRight(PAGE, "edit"), (req, res) => entryWrite(req, res, "add"));
-router.put("/entry/:entryId", requirePageRight(PAGE, "edit"), (req, res) => entryWrite(req, res, "edit"));
-router.delete("/entry/:entryId", requirePageRight(PAGE, "edit"), (req, res) => entryWrite(req, res, "remove"));
+router.post("/activity/:activityId/entries", editOrSearch, (req, res) => entryWrite(req, res, "add"));
+router.put("/entry/:entryId", editOrSearch, (req, res) => entryWrite(req, res, "edit"));
+router.delete("/entry/:entryId", editOrSearch, (req, res) => entryWrite(req, res, "remove"));
 
 // ── Ownership flowchart (phase 3): import from the deed chain, saved versions ─────────────────────
 router.post("/activity/:activityId/import-deed-chain", requirePageRight(PAGE, "edit"), async (req, res) => {
@@ -692,7 +712,8 @@ router.get("/:id", requirePageRight(PAGE, "view"), async (req, res) => {
         documents: docs.recordset.filter((d) => d.ActivityId === a.ActivityId) };
     });
     res.json({ ...w, rs: rs.recordset, lr: lr.recordset, activities,
-      canOverride: isAdmin(req) || (await canAct(req, "Verifier", null)) || (await canAct(req, "Legal Reviewer", null)) });
+      canOverride: isAdmin(req) || (await canAct(req, "Verifier", null)) || (await canAct(req, "Legal Reviewer", null)) || (await canAct(req, "Legal Admin", null)),
+      canEdit: (await hasAnyPageAction(req, PAGE, ["edit"])) || false, searchOnly: !(await hasAnyPageAction(req, PAGE, ["edit"])) && (await canAct(req, "Search Executive", null)) });
   } catch (err) {
     console.error("[legal-verification] get:", err.message);
     res.status(500).json({ error: "Could not load the verification" });

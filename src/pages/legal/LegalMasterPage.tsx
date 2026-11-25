@@ -531,13 +531,13 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
     )}
     <MasterPage
       title={master.title}
-      canCreate={rights.canCreate && !noAdd && !locked}
+      canCreate={(rights.canCreate || !!master.legalAdminEdit) && !noAdd && !locked}
       collapsibleAddForm
       addButtonLabel={addButton ?? `New ${master.title}`}
       addWord="New"
       statusTabs
-      canEdit={rights.canEdit && !locked}
-      canDelete={!locked && ((rights.canDelete && !master.noDelete) || (!!master.superAdminDelete && isSuperAdminRole(currentUser?.role)))}
+      canEdit={(rights.canEdit || !!master.legalAdminEdit) && !locked}
+      canDelete={!locked && (((rights.canDelete || !!master.legalAdminEdit) && !master.noDelete) || (!!master.superAdminDelete && isSuperAdminRole(currentUser?.role)))}
       fields={formFields}
       columns={columns}
       columnRenderers={columnRenderers}

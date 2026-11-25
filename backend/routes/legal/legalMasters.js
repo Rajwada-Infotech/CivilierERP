@@ -103,9 +103,15 @@ const withRight = (action) => (req, res, next) => {
   if (!cfg) return;
   // The approval setup (Approval Control, Approval Workflow, Reminder & SLA) is changed only by an
   // administrator, whatever rights a user has been given on the page.
+  // The verification setup may also be changed by a Legal Admin (Approval Control).
   if (cfg.adminOnly && action !== "view" && !isAdmin(req)) {
-    return res.status(403).json({ error: `Only an administrator can change ${cfg.title}` });
+    if (!cfg.legalAdmin) return res.status(403).json({ error: `Only an administrator can change ${cfg.title}` });
+    return canAct(req, "Legal Admin", null).then((ok) => ok ? requirePageRight(cfg.pageKey, "view")(req, res, next)
+      : res.status(403).json({ error: `Only an administrator or a Legal Admin can change ${cfg.title}` }), (e) => res.status(500).json({ error: e.message }));
   }
+  return withRightRest(cfg, action, req, res, next);
+};
+const withRightRest = (cfg, action, req, res, next) => {
   // Project access on writes: the land / enquiry written to (body or the existing row) must be in the user's projects.
   if (action !== "view" && req.legalScope && (cfg.table === "LegalLand" || cfg.table === "LegalLandEnquiry" || cfg.parent === "LandId" || cfg.parent === "EnquiryId")) {
     const orig = next;
@@ -335,9 +341,12 @@ function sendDbError(res, cfg, err, where) {
 }
 
 // ── Routes ────────────────────────────────────────────────────────────────────────────────────────
-router.get("/meta", (req, res) => {
+router.get("/meta", async (req, res) => {
+  // A Legal Admin edits the verification setup (adminOnly + legalAdmin masters) although its page grants only view.
+  const legalAdmin = !isAdmin(req) && await canAct(req, "Legal Admin", null).catch(() => false);
   res.json(PAGED.map(([key, m]) => ({
-    key, title: m.title, group: m.group, pageKey: m.pageKey, desc: m.desc, pk: m.pk, parent: m.parent, noDelete: !!m.noDelete, superAdminDelete: !!m.superAdminDelete, adminOnly: !!m.adminOnly,
+    key, title: m.title, group: m.group, pageKey: m.pageKey, desc: m.desc, pk: m.pk, parent: m.parent, noDelete: !!m.noDelete, superAdminDelete: !!m.superAdminDelete,
+    adminOnly: !!m.adminOnly && !(m.legalAdmin && legalAdmin), legalAdminEdit: !!(m.legalAdmin && legalAdmin),
     extras: (m.extras || []).map(({ name, label, whatsapp, after, hidden }) => ({ name, label, whatsapp: !!whatsapp, after, hidden: !!hidden })),
     fields: m.fields.map(({ name, label, type, required, options, ref, filterBy, blankOk, fill, default: def, upper, max, mask, auto, suggest, party, hidden, system, multi }) =>
       ({ name, label, type, required: !!required, options, ref, filterBy, blankOk: !!blankOk, fill, default: def, upper: !!upper, max, mask, auto: !!auto, suggest, party, hidden: !!hidden, system: !!system, multi: !!multi,

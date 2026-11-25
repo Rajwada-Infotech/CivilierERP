@@ -245,7 +245,7 @@ export default function LegalVerificationWorkspacePage() {
                       <span className="col-start-2 text-xs md:col-start-auto">{a.AssignedName ?? <span className="text-muted-foreground">Not assigned</span>}</span>
                       <span className={`col-start-2 text-xs md:col-start-auto ${a.overdue ? "font-semibold text-destructive" : ""}`}>{a.DueDate ? `Due ${fmt(a.DueDate)}` : "No due date"}{a.overdue ? " · overdue" : ""}</span>
                     </button>
-                    {isOpen && <ActivityEditor key={a.UpdatedAt ?? a.ActivityId} a={a} canEdit={canEdit && !["Closed", "Verified"].includes(w.Status)} canOverride={w.canOverride} onSaved={refresh} />}
+                    {isOpen && <ActivityEditor key={a.UpdatedAt ?? a.ActivityId} a={a} canEdit={(canEdit || (!!w.searchOnly && a.Department === "Search")) && !["Closed", "Verified"].includes(w.Status)} canOverride={w.canOverride} onSaved={refresh} />}
                   </div>
                 );
               })}

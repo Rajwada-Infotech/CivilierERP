@@ -1641,7 +1641,7 @@ const MASTERS = {
     label: "Stage + ' - ' + (SELECT name FROM dbo.users WHERE id = r.ApproverId)", orderBy: "Stage, ApproverId", adminOnly: true,
     unique: [["Stage", "ApproverId"], "This user already has this approval role"],
     fields: [
-      { name: "Stage", label: "Approval role", type: "select", required: true, options: ["Verifier", "Approver", "Legal Reviewer", "Amendment Approver"] },
+      { name: "Stage", label: "Approval role", type: "select", required: true, options: ["Verifier", "Approver", "Legal Reviewer", "Amendment Approver", "Legal Admin", "Search Executive"] },
       // Several users can be picked when adding (one row each); a row is edited one user at a time.
       { name: "ApproverId", label: "Users", type: "ref", ref: "user", required: true, multi: true },
       { name: "Remarks", label: "Remarks", type: "textarea", max: 500 },
@@ -1700,7 +1700,7 @@ const MASTERS = {
 
   // Legal verification workspace (V2): the activity list, what each waits for, and the reminder days.
   "verification-activity": {
-    adminOnly: true,
+    adminOnly: true, legalAdmin: true,
     title: "Verification Activities", group: "Workflow", pageKey: "legal-verification-activity-master", table: "LegalActivityTemplate", pk: "TemplateId",
     desc: "The legal verification checklist every new workspace starts with: duration, department and whether it is mandatory.",
     label: "ActivityName", orderBy: "ActivityNo",
@@ -1718,7 +1718,7 @@ const MASTERS = {
     ],
   },
   "activity-dependency": {
-    adminOnly: true,
+    adminOnly: true, legalAdmin: true,
     title: "Activity Dependencies", group: "Workflow", pageKey: "legal-activity-dependency-master", table: "LegalActivityDependency", pk: "DependencyId",
     desc: "An activity cannot be completed until the activities it depends on are completed (or overridden with a reason).",
     label: "TemplateId", orderBy: "TemplateId",
@@ -1732,7 +1732,7 @@ const MASTERS = {
     ],
   },
   "activity-reminder": {
-    adminOnly: true,
+    adminOnly: true, legalAdmin: true,
     title: "Activity Reminder Days", group: "Workflow", pageKey: "legal-activity-reminder-master", table: "LegalActivityReminderRule", pk: "RuleId",
     desc: "Days before an activity's due date when its assignee is reminded (0 = on the due date). Overdue activities are reminded daily.",
     label: "DaysBefore", orderBy: "DaysBefore",
