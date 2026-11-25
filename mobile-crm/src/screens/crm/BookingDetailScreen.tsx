@@ -13,7 +13,7 @@ import { fetchWithAuth } from "@/services/fetchWithAuth";
 import { useRoute, type RouteProp } from "@react-navigation/native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { ArrowLeftRight, Banknote, Check, CheckCircle2, ChevronRight, FileText, KeyRound, Landmark, PhoneCall, RefreshCw, Scale, Smartphone, Ticket, UserCheck, Wallet, XCircle } from "lucide-react-native";
+import { ArrowLeftRight, Banknote, Check, CheckCircle2, ChevronRight, FileText, Handshake, KeyRound, Landmark, PhoneCall, RefreshCw, Scale, Smartphone, Ticket, UserCheck, Wallet, XCircle } from "lucide-react-native";
 import { useAuth } from "@/auth/AuthContext";
 import { crmGet, crmSend, getBooking, getBookingLifecycle, getBookingPayments, type Row } from "@/api/crmApi";
 import { toast } from "@/components/Toast";
@@ -404,6 +404,20 @@ export default function BookingDetailScreen() {
               {live && canDoAction("crm-loan-details", "edit") ? (
                 <View style={{ flexDirection: "row", marginTop: 8 }}><ActionKey outline label={loan?.LoanId != null ? "Edit loan" : "Record loan"} onPress={openLoan} /></View>
               ) : null}
+      </> },
+    canAccessPage("crm-brokerage") && b?.BrokerName && {
+      key: "brokerage", label: "Brokerage", icon: Handshake,
+      badge: b.BrokerName as string,
+      body: <>
+              <Kv label="Broker" value={b.BrokerName as string} />
+              {Number(b.BrokerageTotal) > 0 ? <Kv label="Total commission" value={money(b.BrokerageTotal)} /> : null}
+              {Number(b.BrokeragePaid) > 0 ? <Kv label="Paid" value={money(b.BrokeragePaid)} /> : null}
+              {Number(b.BrokerageTotal) > 0 && Number(b.BrokerageTotal) > Number(b.BrokeragePaid) ? (
+                <Kv label="Balance" value={money(Number(b.BrokerageTotal) - Number(b.BrokeragePaid))} />
+              ) : null}
+              <View style={{ flexDirection: "row", marginTop: 8 }}>
+                <ActionKey outline label="View brokerage" onPress={() => nav.navigate("CrmRegister", { register: "brokerage" })} />
+              </View>
       </> },
     ["crm-pre-possession", "crm-possession-notice", "crm-handover"].some((pg) => canAccessPage(pg)) && status === "Approved" &&
       { key: "possession", label: "Possession and handover", icon: KeyRound, go: () => nav.navigate("CrmPossession", { bookingId: id, title }) },
