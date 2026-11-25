@@ -28,16 +28,31 @@ export function openTab(tab: keyof TabParamList) {
  * with notificationType, refId, refType). */
 export interface NotificationRef { type?: unknown; notificationType?: unknown; refId?: unknown; refType?: unknown }
 
-/** The screen a notification opens: an approval → the Approval Inbox, a booking (or a payment Finance returned on
- * one) → that booking, a service ticket → that ticket, a payment milestone → Demands; anything else → Notifications. */
+/** The screen a notification opens — one place for the bell and tapped push notifications.
+ * refType values come from backend/services/notify.js callers and crmSlaEngine.js. */
 export function notificationTarget(n: NotificationRef): { route: string; params?: object } {
   const type = String(n.type ?? "");
   const refType = String(n.refType ?? "");
   const refId = Number(n.refId);
   if (type.startsWith("approval-")) return { route: "Approvals" };
+  // Entity detail screens: open the specific record when we have its id.
   if (refId > 0 && (refType === "crm_booking" || refType === "crm_payment")) return { route: "CrmBooking", params: { bookingId: refId } };
   if (refId > 0 && refType === "service_ticket") return { route: "CrmTicket", params: { ticketId: refId } };
+  if (refId > 0 && refType === "crm_cancellation") return { route: "CrmCancellation", params: { cancellationId: refId } };
+  if (refId > 0 && refType === "crm_refund") return { route: "CrmRefund", params: { refundId: refId } };
+  if (refId > 0 && refType === "crm_invoice") return { route: "CrmInvoice", params: { invoiceId: refId } };
+  if (refId > 0 && refType === "crm_money_receipt") return { route: "CrmMoneyReceipt", params: { receiptId: refId } };
+  if (refId > 0 && refType === "crm_resale") return { route: "CrmResale", params: { resaleId: refId } };
+  if (refId > 0 && refType === "crm_transfer_deed") return { route: "CrmTransferDeed", params: { deedId: refId } };
+  if (refId > 0 && refType === "crm_ownership_change") return { route: "CrmOwnershipChange", params: { changeId: refId } };
+  if (refId > 0 && refType === "crm_brokerage") return { route: "CrmBrokerage", params: { brokerageId: refId } };
+  // Register lists: best destination when we only have an entity id but no dedicated screen,
+  // or when the notification is about an overdue aggregate (no single record to open).
   if (refType === "payment_milestone") return { route: "CrmRegister", params: { register: "demands" } };
+  if (refType === "crm_unit_change") return { route: "CrmRegister", params: { register: "unit-changes" } };
+  if (refType === "crm_agreement") return { route: "CrmRegister", params: { register: "agreements" } };
+  if (refType === "crm_sales_deed") return { route: "CrmRegister", params: { register: "sales-deed" } };
+  if (refType === "crm_possession_notice") return { route: "CrmRegister", params: { register: "possession" } };
   return { route: "Notifications" };
 }
 
