@@ -22,11 +22,11 @@ export const ATTENTION: { key: string; label: string; note: string; hot: boolean
   { key: "disputedNotices", label: "Possession notices disputed", note: "Disputed by the customer", hot: true, register: "possession" },
   { key: "urgentTickets", label: "Urgent service tickets", note: "High priority, not resolved", hot: true, register: "service-tickets" },
   { key: "welcomeCallPending", label: "Welcome calls pending", note: "Approved bookings with no call made", hot: false, register: "welcome-calls" },
-  { key: "agreementsPending", label: "Agreements need action", note: "None drawn up, or in draft over 5 days", hot: false },
-  { key: "deedsAwaitingCustomer", label: "Deeds awaiting customer", note: "Not yet approved on the portal", hot: false },
-  { key: "deedsAwaitingDirector", label: "Deeds awaiting director", note: "Pending director approval", hot: false },
-  { key: "nocsNotIssued", label: "NOCs not issued", note: "Approved, not handed over", hot: false },
-  { key: "cancellationsPending", label: "Cancellations pending", note: "Awaiting management approval", hot: false },
+  { key: "agreementsPending", label: "Agreements need action", note: "None drawn up, or in draft over 5 days", hot: false, register: "agreements" },
+  { key: "deedsAwaitingCustomer", label: "Deeds awaiting customer", note: "Not yet approved on the portal", hot: false, register: "sales-deed" },
+  { key: "deedsAwaitingDirector", label: "Deeds awaiting director", note: "Pending director approval", hot: false, register: "sales-deed" },
+  { key: "nocsNotIssued", label: "NOCs not issued", note: "Approved, not handed over", hot: false, register: "noc" },
+  { key: "cancellationsPending", label: "Cancellations pending", note: "Awaiting management approval", hot: false, register: "cancellations" },
   { key: "handoversThisWeek", label: "Handovers this week", note: "Scheduled in the next 7 days", hot: false, register: "possession" },
 ];
 
