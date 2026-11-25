@@ -16,6 +16,7 @@ import {
 } from "@/api/legalVerificationApi";
 import { Progress, WS_TONE } from "./LegalVerificationListPage";
 import { ActivityEntriesPanel, useEntryConfig } from "@/components/legal/ActivityEntriesPanel";
+import { VerificationReviewPanel } from "@/components/legal/VerificationReviewPanel";
 
 const fmt = (d: string | null | undefined) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—");
 const fmtTime = (d: string) => new Date(d).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -244,12 +245,13 @@ export default function LegalVerificationWorkspacePage() {
                       <span className="col-start-2 text-xs md:col-start-auto">{a.AssignedName ?? <span className="text-muted-foreground">Not assigned</span>}</span>
                       <span className={`col-start-2 text-xs md:col-start-auto ${a.overdue ? "font-semibold text-destructive" : ""}`}>{a.DueDate ? `Due ${fmt(a.DueDate)}` : "No due date"}{a.overdue ? " · overdue" : ""}</span>
                     </button>
-                    {isOpen && <ActivityEditor key={a.UpdatedAt ?? a.ActivityId} a={a} canEdit={canEdit && w.Status !== "Closed"} canOverride={w.canOverride} onSaved={refresh} />}
+                    {isOpen && <ActivityEditor key={a.UpdatedAt ?? a.ActivityId} a={a} canEdit={canEdit && !["Closed", "Verified"].includes(w.Status)} canOverride={w.canOverride} onSaved={refresh} />}
                   </div>
                 );
               })}
               {!acts.length && <p className="p-4 text-sm text-muted-foreground">Nothing here.</p>}
             </div>
+            <VerificationReviewPanel w={w} onSaved={() => { refresh(); qc.invalidateQueries({ queryKey: ["legal-verification-reviews"] }); }} />
           </>
         )}
       </LegalShell>

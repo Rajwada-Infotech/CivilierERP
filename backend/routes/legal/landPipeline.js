@@ -1735,7 +1735,7 @@ router.get("/:id/final-status", requirePageRight(LAND_PAGE, "view"), async (req,
         SELECT TOP 50 a.CreatedAt, a.Action, a.EntityType, u.name AS UserName
         FROM dbo.LegalRecordAudit a LEFT JOIN dbo.users u ON u.id = a.UserId
         WHERE a.LandId = @Id AND a.CreatedAt > ISNULL((SELECT ISNULL(DeedReverifiedAt, FinalVerifiedAt) FROM dbo.LegalLand WHERE LandId = @Id), '1900-01-01')
-          AND a.Action NOT IN (N'Land verified — sent to Deed Process', N'Deed timeline changed', N'Deed completed', N'Deed reopened', N'Deed copy uploaded', N'Deed copy removed', N'Deed changes re-verified')
+          AND a.Action NOT IN (N'Land verified — sent to Deed Process', N'Deed timeline changed', N'Deed stage changed', N'Deed completed', N'Deed reopened', N'Deed copy uploaded', N'Deed copy removed', N'Deed changes re-verified')
         ORDER BY a.CreatedAt DESC`)).recordsets;
       if (c[0][0]?.DeedChangedAt) changed = { at: c[0][0].DeedChangedAt, by: c[0][0].ByName, items: c[1] };
     }
@@ -1801,6 +1801,7 @@ router.get("/deed-process/list", requirePageRight(LAND_PAGE, "view"), pageable("
     const chg = !!(await pool.request().query("SELECT COL_LENGTH('dbo.LegalLand', 'DeedChangedAt') AS c")).recordset[0].c;
     const appr = !!(await pool.request().query("SELECT COL_LENGTH('dbo.LegalLand', 'DeedApprovalStatus') AS c")).recordset[0].c;
     const req2 = !!(await pool.request().query("SELECT COL_LENGTH('dbo.LegalLand', 'DeedApprovalRequestedAt') AS c")).recordset[0].c;
+    const stage = !!(await pool.request().query("SELECT COL_LENGTH('dbo.LegalLand', 'DeedStage') AS c")).recordset[0].c;
     const r = await pool.request().query(`
       SELECT l.LandId, l.LandCode, l.LandName, l.ProjectId, l.WorkflowStatus, d.DistrictName, m.MouzaName, l.FinalVerifiedAt,
              CONVERT(char(10), l.DeedTargetDate, 23) AS DeedTargetDate, l.DeedCompletedAt,
@@ -1810,13 +1811,14 @@ router.get("/deed-process/list", requirePageRight(LAND_PAGE, "view"), pageable("
              ${req2 ? "l.DeedApprovalRequestedAt, (SELECT name FROM dbo.users WHERE id = l.DeedApprovalRequestedBy) AS DeedApprovalRequestedByName," : ""}
              ${chg ? "l.DeedChangedAt, (SELECT name FROM dbo.users WHERE id = l.DeedChangedBy) AS DeedChangedByName," : ""}
              ${copy ? "l.DeedFileId, (SELECT FileName FROM dbo.LegalMasterFile f WHERE f.FileId = l.DeedFileId) AS DeedFileName," : ""}
+             ${stage ? "l.DeedStage, l.DeedDrafterId, (SELECT name FROM dbo.users WHERE id = l.DeedDrafterId) AS DeedDrafterName," : ""}
              (SELECT name FROM dbo.users WHERE id = l.FinalVerifiedBy) AS VerifiedBy
       FROM dbo.LegalLand l
       LEFT JOIN dbo.LegalDistrict d ON d.DistrictId = l.DistrictId
       LEFT JOIN dbo.LegalMouza m ON m.MouzaId = l.MouzaId
       WHERE l.IsActive = 1 AND l.WorkflowStatus IN (N'Deed Process', N'Deed Completed')
       ORDER BY CASE WHEN l.WorkflowStatus = N'Deed Process' THEN 0 ELSE 1 END, l.DeedTargetDate`);
-    res.json({ lands: r.recordset, canEditTimeline: await canAct(req, "Verifier", LAND_PAGE),
+    res.json({ lands: r.recordset, deedStages: DEED_STAGES, canEditTimeline: await canAct(req, "Verifier", LAND_PAGE),
       canApprove: await canAct(req, "Approver", LAND_PAGE), canRequest: await hasAnyPageAction(req, LAND_PAGE, ["edit"]) });
   } catch (err) {
     console.error("[legal-land] deed-process list:", err.message);
@@ -1842,6 +1844,18 @@ router.put("/:id/deed-process", requirePageRight(LAND_PAGE, "view"), async (req,
         .query("UPDATE dbo.LegalLand SET DeedTargetDate = @T, UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @Id");
       await writeAudit(pool, req, { action: "Deed timeline changed", entityType: "Land Property", entityId: id, landId: id, newValue: { targetDate: target } });
       return res.json({ message: "Timeline saved" });
+    }
+    if (req.body?.deedStage !== undefined || req.body?.drafterId !== undefined) {
+      if (!(await hasAnyPageAction(req, LAND_PAGE, ["edit"]))) return res.status(403).json({ error: "You cannot update the deed stage" });
+      if (!(await pool.request().query("SELECT COL_LENGTH('dbo.LegalLand', 'DeedStage') AS c")).recordset[0].c) return res.status(503).json({ error: "Deed stage is not set up yet (migration 717)" });
+      const stage = req.body.deedStage == null || req.body.deedStage === "" ? null : String(req.body.deedStage);
+      if (stage && !DEED_STAGES.includes(stage)) return res.status(400).json({ error: "Unknown deed stage" });
+      const drafter = req.body.drafterId == null || req.body.drafterId === "" ? null : idParam(req.body.drafterId);
+      await pool.request().input("Id", sql.Int, id).input("S", sql.NVarChar(30), stage).input("D", sql.Int, drafter).input("U", sql.Int, req.user?.userId || null)
+        .query("UPDATE dbo.LegalLand SET DeedStage = @S, DeedDrafterId = @D, UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @Id");
+      await writeAudit(pool, req, { action: "Deed stage changed", entityType: "Land Property", entityId: id, landId: id, newValue: { stage, drafter } });
+      if (drafter) await require("../../services/legalNotify").notify(pool, { users: [drafter], except: req.user?.userId, type: "legal_deed_drafting", title: `Deed drafting: ${l.LandCode}`, body: `Stage: ${stage ?? "Not Started"}. Open Legal → Deed Process.`, refId: id });
+      return res.json({ message: `${l.LandCode}: deed stage saved` });
     }
     if (req.body?.deedFileId !== undefined) {
       if (!(await hasAnyPageAction(req, LAND_PAGE, ["edit"]))) return res.status(403).json({ error: "You cannot upload the deed copy" });
@@ -2334,9 +2348,10 @@ router.put("/post-registration/task/:taskId", requirePageRight(LAND_PAGE, "edit"
 // ── LA (Land Acquisition) & ULC (Urban Land Ceiling) clearance ─────────────────────────────────────────────────
 // Tracked per land: Apply (date + application no.) → Obtain (date + certificate no.) or Reject. The certificate copy is
 // attached at Post-Registration once the clearance is obtained. Every change is written to the audit trail.
+const DEED_STAGES = ["Not Started", "Drafting", "Under Review", "Clearance Pending", "Ready for Approval"];
 const CLEARANCE_KINDS = { LA: "LA (Land Acquisition) clearance", ULC: "ULC (Urban Land Ceiling) clearance" };
 // LA & ULC clearance path (migration 712). Done = Approved or Not Applicable; Expired needs a fresh application.
-const CLEARANCE_STATUS = ["Not Applied", "Not Applicable", "Application Submitted", "Under Review", "Query Raised", "Query Replied", "Approved", "Rejected", "Expired"];
+const CLEARANCE_STATUS = ["Not Applied", "Not Applicable", "Application Submitted", "Under Review", "Query Raised", "Query Replied", "Additional Documents Submitted", "Report Received", "Approved", "Rejected", "Expired"];
 const clearanceReady = async (pool) => !!(await pool.request().query("SELECT OBJECT_ID('dbo.LegalLandClearance', 'U') AS t")).recordset[0].t;
 const CLEARANCE_SELECT = `
   SELECT c.ClearanceId, c.LandId, c.Kind, c.Status, CONVERT(char(10), c.AppliedOn, 23) AS AppliedOn, c.ApplicationNo,

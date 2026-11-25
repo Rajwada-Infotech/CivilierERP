@@ -12,7 +12,7 @@ import { getStartableEnquiries, getVerifications, startVerification, type Verifi
 
 const fmt = (d: string | null) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—");
 const input = "h-9 w-full border border-foreground/30 bg-background px-2 text-sm focus:border-foreground focus:outline-none";
-export const WS_TONE: Record<string, string> = { "In Progress": "text-sky-700", "Ready for Review": "text-emerald-700", "On Hold": "text-amber-700", Closed: "text-muted-foreground" };
+export const WS_TONE: Record<string, string> = { "In Progress": "text-sky-700", "Ready for Review": "text-violet-700", Verified: "text-emerald-700", Returned: "text-destructive", "On Hold": "text-amber-700", Closed: "text-muted-foreground" };
 
 /** Start a workspace for an enquiry that has none yet. */
 function StartPanel({ onDone }: { onDone: (id: number) => void }) {

@@ -1,4 +1,5 @@
 import React, { useRef, useState } from "react";
+import { LandVerificationCard } from "@/components/legal/LandVerificationCard";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CheckCircle2 } from "lucide-react";
@@ -342,6 +343,7 @@ export function LandReviewFlow({ landId }: { landId: number }) {
 
   return (
     <section className="space-y-4">
+      <LandVerificationCard landId={landId} />
       <div className="flex flex-wrap items-end justify-between gap-3 border-2 border-foreground bg-card px-4 py-3">
         <div>
           <p className="text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Version {data.versionNo} · {data.first ? "first verification" : "changes since version " + (data.versionNo - 1)}</p>

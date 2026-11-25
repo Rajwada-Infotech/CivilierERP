@@ -26,6 +26,7 @@ const { pageable } = require("./paging");
 const projectGuard = require("./projectGuard");
 const { notify } = require("../../services/legalNotify");
 const { ENTRY_CONFIG, validateEntry, publicConfig, entryLabel } = require("./activityEntries");
+const crypto = require("crypto");
 
 const router = express.Router();
 router.use(apiRateLimit);
@@ -86,7 +87,7 @@ async function refreshWorkspace(conn, verificationId) {
       (SELECT COUNT(*) FROM dbo.LegalVerificationActivity a WHERE a.VerificationId = v.VerificationId AND a.IsMandatory = 1
          AND a.Status NOT IN (N'Completed', N'Not Applicable')) AS OpenMandatory
     FROM dbo.LegalVerification v WHERE v.VerificationId = @V`)).recordset[0];
-  if (!r || r.Status === "Closed" || r.Status === "On Hold") return r?.Status;
+  if (!r || ["Closed", "On Hold", "Verified"].includes(r.Status)) return r?.Status;
   const next = r.OpenMandatory === 0 ? "Ready for Review" : "In Progress";
   if (next !== r.Status) await conn.request().input("V", sql.Int, verificationId).input("S", sql.NVarChar(30), next)
     .query("UPDATE dbo.LegalVerification SET Status = @S, UpdatedAt = SYSUTCDATETIME() WHERE VerificationId = @V");
@@ -231,7 +232,7 @@ router.put("/activity/:activityId", requirePageRight(PAGE, "edit"), async (req, 
     const got = await loadActivity(pool, req, Number(req.params.activityId));
     if (got.error) return res.status(got.error[0]).json({ error: got.error[1] });
     const { a, v } = got;
-    if (v.Status === "Closed") return res.status(409).json({ error: "This verification is closed" });
+    if (v.Status === "Closed" || v.Status === "Verified") return res.status(409).json({ error: v.Status === "Verified" ? "This verification is verified — a Legal Reviewer must reopen it before changes" : "This verification is closed" });
     const b = req.body || {};
     // Optimistic concurrency: refused if someone else saved the activity after it was opened.
     const seen = b.updatedAt ? new Date(b.updatedAt).getTime() : null;
@@ -392,7 +393,7 @@ async function entryWrite(req, res, mode) {
     const got = await loadActivity(pool, req, activityId);
     if (got.error) return res.status(got.error[0]).json({ error: got.error[1] });
     const { a, v } = got;
-    if (v.Status === "Closed") return res.status(409).json({ error: "This verification is closed" });
+    if (v.Status === "Closed" || v.Status === "Verified") return res.status(409).json({ error: v.Status === "Verified" ? "This verification is verified — a Legal Reviewer must reopen it before changes" : "This verification is closed" });
     const code = a.ActivityCode;
     if (!ENTRY_CONFIG[code]) return res.status(400).json({ error: "This activity has no detail entries" });
     const b = req.body || {};
@@ -451,7 +452,7 @@ router.post("/activity/:activityId/import-deed-chain", requirePageRight(PAGE, "e
     const got = await loadActivity(pool, req, Number(req.params.activityId));
     if (got.error) return res.status(got.error[0]).json({ error: got.error[1] });
     if (got.a.ActivityCode !== "OWNERSHIP-FLOW") return res.status(400).json({ error: "Only the ownership flowchart imports the deed chain" });
-    if (got.v.Status === "Closed") return res.status(409).json({ error: "This verification is closed" });
+    if (["Closed", "Verified"].includes(got.v.Status)) return res.status(409).json({ error: "This verification is closed or verified" });
     const deeds = (await pool.request().input("V", sql.Int, got.a.VerificationId).query(`
       SELECT x.DataJson FROM dbo.LegalActivityEntry x JOIN dbo.LegalVerificationActivity a ON a.ActivityId = x.ActivityId
       JOIN dbo.LegalActivityTemplate t ON t.TemplateId = a.TemplateId
@@ -514,6 +515,149 @@ router.post("/activity/:activityId/flow-version", requirePageRight(PAGE, "edit")
   } catch (err) {
     console.error("[legal-verification] flow version:", err.message);
     res.status(500).json({ error: "Could not save the version" });
+  }
+});
+
+// ── Legal review (phase 4) ───────────────────────────────────────────────────────────────────────
+const REVIEW_DECISIONS = ["Verified", "Returned for Correction", "Additional Documents Required", "Further Investigation Required"];
+const REVIEW_CHECKS = [
+  ["owner", "Owner information"], ["rs", "RS records"], ["lr", "LR records"], ["match", "Ownership matching"], ["chain", "Deed chain"],
+  ["flow", "Historical flowchart"], ["court", "Court search"], ["clearance", "Government clearances (LA / ULC)"], ["khajna", "Khajna"],
+  ["heir", "Inheritance"], ["mother", "Mother deed"], ["copies", "Certified copies"], ["survey", "Survey and map records"],
+];
+const canReview = async (req) => isAdmin(req) || (await canAct(req, "Legal Reviewer", null)) || (await canAct(req, "Verifier", null));
+
+/** Everything that was reviewed, frozen: activities with their status, finding, findings and live entries. */
+async function snapshot(conn, verificationId) {
+  const acts = (await conn.request().input("V", sql.Int, verificationId).query(`
+    SELECT a.ActivityId, a.ActivityNo, a.ActivityName, a.IsMandatory, a.Status, a.Finding, a.AssignedUserId, CONVERT(char(10), a.DueDate, 23) AS DueDate,
+           CONVERT(char(10), a.CompletedDate, 23) AS CompletedDate, a.Findings, a.Remarks
+    FROM dbo.LegalVerificationActivity a WHERE a.VerificationId = @V ORDER BY a.ActivityNo`)).recordset;
+  const entries = (await conn.request().input("V", sql.Int, verificationId).query(`
+    SELECT x.EntryId, x.ActivityId, x.DataJson FROM dbo.LegalActivityEntry x JOIN dbo.LegalVerificationActivity a ON a.ActivityId = x.ActivityId
+    WHERE a.VerificationId = @V AND x.IsActive = 1 ORDER BY x.EntryId`)).recordset;
+  const docs = (await conn.request().input("V", sql.Int, verificationId).query(`
+    SELECT d.ActivityId, d.FileId FROM dbo.LegalActivityDocument d JOIN dbo.LegalVerificationActivity a ON a.ActivityId = d.ActivityId WHERE a.VerificationId = @V AND d.IsActive = 1`)).recordset;
+  return acts.map((a) => ({ ...a, entries: entries.filter((e) => e.ActivityId === a.ActivityId).map((e) => ({ EntryId: e.EntryId, data: JSON.parse(e.DataJson) })),
+    documents: docs.filter((d) => d.ActivityId === a.ActivityId).map((d) => d.FileId) }));
+}
+
+router.get("/:id/reviews", requirePageRight(PAGE, "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = Number.parseInt(req.params.id, 10);
+    const w = (await pool.request().input("V", sql.Int, id).query("SELECT ProjectId FROM dbo.LegalVerification WHERE VerificationId = @V")).recordset[0];
+    if (!w) return res.status(404).json({ error: "Verification not found" });
+    if (!inScope(req, w.ProjectId)) return res.status(403).json({ error: "You don't have access to this project." });
+    const rows = (await pool.request().input("V", sql.Int, id).query(`
+      SELECT r.ReviewId, r.VersionNo, r.Decision, r.Remarks, r.ChecklistJson, r.SnapshotHash, u.name AS ReviewedBy, r.ReviewedAt
+      FROM dbo.LegalVerificationReview r LEFT JOIN dbo.users u ON u.id = r.ReviewedBy WHERE r.VerificationId = @V ORDER BY r.VersionNo DESC`)).recordset;
+    res.json({ reviews: rows.map((r) => ({ ...r, checklist: JSON.parse(r.ChecklistJson || "{}"), ChecklistJson: undefined })), checks: REVIEW_CHECKS, decisions: REVIEW_DECISIONS, canReview: await canReview(req) });
+  } catch (err) {
+    console.error("[legal-verification] reviews:", err.message);
+    res.status(500).json({ error: "Could not load reviews" });
+  }
+});
+
+router.post("/:id/review", requirePageRight(PAGE, "view"), async (req, res) => {
+  const pool = getPool();
+  try {
+    const id = Number.parseInt(req.params.id, 10);
+    const w = (await pool.request().input("V", sql.Int, id).query(`${WORKSPACE_SELECT} WHERE v.VerificationId = @V`)).recordset[0];
+    if (!w) return res.status(404).json({ error: "Verification not found" });
+    if (!inScope(req, w.ProjectId)) return res.status(403).json({ error: "You don't have access to this project." });
+    if (!(await canReview(req))) return res.status(403).json({ error: "Only a Legal Reviewer, Verifier or admin can review" });
+    const b = req.body || {};
+    const decision = String(b.decision || "");
+    const remarks = String(b.remarks || "").trim().slice(0, 2000) || null;
+    if (!REVIEW_DECISIONS.includes(decision)) return res.status(400).json({ error: "Choose a decision" });
+    if (["Verified", "Closed"].includes(w.Status)) return res.status(409).json({ error: `Already ${w.Status.toLowerCase()}` });
+    if (decision !== "Verified" && !remarks) return res.status(400).json({ error: "Say what must be corrected or added (remarks)" });
+    const checklist = {};
+    for (const [k] of REVIEW_CHECKS) {
+      const c = b.checklist?.[k] || {};
+      const st = ["ok", "issue", "na"].includes(c.status) ? c.status : null;
+      checklist[k] = { status: st, note: String(c.note || "").slice(0, 300) || null };
+    }
+    if (decision === "Verified") {
+      if (w.Status !== "Ready for Review") return res.status(409).json({ error: "Every mandatory activity must be Completed or Not Applicable first" });
+      const unset = REVIEW_CHECKS.filter(([k]) => !checklist[k].status).map(([, l]) => l);
+      if (unset.length) return res.status(400).json({ error: `Mark every checklist item: ${unset.join(", ")}` });
+      const issues = REVIEW_CHECKS.filter(([k]) => checklist[k].status === "issue").map(([, l]) => l);
+      if (issues.length) return res.status(400).json({ error: `Checklist has issues (${issues.join(", ")}) — return it instead of verifying` });
+      if (w.Discrepancies > 0 && !remarks) return res.status(400).json({ error: `${w.Discrepancies} activit${w.Discrepancies === 1 ? "y has" : "ies have"} a mismatch or discrepancy — explain in remarks why it is acceptable` });
+    }
+    const snap = JSON.stringify(await snapshot(pool, id));
+    const hash = crypto.createHash("sha256").update(snap).digest("hex");
+    const me = userOf(req);
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+    let versionNo;
+    try {
+      versionNo = (await new sql.Request(tx).input("V", sql.Int, id).query("SELECT ISNULL(MAX(VersionNo), 0) + 1 AS n FROM dbo.LegalVerificationReview WITH (UPDLOCK, HOLDLOCK) WHERE VerificationId = @V")).recordset[0].n;
+      await new sql.Request(tx).input("V", sql.Int, id).input("N", sql.Int, versionNo).input("D", sql.NVarChar(40), decision).input("R", sql.NVarChar(2000), remarks)
+        .input("C", sql.NVarChar(sql.MAX), JSON.stringify(checklist)).input("S", sql.NVarChar(sql.MAX), snap).input("H", sql.Char(64), hash).input("U", sql.Int, me)
+        .query("INSERT INTO dbo.LegalVerificationReview (VerificationId, VersionNo, Decision, Remarks, ChecklistJson, SnapshotJson, SnapshotHash, ReviewedBy) VALUES (@V, @N, @D, @R, @C, @S, @H, @U)");
+      await new sql.Request(tx).input("V", sql.Int, id).input("S", sql.NVarChar(30), decision === "Verified" ? "Verified" : "Returned").input("U", sql.Int, me)
+        .query("UPDATE dbo.LegalVerification SET Status = @S, UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE VerificationId = @V");
+      await tx.commit();
+    } catch (e) { try { await tx.rollback(); } catch { /* already */ } throw e; }
+    await writeAudit(pool, req, { action: `Legal review: ${decision}`, entityType: "LegalVerification", entityId: id, newValue: { versionNo, hash }, remarks });
+    const assignees = (await pool.request().input("V", sql.Int, id).query("SELECT DISTINCT AssignedUserId AS id FROM dbo.LegalVerificationActivity WHERE VerificationId = @V AND AssignedUserId IS NOT NULL")).recordset.map((r) => r.id);
+    await notify(pool, { users: [w.LeadUserId, ...(decision === "Verified" ? [] : assignees)], roles: decision === "Verified" ? ["Approver"] : [], except: me,
+      type: decision === "Verified" ? "legal_verification_verified" : "legal_verification_returned", title: `${decision}: ${w.VerificationNo}`,
+      body: (remarks || `Version ${versionNo} reviewed.`).slice(0, 300), refId: id, refType: "legal_verification" });
+    res.json({ message: `Version ${versionNo} saved — ${decision}`, versionNo, hash });
+  } catch (err) {
+    console.error("[legal-verification] review:", err.message);
+    res.status(500).json({ error: "Could not save the review" });
+  }
+});
+
+router.post("/:id/reopen", requirePageRight(PAGE, "view"), async (req, res) => {
+  const pool = getPool();
+  try {
+    const id = Number.parseInt(req.params.id, 10);
+    const w = (await pool.request().input("V", sql.Int, id).query("SELECT ProjectId, Status, VerificationNo FROM dbo.LegalVerification WHERE VerificationId = @V")).recordset[0];
+    if (!w) return res.status(404).json({ error: "Verification not found" });
+    if (!inScope(req, w.ProjectId)) return res.status(403).json({ error: "You don't have access to this project." });
+    if (!(isAdmin(req) || (await canAct(req, "Legal Reviewer", null)))) return res.status(403).json({ error: "Only a Legal Reviewer or admin can reopen a verification" });
+    if (w.Status !== "Verified") return res.status(409).json({ error: "Only a verified verification can be reopened" });
+    const reason = String(req.body?.reason || "").trim().slice(0, 2000);
+    if (!reason) return res.status(400).json({ error: "Say why it is reopened" });
+    const snap = JSON.stringify(await snapshot(pool, id));
+    const n = (await pool.request().input("V", sql.Int, id).query("SELECT ISNULL(MAX(VersionNo), 0) + 1 AS n FROM dbo.LegalVerificationReview WHERE VerificationId = @V")).recordset[0].n;
+    await pool.request().input("V", sql.Int, id).input("N", sql.Int, n).input("R", sql.NVarChar(2000), reason).input("S", sql.NVarChar(sql.MAX), snap)
+      .input("H", sql.Char(64), crypto.createHash("sha256").update(snap).digest("hex")).input("U", sql.Int, userOf(req)).query(`
+        INSERT INTO dbo.LegalVerificationReview (VerificationId, VersionNo, Decision, Remarks, SnapshotJson, SnapshotHash, ReviewedBy) VALUES (@V, @N, N'Reopened', @R, @S, @H, @U);
+        UPDATE dbo.LegalVerification SET Status = N'In Progress', UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE VerificationId = @V;`);
+    await refreshWorkspace(pool, id);
+    await writeAudit(pool, req, { action: "Legal verification reopened", entityType: "LegalVerification", entityId: id, remarks: reason });
+    res.json({ message: `${w.VerificationNo} reopened` });
+  } catch (err) {
+    console.error("[legal-verification] reopen:", err.message);
+    res.status(500).json({ error: "Could not reopen" });
+  }
+});
+
+/** The verification behind a land (through its enquiry), for the land and approval screens. */
+router.get("/by-land/:landId", requirePageRight(PAGE, "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    if (!(await ready(pool))) return res.json(null);
+    const w = (await pool.request().input("L", sql.Int, Number(req.params.landId)).query(`${WORKSPACE_SELECT} WHERE e.LandId = @L`)).recordset[0];
+    if (!w) return res.json(null);
+    if (!inScope(req, w.ProjectId)) return res.status(403).json({ error: "You don't have access to this project." });
+    const last = (await pool.request().input("V", sql.Int, w.VerificationId).query(`
+      SELECT TOP 1 r.VersionNo, r.Decision, r.Remarks, r.SnapshotHash, u.name AS ReviewedBy, r.ReviewedAt
+      FROM dbo.LegalVerificationReview r LEFT JOIN dbo.users u ON u.id = r.ReviewedBy WHERE r.VerificationId = @V ORDER BY r.VersionNo DESC`)).recordset[0] || null;
+    const open = (await pool.request().input("V", sql.Int, w.VerificationId).query(`
+      SELECT ActivityNo, ActivityName, Status, Finding FROM dbo.LegalVerificationActivity WHERE VerificationId = @V
+        AND (Status NOT IN (N'Completed', N'Not Applicable') OR Finding IN (N'Mismatched', N'Discrepancy Found', N'Additional Documents Required', N'Unable to Verify')) ORDER BY ActivityNo`)).recordset;
+    res.json({ ...w, lastReview: last, issues: open });
+  } catch (err) {
+    console.error("[legal-verification] by-land:", err.message);
+    res.status(500).json({ error: "Could not load the verification" });
   }
 });
 

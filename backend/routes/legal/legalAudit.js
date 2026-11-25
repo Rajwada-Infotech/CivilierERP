@@ -52,7 +52,7 @@ async function writeAudit(conn, req, { action, entityType, entityId, landId = nu
 }
 
 // Deed Process's own actions do not count as a change to the land's data.
-const DEED_ACTIONS = new Set(["Land verified — sent to Deed Process", "Deed timeline changed", "Deed completed", "Deed reopened",
+const DEED_ACTIONS = new Set(["Land verified — sent to Deed Process", "Deed timeline changed", "Deed stage changed", "Deed completed", "Deed reopened",
   "Deed copy uploaded", "Deed copy removed", "Deed changes re-verified",
   "Deed approved", "Deed rejected", "Deed on hold", "Deed L1 approved", "Deed L1 rejected", "Deed L1 on hold", "Deed L2 approved", "Deed L2 rejected", "Deed L2 on hold", "Registry search recorded", "Due diligence checked", "Risk assessed", "Legal review updated", "Court case cleared", "Government site data saved", "Post-registration task updated", "Post-registration tasks created", "Registry search edited", "Registry search deleted", "Applied for deed registration", "Deed registered", "Amendment requested", "Amendment approved", "Amendment rejected", "Amendment withdrawn", "Land review submitted", "Deed sent for final approval", "Land review approved", "Land review returned"]);
 

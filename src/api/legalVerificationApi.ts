@@ -83,3 +83,18 @@ export interface FlowVersion { versionNo: number; HistoryId: number; remarks: st
 export const importDeedChain = async (activityId: number) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/activity/${activityId}/import-deed-chain`, json("POST", {})));
 export const getFlowVersions = async (activityId: number) => handle<FlowVersion[]>(await fetchWithAuth(`${BASE}/activity/${activityId}/flow-versions`));
 export const saveFlowVersion = async (activityId: number, remarks: string) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/activity/${activityId}/flow-version`, json("POST", { remarks })));
+
+// ── Legal review (phase 4) ───────────────────────────────────────────────────────────────────────
+export type CheckStatus = "ok" | "issue" | "na" | null;
+export interface ReviewRow {
+  ReviewId: number; VersionNo: number; Decision: string; Remarks: string | null; SnapshotHash: string | null; ReviewedBy: string | null; ReviewedAt: string;
+  checklist: Record<string, { status: CheckStatus; note: string | null }>;
+}
+export const getReviews = async (id: number) =>
+  handle<{ reviews: ReviewRow[]; checks: [string, string][]; decisions: string[]; canReview: boolean }>(await fetchWithAuth(`${BASE}/${id}/reviews`));
+export const submitReview = async (id: number, body: { decision: string; remarks: string; checklist: Record<string, { status: CheckStatus; note: string }> }) =>
+  handle<{ message: string; versionNo: number; hash: string }>(await fetchWithAuth(`${BASE}/${id}/review`, json("POST", body)));
+export const reopenVerification = async (id: number, reason: string) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/reopen`, json("POST", { reason })));
+export const getVerificationByLand = async (landId: number) =>
+  handle<(VerificationSummary & { lastReview: { VersionNo: number; Decision: string; Remarks: string | null; SnapshotHash: string | null; ReviewedBy: string | null; ReviewedAt: string } | null;
+    issues: { ActivityNo: number; ActivityName: string; Status: string; Finding: string | null }[] }) | null>(await fetchWithAuth(`${BASE}/by-land/${landId}`));
