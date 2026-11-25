@@ -2,13 +2,15 @@
 // countdown, and bank payout details.
 // Endpoint: GET /api/crm/refunds/:id
 import { ActivityIndicator, ScrollView, Text, View } from "react-native";
-import { useRoute, type RouteProp } from "@react-navigation/native";
+import { useRoute, useNavigation, type RouteProp } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useQuery } from "@tanstack/react-query";
 import { crmGet, type Row } from "@/api/crmApi";
+import { useAuth } from "@/auth/AuthContext";
 import { fonts } from "@/theme/fonts";
 import { useBrand } from "@/theme/ThemeContext";
 import type { MainStackParamList } from "@/navigation/MainStack";
-import { Kv, Pill, Section, fmtDate, money, words } from "./ui";
+import { ActionKey, Kv, Pill, Section, fmtDate, money, words } from "./ui";
 
 const STATUS_COLOR: Record<string, string> = {
   Draft:            "#94a3b8",
@@ -25,6 +27,8 @@ export default function CrmRefundScreen() {
   const { params } = useRoute<RouteProp<MainStackParamList, "CrmRefund">>();
   const { refundId } = params;
   const b = useBrand();
+  const nav = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
+  const { canAccessPage } = useAuth();
 
   const q = useQuery<Row>({
     queryKey: ["crm-refund", refundId],
@@ -69,7 +73,17 @@ export default function CrmRefundScreen() {
       <Section title="Refund">
         <Kv label="Customer" value={r.CustomerName as string} />
         {r.BookingNo ? <Kv label="Booking" value={[r.BookingNo, r.UnitNo, r.ProjectName].filter(Boolean).join(" · ")} /> : null}
+        {r.BookingId && (canAccessPage("crm-bookings") || canAccessPage("crm-payments")) ? (
+          <View style={{ flexDirection: "row", marginBottom: 4 }}>
+            <ActionKey outline label="Open booking" onPress={() => nav.navigate("CrmBooking", { bookingId: Number(r.BookingId), title: r.BookingNo as string || "Booking" })} />
+          </View>
+        ) : null}
         {r.CancellationNo ? <Kv label="Cancellation" value={r.CancellationNo as string} /> : null}
+        {r.SourceCancellationId && canAccessPage("crm-cancellations") ? (
+          <View style={{ flexDirection: "row", marginBottom: 4 }}>
+            <ActionKey outline label="Open cancellation" onPress={() => nav.navigate("CrmCancellation", { cancellationId: Number(r.SourceCancellationId), title: r.CancellationNo as string || "Cancellation" })} />
+          </View>
+        ) : null}
         <Kv label="Number" value={r.RefundNo as string} />
         <Kv label="Source" value={words(r.SourceType as string)} />
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 2 }}>

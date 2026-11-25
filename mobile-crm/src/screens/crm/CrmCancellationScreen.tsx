@@ -1,13 +1,15 @@
 // Cancellation detail — amounts, deductions, approval chain, and refund status.
 // Endpoint: GET /api/crm/cancellations/:id
 import { ActivityIndicator, ScrollView, Text, View } from "react-native";
-import { useRoute, type RouteProp } from "@react-navigation/native";
+import { useRoute, useNavigation, type RouteProp } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useQuery } from "@tanstack/react-query";
 import { crmGet, type Row } from "@/api/crmApi";
+import { useAuth } from "@/auth/AuthContext";
 import { fonts } from "@/theme/fonts";
 import { useBrand } from "@/theme/ThemeContext";
 import type { MainStackParamList } from "@/navigation/MainStack";
-import { Kv, Pill, Section, fmtDate, money, words } from "./ui";
+import { ActionKey, Kv, Pill, Section, fmtDate, money, words } from "./ui";
 
 const STATUS_COLOR: Record<string, string> = {
   Pending:  "#f59e0b",
@@ -26,6 +28,8 @@ export default function CrmCancellationScreen() {
   const { params } = useRoute<RouteProp<MainStackParamList, "CrmCancellation">>();
   const { cancellationId } = params;
   const b = useBrand();
+  const nav = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
+  const { canAccessPage } = useAuth();
 
   const q = useQuery<Row>({
     queryKey: ["crm-cancellation", cancellationId],
@@ -61,6 +65,11 @@ export default function CrmCancellationScreen() {
       {/* Identity */}
       <Section title="Cancellation">
         <Kv label="Booking" value={[c.BookingNo, c.UnitNo, c.ProjectName].filter(Boolean).join(" · ")} />
+        {c.BookingId && (canAccessPage("crm-bookings") || canAccessPage("crm-payments")) ? (
+          <View style={{ flexDirection: "row", marginBottom: 4 }}>
+            <ActionKey outline label="Open booking" onPress={() => nav.navigate("CrmBooking", { bookingId: Number(c.BookingId), title: c.BookingNo as string || "Booking" })} />
+          </View>
+        ) : null}
         <Kv label="Applicant" value={c.ApplicantName as string} />
         <Kv label="Number" value={c.CancellationNo as string} />
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 2 }}>
@@ -114,6 +123,11 @@ export default function CrmCancellationScreen() {
       {/* Refund tracking */}
       {c.RefundId || c.SettlementStatus ? (
         <Section title="Refund">
+          {c.RefundId && canAccessPage("crm-refunds") ? (
+            <View style={{ flexDirection: "row", marginBottom: 8 }}>
+              <ActionKey outline label="Open refund" onPress={() => nav.navigate("CrmRefund", { refundId: Number(c.RefundId), title: c.RefundNo as string || "Refund" })} />
+            </View>
+          ) : null}
           {c.RefundNo ? <Kv label="Refund no." value={c.RefundNo as string} /> : null}
           {c.RefundStatus ? (
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 2 }}>
