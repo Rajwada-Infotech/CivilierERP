@@ -1,5 +1,5 @@
 // Opens the incoming-call screen when someone calls this person: at once over the socket, and by asking the server
-// every 5 s while the app is open (in case the socket is down and the push is late). The push itself, tapped
+// every 20 s while the app is open (in case the socket is down and the push is late). The push itself, tapped
 // from the lock screen, opens the same screen through App.tsx.
 import { useEffect, useRef } from "react";
 import { AppState } from "react-native";
@@ -38,7 +38,7 @@ export function IncomingCallWatcher() {
   useEffect(() => {
     if (!view) return;
     void check();
-    const t = setInterval(() => void check(), 5000);
+    const t = setInterval(() => void check(), 20000);
     const sub = AppState.addEventListener("change", (s) => {
       active.current = s === "active";
       if (active.current) void check();

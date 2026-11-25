@@ -2,8 +2,8 @@
 // joins the call's room straight away. Incoming: Answer / Decline. During the call: mute, speaker and end.
 // LiveKit's native audio isn't inside Expo Go; there the screen says so and offers the phone dialler instead.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { View, Text, Linking, Animated, Easing, NativeModules } from "react-native";
-import { isRunningInExpoGo } from "expo";
+import { View, Text, Linking, Animated, Easing } from "react-native";
+import { nativeCallsAvailable } from "./callSupport";
 import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import { Mic, MicOff, Phone, PhoneOff, Volume2, Ear } from "lucide-react-native";
 import type { MainStackParamList } from "@/navigation/MainStack";
@@ -21,7 +21,7 @@ type LiveKit = { Room: any; RoomEvent: any; AudioSession: any };
 function loadLiveKit(): LiveKit | null {
   // Expo Go has no WebRTC native module: LiveKit loads there but every call fails with "WebRTC native module not
   // found". Check first, so the person gets a clear message and the phone option instead.
-  if (isRunningInExpoGo() || !NativeModules.WebRTCModule) return null;
+  if (!nativeCallsAvailable()) return null;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const rn = require("@livekit/react-native");

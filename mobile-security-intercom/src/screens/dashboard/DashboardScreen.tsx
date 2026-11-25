@@ -182,7 +182,7 @@ export default function DashboardScreen() {
     enabled: !!view,
     staleTime: 15 * 1000,
     // While a visitor is waiting, re-read often in case the socket is down; otherwise once a minute.
-    refetchInterval: (q) => ((q.state.data?.pending?.length ?? 0) > 0 ? 8000 : 60 * 1000),
+    refetchInterval: (q) => ((q.state.data?.pending?.length ?? 0) > 0 ? 20000 : 60 * 1000),
     retry: 1,
   });
 
