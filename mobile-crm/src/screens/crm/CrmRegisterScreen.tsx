@@ -40,6 +40,8 @@ export function useCrmCanOpen() {
         : o.to === "ownership-change" ? canAccessPage("crm-ownership-changes")
     : o.to === "agreement" ? canAccessPage("crm-agreements")
     : o.to === "sale-deed" ? canAccessPage("crm-sales-deed")
+    : o.to === "noc" ? canAccessPage("crm-noc")
+    : o.to === "mutation" ? canAccessPage("crm-mutation")
         : canAccessPage("crm-customer-360"))));
 }
 
@@ -64,6 +66,8 @@ export function useCrmOpen() {
     else if (o.to === "ownership-change") nav.navigate("CrmOwnershipChange", { changeId: o.changeId, title: o.title });
     else if (o.to === "agreement") nav.navigate("CrmAgreement", { bookingId: o.bookingId, title: o.title });
     else if (o.to === "sale-deed") nav.navigate("CrmSaleDeed", { bookingId: o.bookingId, title: o.title });
+    else if (o.to === "noc") nav.navigate("CrmNoc", { bookingId: o.bookingId, title: o.title });
+    else if (o.to === "mutation") nav.navigate("CrmMutation", { bookingId: o.bookingId, title: o.title });
     else openDocument(o.path, o.name).catch((e: Error) => Alert.alert("Could not open", e.message));
   };
 }

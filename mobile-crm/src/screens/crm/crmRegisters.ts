@@ -32,7 +32,9 @@ export type CrmOpen =
   | { to: "transfer-deed"; deedId: number; title: string }
   | { to: "ownership-change"; changeId: number; title: string }
   | { to: "agreement"; bookingId: number; title: string }
-  | { to: "sale-deed"; bookingId: number; title: string };
+  | { to: "sale-deed"; bookingId: number; title: string }
+  | { to: "noc"; bookingId: number; title: string }
+  | { to: "mutation"; bookingId: number; title: string };
 
 /** Welcome-call outcomes and their words — the web's (src/pages/CRM/welcomeCalls/config.tsx OUTCOMES / OUTCOME_LABEL),
  * the server's list (crmWelcomeCalls.js OUTCOMES). */
@@ -354,7 +356,8 @@ export const CRM_REGISTERS: CrmRegister[] = [
       joinDot(r.NocType, r.ProjectName),
     ],
     searchIn: (r) => [r.NocNo, r.ApplicantName, r.BookingNo, r.UnitNo, r.NocType, r.Status, r.ProjectName],
-    open: toBooking, dateOf: (r) => r.CreatedAt,
+    open: (r) => (r.BookingId ? { to: "noc" as const, bookingId: Number(r.BookingId), title: r.NocNo || r.ApplicantName || "NOC" } : null),
+    dateOf: (r) => r.CreatedAt,
     empty: "No NOC records.",
   },
   {
@@ -380,7 +383,8 @@ export const CRM_REGISTERS: CrmRegister[] = [
       joinDot(r.RegistrationNo && `Reg ${r.RegistrationNo}`, r.DocsRequired && `${r.DocsVerified ?? 0}/${r.DocsRequired} docs`),
     ],
     searchIn: (r) => [r.ApplicantName, r.BookingNo, r.UnitNo, r.DeedNo, r.RegistrationNo, r.Status],
-    open: toBooking, dateOf: (r) => r.CreatedAt,
+    open: (r) => (r.BookingId ? { to: "mutation" as const, bookingId: Number(r.BookingId), title: r.ApplicantName || r.BookingNo || "Mutation" } : null),
+    dateOf: (r) => r.CreatedAt,
     empty: "No mutation records.",
   },
   {
