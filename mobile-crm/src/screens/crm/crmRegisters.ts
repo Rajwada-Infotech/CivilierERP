@@ -30,7 +30,9 @@ export type CrmOpen =
   | { to: "money-receipt"; receiptId: number; title: string }
   | { to: "brokerage"; brokerageId: number; title: string }
   | { to: "transfer-deed"; deedId: number; title: string }
-  | { to: "ownership-change"; changeId: number; title: string };
+  | { to: "ownership-change"; changeId: number; title: string }
+  | { to: "agreement"; bookingId: number; title: string }
+  | { to: "sale-deed"; bookingId: number; title: string };
 
 /** Welcome-call outcomes and their words — the web's (src/pages/CRM/welcomeCalls/config.tsx OUTCOMES / OUTCOME_LABEL),
  * the server's list (crmWelcomeCalls.js OUTCOMES). */
@@ -339,7 +341,8 @@ export const CRM_REGISTERS: CrmRegister[] = [
       joinDot(r.AgreementDate && `Dated ${fmtDate(r.AgreementDate)}`, r.ProjectName),
     ],
     searchIn: (r) => [r.AgreementNo, r.ApplicantName, r.BookingNo, r.UnitNo, r.ProjectName, r.Status],
-    open: toBooking, dateOf: (r) => r.AgreementDate, amountOf: (r) => r.GrandTotal,
+    open: (r) => (r.BookingId ? { to: "agreement" as const, bookingId: Number(r.BookingId), title: r.AgreementNo || r.ApplicantName || "Agreement" } : null),
+    dateOf: (r) => r.AgreementDate, amountOf: (r) => r.GrandTotal,
     empty: "No agreements.",
   },
   {
@@ -363,7 +366,8 @@ export const CRM_REGISTERS: CrmRegister[] = [
       joinDot(r.ProjectName, r.CreatedAt && `Created ${fmtDate(r.CreatedAt)}`),
     ],
     searchIn: (r) => [r.DeedNo, r.ApplicantName, r.BookingNo, r.UnitNo, r.ProjectName, r.Status],
-    open: toBooking, dateOf: (r) => r.CreatedAt,
+    open: (r) => (r.BookingId ? { to: "sale-deed" as const, bookingId: Number(r.BookingId), title: r.DeedNo || r.ApplicantName || "Sale Deed" } : null),
+    dateOf: (r) => r.CreatedAt,
     empty: "No sale deed records.",
   },
   {
