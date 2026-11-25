@@ -37,7 +37,8 @@ import {
   type LiveZone,
   type VisitorLogRow,
 } from "@/api/securityIntercomApi";
-import { EmptyRow, SheetDialog, fieldCls, flatLabel } from "./securityParts";
+import { EmptyRow, SheetDialog, fieldCls, filterCls, flatLabel, inlineFieldCls } from "./securityParts";
+import { HR_LBL as LBL } from "@/components/hrpayroll/HrUi";
 
 const PAGE_KEY = "security-live";
 type Tab = "map" | "replay" | "alerts" | "log" | "complaints";
@@ -238,7 +239,7 @@ function ReplayTab() {
         <div className="flex flex-wrap items-end gap-3">
           <label className="text-xs">
             <span className="block mb-1 text-muted-foreground">Guard</span>
-            <select value={guardId} onChange={(e) => setGuardId(e.target.value)} className={`${fieldCls} w-56`}>
+            <select value={guardId} onChange={(e) => setGuardId(e.target.value)} className={`${inlineFieldCls} w-56`}>
               <option value="">Choose…</option>
               {guards.map((g) => (
                 <option key={g.id} value={g.id}>{g.name}</option>
@@ -247,11 +248,11 @@ function ReplayTab() {
           </label>
           <label className="text-xs">
             <span className="block mb-1 text-muted-foreground">From</span>
-            <input type="datetime-local" value={from} onChange={(e) => setFrom(e.target.value)} className={`${fieldCls} w-52`} />
+            <input type="datetime-local" value={from} onChange={(e) => setFrom(e.target.value)} className={`${inlineFieldCls} w-52 font-heading tabular-nums`} />
           </label>
           <label className="text-xs">
             <span className="block mb-1 text-muted-foreground">To</span>
-            <input type="datetime-local" value={to} onChange={(e) => setTo(e.target.value)} className={`${fieldCls} w-52`} />
+            <input type="datetime-local" value={to} onChange={(e) => setTo(e.target.value)} className={`${inlineFieldCls} w-52 font-heading tabular-nums`} />
           </label>
           <button
             type="button"
@@ -487,33 +488,48 @@ function VisitorLogTab({ canExport }: { canExport: boolean }) {
         note={data?.total}
         flush
         action={
-          <div className="flex flex-wrap items-center gap-2">
-            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={`${fieldCls} w-36 h-8`} aria-label="From" />
-            <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={`${fieldCls} w-36 h-8`} aria-label="To" />
-            <select value={status} onChange={(e) => setStatus(e.target.value)} className={`${fieldCls} w-auto h-8`} aria-label="Status">
-              <option value="">Any status</option>
+          canExport ? (
+            <button type="button" className={`${KEY_LINE} h-8 px-3`} onClick={() => void exportCsv()} disabled={exporting || !data?.total}>
+              {exporting ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />} Export CSV
+            </button>
+          ) : undefined
+        }
+      >
+        <div className="flex flex-wrap items-end gap-3 px-4 py-3 border-b border-foreground/20">
+          <label className="flex flex-col gap-1">
+            <span className={LBL}>From</span>
+            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={`${filterCls} w-40 font-heading tabular-nums`} />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className={LBL}>To</span>
+            <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={`${filterCls} w-40 font-heading tabular-nums`} />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className={LBL}>Outcome</span>
+            <select value={status} onChange={(e) => setStatus(e.target.value)} className={`${filterCls} w-40`}>
+              <option value="">Any outcome</option>
               {Object.entries(STATUS).map(([k, v]) => (
                 <option key={k} value={k}>{v.text}</option>
               ))}
             </select>
-            <select value={gateId} onChange={(e) => setGateId(e.target.value)} className={`${fieldCls} w-auto h-8`} aria-label="Gate">
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className={LBL}>Gate</span>
+            <select value={gateId} onChange={(e) => setGateId(e.target.value)} className={`${filterCls} w-56`}>
               <option value="">All gates</option>
               {(gates?.gates ?? []).map((g) => (
                 <option key={g.id} value={g.id}>{g.projectName} · {g.name}</option>
               ))}
             </select>
-            <div className="relative">
+          </label>
+          <label className="flex flex-col gap-1 flex-1 min-w-[14rem]">
+            <span className={LBL}>Search</span>
+            <span className="relative">
               <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Name, flat, vehicle, phone" className={`${fieldCls} w-56 h-8 pl-7`} />
-            </div>
-            {canExport && (
-              <button type="button" className={`${KEY_LINE} h-8 px-3`} onClick={() => void exportCsv()} disabled={exporting || !data?.total}>
-                {exporting ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />} Export CSV
-              </button>
-            )}
-          </div>
-        }
-      >
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Name, flat, vehicle, phone" className={`${filterCls} w-full pl-7`} />
+            </span>
+          </label>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>

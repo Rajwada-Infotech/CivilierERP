@@ -25,7 +25,7 @@ import {
   type ProjectOption,
   type SecurityResident,
 } from "@/api/securityIntercomApi";
-import { EmptyRow, Field, SheetDialog, fieldCls, flatLabel } from "./securityParts";
+import { EmptyRow, Field, SheetDialog, fieldCls, filterCls, flatLabel } from "./securityParts";
 
 const PAGE_KEY = "security-residents";
 const ACTION_LABEL: Record<string, string> = { ADDED: "Added", UPDATED: "Changed", DEACTIVATED: "Removed", REACTIVATED: "Restored" };
@@ -117,7 +117,7 @@ export default function SecurityResidents() {
               <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} /> Show removed
               </label>
-              <select value={projectId} onChange={(e) => setProjectId(e.target.value)} className={`${fieldCls} w-auto h-8`} aria-label="Project">
+              <select value={projectId} onChange={(e) => setProjectId(e.target.value)} className={`${filterCls} w-auto`} aria-label="Project">
                 <option value="">All projects</option>
                 {(data?.projects ?? []).map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
@@ -125,7 +125,7 @@ export default function SecurityResidents() {
               </select>
               <div className="relative">
                 <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Name, mobile or flat" className={`${fieldCls} w-52 h-8 pl-7`} />
+                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Name, mobile or flat" className={`${filterCls} w-52 pl-7`} />
               </div>
             </div>
           }

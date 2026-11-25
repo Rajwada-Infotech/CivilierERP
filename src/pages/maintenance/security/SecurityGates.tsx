@@ -14,7 +14,7 @@ import { SheetMark } from "@/components/sheet/Sheet";
 import { KEY_INK } from "@/components/sheet/sheetParts";
 import { usePageRights } from "@/hooks/usePageRights";
 import { createGate, deleteGate, getGates, updateGate, type GateInput, type NoResponsePolicy, type ProjectOption, type SecurityGate } from "@/api/securityIntercomApi";
-import { EmptyRow, Field, SheetDialog, fieldCls } from "./securityParts";
+import { EmptyRow, Field, SheetDialog, fieldCls, filterCls } from "./securityParts";
 
 const PAGE_KEY = "security-gates";
 const POLICIES: { value: NoResponsePolicy; label: string }[] = [
@@ -78,7 +78,7 @@ export default function SecurityGates() {
           note={gates.length}
           flush
           action={
-            <select value={projectId} onChange={(e) => setProjectId(e.target.value)} className={`${fieldCls} w-auto h-8`} aria-label="Project">
+            <select value={projectId} onChange={(e) => setProjectId(e.target.value)} className={`${filterCls} w-auto`} aria-label="Project">
               <option value="">All projects</option>
               {(data?.projects ?? []).map((p) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
