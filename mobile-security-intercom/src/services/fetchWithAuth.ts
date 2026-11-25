@@ -100,10 +100,13 @@ export async function fetchWithAuth(
   }
 
   if (response.status === 403) {
-    throw new ApiError(
-      "You do not have permission to perform this action.",
-      response.status,
-    );
+    // The server's own reason when it gives one ("Only the person called can answer.", …), so a refusal can be told
+    // apart from a missing right.
+    const body = await response
+      .clone()
+      .json()
+      .catch(() => ({}) as { error?: string });
+    throw new ApiError(body?.error || "You do not have permission to perform this action.", response.status);
   }
 
   return response;
