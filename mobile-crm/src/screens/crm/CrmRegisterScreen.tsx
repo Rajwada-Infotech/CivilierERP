@@ -36,6 +36,7 @@ export function useCrmCanOpen() {
         : o.to === "resale" ? canAccessPage("crm-resales")
         : o.to === "money-receipt" ? canAccessPage("crm-money-receipts")
         : o.to === "brokerage" ? canAccessPage("crm-brokerage")
+        : o.to === "transfer-deed" ? canAccessPage("crm-transfer-deeds")
         : canAccessPage("crm-customer-360"))));
 }
 
@@ -56,6 +57,7 @@ export function useCrmOpen() {
     else if (o.to === "resale") nav.navigate("CrmResale", { resaleId: o.resaleId, title: o.title });
     else if (o.to === "money-receipt") nav.navigate("CrmMoneyReceipt", { receiptId: o.receiptId, title: o.title });
     else if (o.to === "brokerage") nav.navigate("CrmBrokerage", { brokerageId: o.brokerageId, title: o.title });
+    else if (o.to === "transfer-deed") nav.navigate("CrmTransferDeed", { deedId: o.deedId, title: o.title });
     else openDocument(o.path, o.name).catch((e: Error) => Alert.alert("Could not open", e.message));
   };
 }

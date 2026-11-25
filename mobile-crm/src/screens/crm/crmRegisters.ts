@@ -28,7 +28,8 @@ export type CrmOpen =
   | { to: "invoice"; invoiceId: number; title: string }
   | { to: "resale"; resaleId: number; title: string }
   | { to: "money-receipt"; receiptId: number; title: string }
-  | { to: "brokerage"; brokerageId: number; title: string };
+  | { to: "brokerage"; brokerageId: number; title: string }
+  | { to: "transfer-deed"; deedId: number; title: string };
 
 /** Welcome-call outcomes and their words — the web's (src/pages/CRM/welcomeCalls/config.tsx OUTCOMES / OUTCOME_LABEL),
  * the server's list (crmWelcomeCalls.js OUTCOMES). */
@@ -574,7 +575,8 @@ export const CRM_REGISTERS: CrmRegister[] = [
       r.CreatedAt && fmtDate(r.CreatedAt),
     ],
     searchIn: (r) => [r.DeedNo, r.ApplicantName, r.BookingNo, r.Status],
-    open: toBooking, dateOf: (r) => r.CreatedAt,
+    open: (r) => ({ to: "transfer-deed" as const, deedId: Number(r.Id), title: r.DeedNo || r.BookingNo || "Transfer Deed" }),
+    dateOf: (r) => r.CreatedAt,
     empty: "No transfer deeds.",
   },
   {
