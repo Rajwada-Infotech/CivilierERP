@@ -6,6 +6,10 @@ import { HR_FIELD, HR_HEAD, HR_LBL } from "@/components/hrpayroll/HrUi";
 import { KEY_INK, KEY_LINE } from "@/components/sheet/sheetParts";
 
 export const fieldCls = HR_FIELD;
+/** A field set inline next to others (filters, toolbars): the same look without w-full, so its own width applies. */
+export const inlineFieldCls = HR_FIELD.replace("w-full ", "");
+/** The same at row height (h-8), for filters in a box's header or toolbar. */
+export const filterCls = HR_FIELD.replace("w-full ", "").replace("h-9", "h-8");
 export const labelCls = `block mb-1.5 ${HR_LBL}`;
 
 export function Field({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {

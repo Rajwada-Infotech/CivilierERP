@@ -23,7 +23,7 @@ import {
   type GuardAssignment,
   type GuardOptions,
 } from "@/api/securityIntercomApi";
-import { EmptyRow, Field, SheetDialog, fieldCls } from "./securityParts";
+import { EmptyRow, Field, SheetDialog, fieldCls, filterCls } from "./securityParts";
 
 const PAGE_KEY = "security-guards";
 const todayIst = () => new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10);
@@ -102,7 +102,7 @@ export default function SecurityGuards() {
               </label>
               <div className="relative">
                 <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Guard, gate or project" className={`${fieldCls} w-56 h-8 pl-7`} />
+                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Guard, gate or project" className={`${filterCls} w-56 pl-7`} />
               </div>
             </div>
           }
