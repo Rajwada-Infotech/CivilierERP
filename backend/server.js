@@ -524,7 +524,8 @@ async function createApp() {
     // Per account: 20 attempts / 15 min at one email address (see loginRateLimitKey for why not per IP).
     const loginLimiter = rateLimit({
       windowMs: 15 * 60 * 1000,
-      max: 20,
+      // The Security app's guards sign in on shared gate phones at every shift change: more room per address there.
+      max: (req) => (req.get("X-Client") === "mobile-security-intercom" ? 100 : 20),
       message: { error: "Too many login attempts. Try again later." },
       store: makeStore("rl:login:"),
       keyGenerator: loginRateLimitKey,
@@ -579,6 +580,9 @@ async function createApp() {
     const apiLimiter = rateLimit({
       windowMs: 60 * 1000,
       max: async (req) => {
+        // The Civilier Security app (guards on shift, residents waiting at the gate) keeps live screens open all day:
+        // a much higher ceiling per person, and for its sign-in screen at the shared address.
+        if (req.get("X-Client") === "mobile-security-intercom") return req.rateLimitUserId == null && req.rateLimitPortalId == null ? 5000 : 3000;
         if (req.rateLimitUserId == null) return 1000;
         try {
           return await getDynamicLimitCached(req.rateLimitUserId);
