@@ -76,10 +76,14 @@ function stageMilestones(rows, held, pending, recorded = 0) {
 // being checked; Outstanding = what is genuinely still to pay on it.
 function milestoneDue(m) {
   const stage = m?.MoneyStage ?? null;
+  const outstanding = stage === "Waived" ? 0 : Math.max(0, round2(Number(m?.AmountDue || 0) - Number(m?.AmountPaid || 0) - Number(m?.HeldOnAccount || 0)));
   return {
     Covered: ["Adjusted", "Verified", "Waived"].includes(stage),
     Verifying: ["InVerification", "Recorded"].includes(stage),
-    Outstanding: stage === "Waived" ? 0 : Math.max(0, round2(Number(m?.AmountDue || 0) - Number(m?.AmountPaid || 0) - Number(m?.HeldOnAccount || 0))),
+    Outstanding: outstanding,
+    // ToPay = what the customer has not yet handed over at all: Outstanding less money already received for it that is
+    // with Finance or recorded but not yet sent (WithFinanceCover / RecordedCover, from stageMilestones). Reminders ask for this.
+    ToPay: Math.max(0, round2(outstanding - Number(m?.WithFinanceCover || 0) - Number(m?.RecordedCover || 0))),
   };
 }
 

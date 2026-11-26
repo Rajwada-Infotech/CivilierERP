@@ -75,12 +75,43 @@ async function milestoneRows(pool, rule, ctx, onlyFirst) {
   const out = [];
   for (const m of await unpaidMilestones(pool, rule, onlyFirst)) {
     const st = (await stillToPay(pool, ctx, m.BookingId)).get(m.MilestoneId);
-    if (!st || st.Covered || st.Verifying || !(st.Outstanding > 0)) continue;
+    // Paid or received (matched, held, with Finance or recorded) needs no reminder; part received asks only for the rest.
+    if (!st || st.Covered || st.Verifying || !(st.ToPay > 0)) continue;
     out.push({
-      bookingId: m.BookingId, key: `milestone:${m.MilestoneId}`, refId: m.MilestoneId,
+      bookingId: m.BookingId, key: `milestone:${m.MilestoneId}`, refId: m.MilestoneId, toPay: st.ToPay,
       starts: { BookingDate: m.BookingDate, DueDate: m.DueDate, DemandDate: m.DemandDate },
       contact: contactOf(m),
-      facts: { ...commonFacts(m), Milestone: m.MilestoneName, Amount: inr(st.Outstanding), DueDate: m.DueDate ? day(m.DueDate) : "" },
+      facts: { ...commonFacts(m), Milestone: m.MilestoneName, Amount: inr(st.ToPay), DueDate: m.DueDate ? day(m.DueDate) : "" },
+    });
+  }
+  return out;
+}
+
+// One reminder per booking for its payment milestones: those already due under the rule (start + offset reached) go
+// in one message — their names, the total still to pay, the oldest due date — numbered from the oldest one. The key
+// carries that oldest payment milestone, so when it is paid the next one starts its own count (Reminder 1 again)
+// instead of colliding with numbers already sent. A booking with none due yet is still pending (its next one).
+function oneReminderPerBooking(rows, rule, today) {
+  const byBooking = new Map();
+  for (const r of rows) {
+    if (!r.starts[rule.StartFrom]) continue;
+    byBooking.set(r.bookingId, [...(byBooking.get(r.bookingId) || []), r]);
+  }
+  const out = [];
+  for (const [bookingId, list] of byBooking) {
+    list.sort((a, b) => toDay(a.starts[rule.StartFrom]) - toDay(b.starts[rule.StartFrom]) || a.refId - b.refId);
+    const due = list.filter((r) => daysBetween(r.starts[rule.StartFrom], today) - rule.OffsetDays >= 0);
+    const group = due.length ? due : [list[0]];
+    const first = group[0];
+    const names = group.map((r) => r.facts.Milestone);
+    out.push({
+      bookingId, key: `milestones:${bookingId}:${first.refId}`, refId: first.refId, starts: first.starts, contact: first.contact,
+      facts: {
+        ...first.facts,
+        Milestone: names.length > 3 ? `${names.slice(0, 2).join(", ")} and ${names.length - 2} more` : names.join(", "),
+        Amount: inr(group.reduce((n, r) => n + Number(r.toPay || 0), 0)),
+        MilestoneCount: group.length,
+      },
     });
   }
   return out;
@@ -98,12 +129,12 @@ const SITUATIONS = {
   },
   instalmentDue: {
     label: "Payment milestone due or overdue",
-    description: "Any payment milestone with money still to pay, counted from its due date or its demand date (a negative offset reminds before). Stops once it is paid or the payment is being verified.",
+    description: "A booking's payment milestones with money still to pay, in one reminder per booking: their names and total, counted from the oldest one's due date or demand date (a negative offset reminds before). Stops once they are paid or the money is received.",
     starts: ["DueDate", "DemandDate"],
-    fields: [...COMMON_FIELDS, "Milestone", "Amount", "DueDate"],
+    fields: [...COMMON_FIELDS, "Milestone", "Amount", "DueDate", "MilestoneCount"],
     customerScreen: "CustomerPayments", portalTarget: "payments",
     notifyType: "sla_payment_overdue", refType: "crm_payment",
-    pending: (pool, rule, ctx) => milestoneRows(pool, rule, ctx, false),
+    pending: async (pool, rule, ctx) => oneReminderPerBooking(await milestoneRows(pool, rule, ctx, false), rule, ctx.today),
   },
   agreementPending: {
     label: "Agreement not signed",
@@ -323,7 +354,7 @@ async function loadPauses(pool, today) {
     WHERE EndedAt IS NULL AND (PausedUntil IS NULL OR PausedUntil >= @d)`)).recordset;
   return (bookingId, rid) => pauses.some((p) => p.BookingId === bookingId && (p.RuleId == null || p.RuleId === rid));
 }
-const newCtx = () => ({ stages: new Map(), staff: new Map() });
+const newCtx = (today) => ({ today, stages: new Map(), staff: new Map() });
 const sendKey = (e) => [e.key, e.occurrence, e.stage, e.channel, String(e.recipient).slice(0, 200)].join("|");
 
 /** The reminder migrations (700 to 704) applied: the engine stays quiet and the page explains until they are. */
@@ -344,7 +375,7 @@ async function checkRule(rule, recipients, channels, { today = new Date(), sampl
   const pool = getPool();
   const sit = (await loadSituations(pool))[rule.Situation];
   if (!sit) throw Object.assign(new Error("This reminder's situation is not available."), { status: 400 });
-  const ctx = newCtx();
+  const ctx = newCtx(today);
   const paused = await loadPauses(pool, today);
   const active = channels.filter((c) => c.IsActive !== false && c.IsActive !== 0);
   const { rows, plan, due } = await planRule(pool, sit, rule, recipients, active, { today, ctx, paused });
@@ -383,7 +414,7 @@ async function runReminders({ today = new Date(), ruleId = null } = {}) {
     `SELECT * FROM dbo.CrmReminderRule WHERE IsActive = 1${ruleId ? " AND Id = @id" : ""}`)).recordset;
   const paused = await loadPauses(pool, today);
   const situations = await loadSituations(pool);
-  const ctx = newCtx();
+  const ctx = newCtx(today);
   const summary = [];
 
   for (const rule of rules) {
