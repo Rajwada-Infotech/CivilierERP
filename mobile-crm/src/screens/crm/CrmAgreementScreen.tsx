@@ -2,17 +2,17 @@
 // draft one if none exists. The web's CRM Agreement page, its core workflow:
 //   Draft → submit → Senior approval → send to customer → customer approves → date agreed
 //   → mark executed → AFS registry done → mark registered
-// All heavy step-gating (prerequisites, mandatory docs, AFS registry complete) stays on the
-// server; this screen shows the available actions and lets the server return a clear error.
+// Includes proxy customer approval & rework, proxy date accept, and eligible booking selection.
 import { useState } from "react";
 import { ActivityIndicator, Modal, ScrollView, Text, View } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRoute, type RouteProp } from "@react-navigation/native";
-import { Check } from "lucide-react-native";
+import { Check, Users } from "lucide-react-native";
 import { useAuth } from "@/auth/AuthContext";
 import { crmGet, crmSend, type Row } from "@/api/crmApi";
 import { TextField, NumberField, RemarksField } from "@/components/form/Form";
 import { DateField } from "@/components/form/DateField";
+import { OptionPickerModal, PickerRow } from "@/components/OptionPicker";
 import { toast } from "@/components/Toast";
 import type { MainStackParamList } from "@/navigation/MainStack";
 import { colors } from "@/theme/colors";
@@ -176,26 +176,45 @@ function CreateAgreementModal({ bookingId, onClose, onDone }: { bookingId: numbe
 
 export default function CrmAgreementScreen() {
   const { params } = useRoute<Params>();
-  const { bookingId } = params;
+  const initialBookingId = params?.bookingId;
+  const [selectedBookingId, setSelectedBookingId] = useState<number | null>(initialBookingId ?? null);
+  const [showBookingPicker, setShowBookingPicker] = useState(false);
+
   const { canAccessPage, canDoAction } = useAuth();
   const qc = useQueryClient();
   const seesAgr = canAccessPage("crm-agreements");
   const canEditAgr = canDoAction("crm-agreements", "edit");
   const canCreateAgr = canDoAction("crm-agreements", "create");
 
-  const q = useQuery({
-    queryKey: ["crm-agreement-booking", bookingId],
-    enabled: seesAgr,
-    queryFn: () => crmGet<Row | null>(`/api/crm/agreements/booking/${bookingId}`),
+  // Eligible bookings for when opening Draft Agreement without pre-set bookingId
+  const eligibleQ = useQuery<Row[]>({
+    queryKey: ["crm-agreements-eligible-bookings"],
+    queryFn: () => crmGet<Row[]>("/api/crm/agreements/eligible-bookings").then((d) => (Array.isArray(d) ? d : [])),
+    enabled: seesAgr && canCreateAgr && selectedBookingId == null,
+  });
+
+  const activeBookingId = selectedBookingId;
+
+  const q = useQuery<Row | null>({
+    queryKey: ["crm-agreement-booking", activeBookingId],
+    enabled: seesAgr && activeBookingId != null,
+    queryFn: () => crmGet<Row | null>(`/api/crm/agreements/booking/${activeBookingId!}`),
   });
   const agr = q.data ?? null;
 
   const [showCreate, setShowCreate] = useState(false);
   const [showPropose, setShowPropose] = useState(false);
   const [showRegister, setShowRegister] = useState(false);
+  const [showRework, setShowRework] = useState(false);
+  const [reworkRemarks, setReworkRemarks] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
 
-  const refresh = () => qc.invalidateQueries({ queryKey: ["crm-agreement-booking", bookingId] });
+  const refresh = () => {
+    if (activeBookingId) {
+      qc.invalidateQueries({ queryKey: ["crm-agreement-booking", activeBookingId] });
+      qc.invalidateQueries({ queryKey: ["crm-agreements"] });
+    }
+  };
 
   const act = async (key: string, fn: () => Promise<unknown>, done: string) => {
     setBusy(key);
@@ -209,6 +228,46 @@ export default function CrmAgreementScreen() {
       <Empty text="You don't have a right on Agreements." />
     </View>
   );
+
+  // If no booking is selected yet, offer the eligible booking picker
+  if (!activeBookingId) {
+    const eligible = eligibleQ.data ?? [];
+    const options = eligible.map((e) => ({
+      key: String(e.Id),
+      label: `${e.ApplicantName} (${e.BookingNo})`,
+      sublabel: e.UnitNo ? `Unit ${e.UnitNo}` : undefined,
+    }));
+
+    return (
+      <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: 16, gap: 16 }}>
+        <Section title="Draft Agreement">
+          <Text style={{ fontSize: 13, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>
+            Select a live booking that does not have an agreement to draft one.
+          </Text>
+          <PickerRow
+            label="Eligible Booking"
+            required
+            value=""
+            placeholder={eligibleQ.isLoading ? "Loading eligible bookings…" : "Choose a booking…"}
+            onPress={() => setShowBookingPicker(true)}
+          />
+        </Section>
+
+        <OptionPickerModal
+          visible={showBookingPicker}
+          title="Select Booking for Agreement"
+          options={options}
+          searchable
+          onSelect={(k) => {
+            setSelectedBookingId(Number(k));
+            setShowBookingPicker(false);
+            setShowCreate(true);
+          }}
+          onClose={() => setShowBookingPicker(false)}
+        />
+      </ScrollView>
+    );
+  }
 
   if (q.isLoading) return (
     <View style={{ flex: 1, backgroundColor: colors.background, alignItems: "center", justifyContent: "center" }}>
@@ -295,13 +354,60 @@ export default function CrmAgreementScreen() {
             </Section>
           ) : null}
 
+          {/* Customer approval & rework */}
+          {canEditAgr && agr.SentToCustomerAt && agr.CustomerApprovalStatus !== "Approved" ? (
+            <Section title="Customer Actions">
+              <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginBottom: 10 }}>
+                If the customer confirmed offline, record approval or rework on their behalf.
+              </Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                <ActionKey
+                  label={busy === "proxy-approve" ? "Approving…" : "Proxy Customer Approval"}
+                  onPress={() => act("proxy-approve", () => crmSend(`/api/crm/agreements/${agr.Id}/proxy-customer-approve`, "PUT", {}), "Customer approval recorded")}
+                />
+                {!showRework ? (
+                  <ActionKey
+                    outline
+                    tone={colors.destructive}
+                    label="Customer requested rework"
+                    onPress={() => setShowRework(true)}
+                  />
+                ) : null}
+              </View>
+
+              {showRework ? (
+                <View style={{ gap: 8, marginTop: 8 }}>
+                  <RemarksField label="Customer's rework comments" value={reworkRemarks} onChangeText={setReworkRemarks} />
+                  <View style={{ flexDirection: "row", gap: 8 }}>
+                    <ActionKey
+                      tone={colors.destructive}
+                      label={busy === "proxy-rework" ? "Saving…" : "Confirm rework"}
+                      onPress={async () => {
+                        await act("proxy-rework", () => crmSend(`/api/crm/agreements/${agr.Id}/proxy-customer-recheck`, "PUT", { Remarks: reworkRemarks }), "Rework requested");
+                        setShowRework(false);
+                      }}
+                    />
+                    <ActionKey outline label="Cancel" onPress={() => setShowRework(false)} />
+                  </View>
+                </View>
+              ) : null}
+            </Section>
+          ) : null}
+
+          {/* Signing date */}
           {canEditAgr && agr.SentToCustomerAt && !agr.AgreementDate ? (
-            <Section title="Actions">
+            <Section title="Signing Date">
               <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginBottom: 10 }}>
                 Propose a signing date — the customer responds on Civilier Home. Once both sides match, it goes for Date Approval.
               </Text>
-              <View style={{ flexDirection: "row", gap: 8 }}>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
                 <ActionKey label="Propose signing date" outline onPress={() => setShowPropose(true)} />
+                {agr.ProposedDate && agr.ProposedDateStatus !== "Agreed" ? (
+                  <ActionKey
+                    label={busy === "proxy-date" ? "Accepting…" : "Proxy Accept Date"}
+                    onPress={() => act("proxy-date", () => crmSend(`/api/crm/agreements/${agr.Id}/proxy-date-accept`, "PUT", {}), "Proposed date accepted")}
+                  />
+                ) : null}
               </View>
             </Section>
           ) : null}
@@ -328,7 +434,7 @@ export default function CrmAgreementScreen() {
         </>
       )}
 
-      {showCreate ? <CreateAgreementModal bookingId={bookingId} onClose={() => setShowCreate(false)} onDone={() => { setShowCreate(false); refresh(); }} /> : null}
+      {showCreate ? <CreateAgreementModal bookingId={activeBookingId} onClose={() => setShowCreate(false)} onDone={() => { setShowCreate(false); refresh(); }} /> : null}
       {agr && showPropose ? <ProposeDateModal agreementId={Number(agr.Id)} onClose={() => setShowPropose(false)} onDone={() => { setShowPropose(false); refresh(); }} /> : null}
       {agr && showRegister ? <MarkRegisteredModal agreementId={Number(agr.Id)} onClose={() => setShowRegister(false)} onDone={() => { setShowRegister(false); refresh(); }} /> : null}
     </ScrollView>

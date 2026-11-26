@@ -45,7 +45,7 @@ export function useCrmDashboard(projectId: number | null = null, enabled = true)
 }
 
 /** Open a CRM list when the person has a right on it; undefined when they don't (the row then shows without a link). */
-function useOpenRegister() {
+export function useOpenRegister() {
   const nav = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const { canAccessPage } = useAuth();
   return (key?: string) => {

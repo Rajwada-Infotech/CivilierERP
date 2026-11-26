@@ -4,7 +4,7 @@
 // service tickets, the buyer and the agreement. Each part comes from the route the web page uses and shows only to
 // staff with that page's right.
 import { useState } from "react";
-import { ActivityIndicator, Modal, RefreshControl, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Modal, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
 import { RemarksField, TextField } from "@/components/form/Form";
 import { DateField } from "@/components/form/DateField";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -13,7 +13,7 @@ import { fetchWithAuth } from "@/services/fetchWithAuth";
 import { useRoute, type RouteProp } from "@react-navigation/native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { ArrowLeftRight, Banknote, Check, CheckCircle2, ChevronRight, FileText, Handshake, KeyRound, Landmark, PhoneCall, RefreshCw, Scale, Smartphone, Ticket, UserCheck, Wallet, XCircle } from "lucide-react-native";
+import { ArrowLeftRight, Banknote, Car, Check, CheckCircle2, ChevronRight, FileText, Handshake, KeyRound, Landmark, PhoneCall, RefreshCw, Scale, Smartphone, Ticket, UserCheck, Wallet, XCircle } from "lucide-react-native";
 import { useAuth } from "@/auth/AuthContext";
 import { crmGet, crmSend, getBooking, getBookingLifecycle, getBookingPayments, type Row } from "@/api/crmApi";
 import { toast } from "@/components/Toast";
@@ -38,6 +38,8 @@ export default function BookingDetailScreen() {
   const { params } = useRoute<RouteProp<MainStackParamList, "CrmBooking">>();
   const card = useCardStyle();
   const id = params.bookingId;
+  // "money": the web's Payment Milestones record — the money at a glance, the account, the plan and its waivers only.
+  const moneyOnly = params.focus === "money";
   const { canAccessPage, canDoAction } = useAuth();
   const nav = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const open = useCrmOpen();
@@ -83,6 +85,9 @@ export default function BookingDetailScreen() {
   // Milestone actions, as the web's booking page (CrmBookingDetail.tsx) and Payment Milestones page offer them.
   const qc = useQueryClient();
   const [busyMs, setBusyMs] = useState<number | null>(null);
+  const [reversing, setReversing] = useState<Row | null>(null);
+  const [reverseText, setReverseText] = useState("");
+  const [reverseBusy, setReverseBusy] = useState(false);
   const [waiveFor, setWaiveFor] = useState<Row | null>(null);
   const canEditReceipts = live && canDoAction("crm-money-receipts", "edit");
   const [bounceFor, setBounceFor] = useState<Row | null>(null);
@@ -405,6 +410,8 @@ export default function BookingDetailScreen() {
                 <View style={{ flexDirection: "row", marginTop: 8 }}><ActionKey outline label={loan?.LoanId != null ? "Edit loan" : "Record loan"} onPress={openLoan} /></View>
               ) : null}
       </> },
+    seesBooking && { key: "charges", label: "Parking & Extra Charges", icon: Car,
+      go: () => nav.navigate("CrmBookingCharges", { bookingId: id, title }) },
     canAccessPage("crm-brokerage") && b?.BrokerName && {
       key: "brokerage", label: "Brokerage", icon: Handshake,
       badge: b.BrokerName as string,
@@ -532,6 +539,7 @@ export default function BookingDetailScreen() {
             </HeroSurface>
           </View>
 
+          {!moneyOnly ? <>
           {/* 2. Where it stands: the journey's current step, in the server's own words, with its key */}
           {nextStep && live && !inApproval ? (
             <View style={{ ...card, padding: 14, marginBottom: 12, borderColor: `${CRM}66`, backgroundColor: `${CRM}14` }}>
@@ -680,6 +688,8 @@ export default function BookingDetailScreen() {
             </View>
           ) : null}
 
+          </> : null}
+
           {/* 4. Account, in accounting terms */}
           {moneyInfo && sum ? (
             <Section title="Account">
@@ -765,6 +775,38 @@ export default function BookingDetailScreen() {
             )}
           </Section>
 
+          {/* Waivers — the web's WaiverSection (payments/parts.tsx): who asked, who decided, why; Reverse an approved one. */}
+          {(payQ.data?.waivers ?? []).length ? (
+            <Section title={`Waivers (${payQ.data!.waivers!.length})`}>
+              {payQ.data!.waivers!.map((w: Row) => {
+                const st = w.Status === "Pending" ? { label: "Awaiting approval", rev: false } : w.Status === "Rejected" ? { label: "Rejected", rev: false }
+                  : w.ReversalStatus === "Approved" ? { label: "Reversed", rev: false } : w.ReversalStatus === "Pending" ? { label: "Reversal awaiting approval", rev: false }
+                  : { label: "Waived", rev: true };
+                return (
+                  <View key={w.Id} style={{ paddingVertical: 10, borderTopWidth: 1, borderTopColor: colors.border, gap: 3 }}>
+                    <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 8 }}>
+                      <Text style={{ flex: 1, fontSize: 14, fontFamily: fonts.body.medium, color: colors.foreground }}>{w.MilestoneNo} {w.MilestoneName}</Text>
+                      <Pill label={st.label} />
+                    </View>
+                    <Text style={{ fontSize: 12, color: colors.mutedForeground }}>Taxable value {money(w.TaxableValue)} · GST {money(w.GstAmount)} · Amount {money(w.Amount)}</Text>
+                    {w.Reason ? <Text style={{ fontSize: 12.5, color: colors.foreground }}>{w.Reason}</Text> : null}
+                    {w.RejectionNote ? <Text style={{ fontSize: 12, color: colors.destructive }}>Rejected: {w.RejectionNote}</Text> : null}
+                    {w.ReversalReason ? <Text style={{ fontSize: 12, color: colors.mutedForeground }}>Reversal: {w.ReversalReason}{w.ReversalRejectionNote ? ` (rejected: ${w.ReversalRejectionNote})` : ""}</Text> : null}
+                    <Text style={{ fontSize: 12, color: colors.mutedForeground }}>Asked by {w.RequestedByName || "—"} · {fmtDate(w.RequestedAt)}{w.DecidedAt ? ` · Decided by ${w.DecidedByName || "—"} · ${fmtDate(w.DecidedAt)}` : ""}</Text>
+                    {canDoAction("crm-payments", "edit") && st.rev ? (
+                      w.ReversalBlock ? <Text style={{ fontSize: 12, color: colors.mutedForeground }}>{w.ReversalBlock}</Text> : (
+                        <View style={{ flexDirection: "row", marginTop: 4 }}>
+                          <ActionKey outline label="Reverse" onPress={() => { setReverseText(""); setReversing(w); }} />
+                        </View>
+                      )
+                    ) : null}
+                  </View>
+                );
+              })}
+            </Section>
+          ) : null}
+
+          {!moneyOnly ? <>
           {/* 6. Journey: steps as chips — done, now, then the rest */}
           {steps.length ? (
             <Section title="Journey" right={<Text style={{ fontSize: 12, fontFamily: fonts.body.medium, color: colors.mutedForeground }}>{`${doneCount} of ${steps.length} done`}</Text>}>
@@ -805,6 +847,26 @@ export default function BookingDetailScreen() {
                   ) : null}
                 </View>
               )) : null}
+              {/* The web Payment & Invoice tab's Money Receipt card when none exists yet. */}
+              {seesReceipts && !receiptsQ.isLoading && receipts.length === 0 ? (
+                <View style={{ gap: 6, marginBottom: 8 }}>
+                  <Text style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>
+                    {stage === "Review" ? "Auto-generated when this booking is submitted for approval (Verify & Send for Approval)."
+                      : "No money receipt yet — it is auto-created on submission. If it's missing, use the payment form above or click Retry."}
+                  </Text>
+                  {stage !== "Review" && canDoAction("crm-bookings", "edit") ? (
+                    <View style={{ flexDirection: "row" }}>
+                      <ActionKey outline label="Retry Auto-Create" onPress={async () => {
+                        try {
+                          const d = await crmSend<Row>(`/api/crm/bookings/${id}/trigger-money-receipt`, "POST");
+                          toast.success(d.existing ? "Money receipt already exists — refreshed." : `Money Receipt ${d.ReceiptNo || ""} created.`);
+                          qc.invalidateQueries({ queryKey: ["crm-booking-receipts", id] });
+                        } catch (e) { toast.error((e as Error).message); }
+                      }} />
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
               {seesInvoices ? invoices.map((v) => (
                 <View key={`i${v.Id}`}>
                   <LinkRow icon={FileText} tone="#3b82f6" title={`Invoice ${v.InvoiceNo ?? v.Id}`}
@@ -828,6 +890,15 @@ export default function BookingDetailScreen() {
                     sub={joinDot(d.FileName !== d.Label && d.FileName, kb(d.FileSize), fmtDate(d.CreatedAt), d.UploaderName, d.Source === "application" && "From Application")}
                     onPress={() => open({ to: "document", name: d.FileName || "Document",
                       path: d.Source === "booking" ? `/api/crm/bookings/${id}/attachments/file/${d.Id}` : `/api/crm/booking-documents/file/${d.Id}` })} />
+                  {/* The web Attachments tab's Delete: the booking's own files, while the booking isn't Approved. */}
+                  {canEditBooking && status !== "Approved" && d.Source !== "application" ? (
+                    <View style={{ flexDirection: "row", marginBottom: 8 }}>
+                      <ActionKey outline tone={colors.destructive} label="Delete" onPress={async () => {
+                        try { await crmSend(`/api/crm/bookings/${id}/attachments/${d.Id}`, "DELETE"); toast.success("Attachment removed"); qc.invalidateQueries({ queryKey: ["crm-booking-docs", id] }); }
+                        catch (e) { toast.error((e as Error).message); }
+                      }} />
+                    </View>
+                  ) : null}
                 </View>
               )) : null}
               {canEditBooking ? (
@@ -876,6 +947,7 @@ export default function BookingDetailScreen() {
               ))}
             </Section>
           ) : null}
+          </> : null}
           {changeUnit && b ? <ChangeUnitDialog booking={{ ...pb, ...b }} onClose={() => setChangeUnit(false)} /> : null}
       {resaleDialog ? <ResaleDealDialog bookingId={id} sellerId={customer ? Number(customer.Id) : undefined} onClose={() => setResaleDialog(false)} /> : null}
       {ownershipDialog ? <OwnershipChangeDialog bookingId={id} fromCustomerId={customer ? Number(customer.Id) : undefined} onClose={() => setOwnershipDialog(false)} /> : null}
@@ -902,6 +974,30 @@ export default function BookingDetailScreen() {
       ) : null}
         </>
       )}
+      <Modal visible={!!reversing} transparent animationType="fade" onRequestClose={() => { if (!reverseBusy) setReversing(null); }}>
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", padding: 16 }}>
+          <View style={{ backgroundColor: colors.card, borderRadius: 18, padding: 18, gap: 10 }}>
+            <Text style={{ fontSize: 17, fontFamily: fonts.heading.semibold, color: colors.foreground }}>Reverse this waiver?</Text>
+            <Text style={{ fontSize: 12.5, color: colors.mutedForeground }}>{reversing?.MilestoneName}: {money(reversing?.Amount)} becomes due again once the reversal is approved.</Text>
+            <Text style={{ fontSize: 12.5, fontFamily: fonts.body.medium, color: colors.mutedForeground }}>Reason</Text>
+            <TextInput value={reverseText} onChangeText={setReverseText} multiline
+              style={{ minHeight: 72, textAlignVertical: "top", borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 12, color: colors.foreground, fontFamily: fonts.body.regular }} />
+            {reverseText.trim().length < 10 ? <Text style={{ fontSize: 11.5, color: colors.mutedForeground }}>Say why: at least 10 characters</Text> : null}
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              <ActionKey outline label="Cancel" onPress={() => { if (!reverseBusy) setReversing(null); }} />
+              <ActionKey label={reverseBusy ? "Sending…" : "Send for approval"} onPress={async () => {
+                if (reverseBusy || !reversing || reverseText.trim().length < 10) return;
+                setReverseBusy(true);
+                try {
+                  await crmSend(`/api/crm/payments/waivers/${reversing.Id}/reverse`, "PUT", { Reason: reverseText.trim() });
+                  toast.success("Reversal sent for approval"); setReversing(null); void payQ.refetch();
+                } catch (e) { toast.error((e as Error).message || "Could not send the reversal"); }
+                finally { setReverseBusy(false); }
+              }} />
+            </View>
+          </View>
+        </View>
+      </Modal>
       <ApplyOnAccountPrompt milestone={applyTo} deposits={deposits} busy={busyMs != null} onClose={() => setApplyTo(null)}
         onApply={(d, amount) => applyTo && msAction(applyTo, () => crmSend(`/api/crm/payments/on-account/${d.Id}/apply`, "PUT", { MilestoneId: applyTo.Id, Amount: amount }), () => `${money(amount)} applied from ${d.ReceiptNo}`)} />
       {loanForm ? (

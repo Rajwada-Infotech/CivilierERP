@@ -14,6 +14,7 @@ import { fonts } from "@/theme/fonts";
 import { useBrand } from "@/theme/ThemeContext";
 import type { MainStackParamList } from "@/navigation/MainStack";
 import { OptionSheet } from "@/components/sheet/FormParts";
+import { useAuth } from "@/auth/AuthContext";
 
 // ── Status palette — vivid enough to pop on dark surfaces ─────────────────────
 type StatusKey = "Available" | "OnHold" | "On Hold" | "Booked" | "Blocked";
@@ -199,6 +200,8 @@ function UnitInfoSheet({ unit, onClose, onOpenBooking }: {
 // ── Main screen ────────────────────────────────────────────────────────────────
 export default function UnitMatrixScreen() {
   const nav = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
+  // A free unit or plot starts a new application on it, for staff who may add applications.
+  const canApply = useAuth().canDoAction("crm-applications", "create");
   const b = useBrand();
   const [projectId, setProjectId] = useState<number | null>(null);
   const [projectName, setProjectName] = useState("");
@@ -320,6 +323,9 @@ export default function UnitMatrixScreen() {
                             onPress={() => {
                               const s = deriveStatus(u);
                               if (s === "Booked" || s === "OnHold" || s === "On Hold") setInfoUnit(u);
+                              else if (s === "Available" && canApply && projectId) {
+                                nav.navigate("CrmApplicationForm", { pick: u.IsPlot ? { ProjectId: projectId, PlotId: u.Id } : { ProjectId: projectId, UnitId: u.Id } });
+                              }
                             }}
                           />
                         ))}

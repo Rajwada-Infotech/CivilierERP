@@ -20,6 +20,7 @@ import { crmGet, crmSend, type Row } from "@/api/crmApi";
 import { toast } from "@/components/Toast";
 import { TextField, RemarksField } from "@/components/form/Form";
 import { DateField } from "@/components/form/DateField";
+import { OptionPickerModal, PickerRow } from "@/components/OptionPicker";
 import { fonts } from "@/theme/fonts";
 import { useBrand } from "@/theme/ThemeContext";
 import type { MainStackParamList } from "@/navigation/MainStack";
@@ -213,7 +214,10 @@ function CompleteForm({ registryId, onDone }: { registryId: number; onDone: () =
 
 export default function CrmSaleDeedScreen() {
   const { params } = useRoute<RouteProp<MainStackParamList, "CrmSaleDeed">>();
-  const { bookingId } = params;
+  const initialBookingId = params?.bookingId;
+  const [selectedBookingId, setSelectedBookingId] = useState<number | null>(initialBookingId ?? null);
+  const [showPicker, setShowPicker] = useState(false);
+
   const { canDoAction, canAccessPage } = useAuth();
   const b = useBrand();
   const qc = useQueryClient();
@@ -222,14 +226,24 @@ export default function CrmSaleDeedScreen() {
   const canEdit = canDoAction("crm-sales-deed", "edit");
   const canRegistry = canAccessPage("crm-registry") || canEdit;
 
+  // Eligible bookings for when bookingId is not passed in route
+  const eligibleQ = useQuery<Row[]>({
+    queryKey: ["crm-sales-deed-eligible-bookings"],
+    queryFn: () => crmGet<Row[]>("/api/crm/sales-deed/eligible-bookings").then((d) => (Array.isArray(d) ? d : [])),
+    enabled: selectedBookingId == null,
+  });
+
+  const activeBookingId = selectedBookingId;
+
   const ctxQ = useQuery<DeedCtx>({
-    queryKey: ["crm-deed-ctx", bookingId],
-    queryFn: () => crmGet(`/api/crm/sales-deed/booking/${bookingId}/context`),
+    queryKey: ["crm-deed-ctx", activeBookingId],
+    queryFn: () => crmGet<DeedCtx>(`/api/crm/sales-deed/booking/${activeBookingId!}/context`),
+    enabled: activeBookingId != null,
   });
 
   const deedRefQ = useQuery<{ Id: number; DeedNo: string } | null>({
-    queryKey: ["crm-deed-ref", bookingId],
-    queryFn: () => crmGet(`/api/crm/sales-deed/booking/${bookingId}/deed`),
+    queryKey: ["crm-deed-ref", activeBookingId],
+    queryFn: () => crmGet(`/api/crm/sales-deed/booking/${activeBookingId!}/deed`),
     enabled: !!ctxQ.data,
   });
 
@@ -240,13 +254,17 @@ export default function CrmSaleDeedScreen() {
   });
 
   const registryQ = useQuery<Row | null>({
-    queryKey: ["crm-registry-booking", bookingId],
-    queryFn: () => crmGet(`/api/crm/sales-deed/registry/booking/${bookingId}`),
+    queryKey: ["crm-registry-booking", activeBookingId],
+    queryFn: () => crmGet(`/api/crm/sales-deed/registry/booking/${activeBookingId!}`),
     enabled: !!ctxQ.data,
   });
 
   const [showSchedule, setShowSchedule] = useState(false);
   const [showComplete, setShowComplete] = useState(false);
+  const [showCancelRegistry, setShowCancelRegistry] = useState(false);
+  const [cancelRegistryReason, setCancelRegistryReason] = useState("");
+  const [showRecheckRemarks, setShowRecheckRemarks] = useState(false);
+  const [recheckRemarks, setRecheckRemarks] = useState("");
   const [busyReg, setBusyReg] = useState(false);
   const [busyApproval, setBusyApproval] = useState(false);
   const [rejectNote, setRejectNote] = useState("");
@@ -254,8 +272,9 @@ export default function CrmSaleDeedScreen() {
   const [directorNote, setDirectorNote] = useState("");
 
   const invalidate = () => {
-    ["crm-deed-ctx", "crm-deed-ref", "crm-registry-booking", "crm-booking-legal-mil", "crm-booking"].forEach((k) =>
-      qc.invalidateQueries({ queryKey: [k, bookingId] })
+    if (!activeBookingId) return;
+    ["crm-deed-ctx", "crm-deed-ref", "crm-registry-booking", "crm-booking-legal-mil", "crm-booking", "crm-sales-deed-eligible-bookings"].forEach((k) =>
+      qc.invalidateQueries({ queryKey: [k, activeBookingId] })
     );
     if (deedRefQ.data?.Id) qc.invalidateQueries({ queryKey: ["crm-deed-detail", deedRefQ.data.Id] });
   };
@@ -271,14 +290,54 @@ export default function CrmSaleDeedScreen() {
   };
 
   const startRegistry = async () => {
+    if (!activeBookingId) return;
     setBusyReg(true);
     try {
-      await crmSend("/api/crm/sales-deed/registry", "POST", { BookingId: bookingId });
+      await crmSend("/api/crm/sales-deed/registry", "POST", { BookingId: activeBookingId });
       toast.success("Registry tracker started");
       invalidate();
     } catch (e) { toast.error((e as Error).message); }
     finally { setBusyReg(false); }
   };
+
+  // If no booking is selected yet, show eligible bookings picker
+  if (!activeBookingId) {
+    const eligible = eligibleQ.data ?? [];
+    const options = eligible.map((e) => ({
+      key: String(e.Id),
+      label: `${e.ApplicantName} (${e.BookingNo})`,
+      sublabel: [e.UnitNo && `Unit ${e.UnitNo}`, e.AgreementNo && `Agreement ${e.AgreementNo}`].filter(Boolean).join(" · "),
+    }));
+
+    return (
+      <ScrollView style={{ flex: 1, backgroundColor: b.surface }} contentContainerStyle={{ padding: 16, gap: 16 }}>
+        <Section title="New Sale Deed">
+          <Text style={{ fontSize: 13, fontFamily: fonts.body.regular, color: b.textSecondary }}>
+            Choose a booking whose Agreement for Sale is Registered (and handover complete for under-construction projects) to view or create its Sale Deed.
+          </Text>
+          <PickerRow
+            label="Eligible Booking"
+            required
+            value=""
+            placeholder={eligibleQ.isLoading ? "Loading eligible bookings…" : "Choose a booking…"}
+            onPress={() => setShowPicker(true)}
+          />
+        </Section>
+
+        <OptionPickerModal
+          visible={showPicker}
+          title="Select Booking for Sale Deed"
+          options={options}
+          searchable
+          onSelect={(k) => {
+            setSelectedBookingId(Number(k));
+            setShowPicker(false);
+          }}
+          onClose={() => setShowPicker(false)}
+        />
+      </ScrollView>
+    );
+  }
 
   const loading = ctxQ.isLoading;
 
@@ -363,7 +422,7 @@ export default function CrmSaleDeedScreen() {
       ) : (
         !deedRefQ.isLoading && (
           canCreate && agrRegistered && !ctx.requiresHandoverBeforeDeed ? (
-            <CreateDeedForm bookingId={bookingId} ctx={ctx} onCreated={invalidate} />
+            <CreateDeedForm bookingId={activeBookingId} ctx={ctx} onCreated={invalidate} />
           ) : (
             <Empty text="No sale deed yet." />
           )
@@ -380,13 +439,14 @@ export default function CrmSaleDeedScreen() {
 
         // Which actions are live right now
         const canSubmit = !sa || sa === "Rejected"; // null or Rejected → can submit
-        const canSrApprove = sa === "Pending" && !!sentAt === false; // before sent-to-customer
+        const canSrApprove = sa === "Pending" && !sentAt; // before sent-to-customer
         const canSrReject = sa === "Pending";
         const canSendCustomer = sa === "Approved" && (!sentAt || ca === "Rejected" || ca === "RecheckRequested");
+        const canProxyCustomer = !!sentAt && ca !== "Approved" && canEdit;
         const canDirApprove = ca === "Approved" && da !== "Approved";
         const canDirReject = ca === "Approved" && da !== "Approved";
 
-        if (!canSubmit && !canSrApprove && !canSrReject && !canSendCustomer && !canDirApprove && !canDirReject) return null;
+        if (!canSubmit && !canSrApprove && !canSrReject && !canSendCustomer && !canProxyCustomer && !canDirApprove && !canDirReject) return null;
 
         return (
           <Section title="Approval actions">
@@ -435,6 +495,39 @@ export default function CrmSaleDeedScreen() {
               {canSendCustomer ? (
                 <ActionKey icon={Users} label={busyApproval ? "Sending…" : sentAt ? "Resend to customer" : "Send to customer"}
                   onPress={() => deedAction(`/api/crm/sales-deed/${deedId}/send-to-customer`, undefined, "Sent to customer")} />
+              ) : null}
+
+              {/* Proxy customer approval & rework */}
+              {canProxyCustomer ? (
+                <>
+                  <ActionKey
+                    label={busyApproval ? "Approving…" : "Proxy Customer Approval"}
+                    onPress={() => deedAction(`/api/crm/sales-deed/${deedId}/proxy-customer-approve`, undefined, "Customer approval recorded")}
+                  />
+                  {!showRecheckRemarks ? (
+                    <ActionKey
+                      outline
+                      tone={b.warning}
+                      label="Customer requested rework"
+                      onPress={() => setShowRecheckRemarks(true)}
+                    />
+                  ) : (
+                    <View style={{ gap: 8 }}>
+                      <RemarksField label="Customer's rework request / remarks" value={recheckRemarks} onChangeText={setRecheckRemarks} />
+                      <View style={{ flexDirection: "row", gap: 8 }}>
+                        <ActionKey
+                          label={busyApproval ? "Saving…" : "Confirm rework"}
+                          tone={b.warning}
+                          onPress={() => {
+                            deedAction(`/api/crm/sales-deed/${deedId}/proxy-customer-recheck`, { Remarks: recheckRemarks }, "Customer rework requested");
+                            setShowRecheckRemarks(false);
+                          }}
+                        />
+                        <ActionKey outline label="Cancel" onPress={() => setShowRecheckRemarks(false)} />
+                      </View>
+                    </View>
+                  )}
+                </>
               ) : null}
 
               {/* Director Approve / Reject */}
@@ -497,7 +590,7 @@ export default function CrmSaleDeedScreen() {
 
               {!regCompleted && canEdit ? (
                 <>
-                  {!showSchedule && !showComplete ? (
+                  {!showSchedule && !showComplete && !showCancelRegistry ? (
                     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
                       <ActionKey
                         label={regScheduled ? "Reschedule" : "Schedule appointment"}
@@ -506,8 +599,27 @@ export default function CrmSaleDeedScreen() {
                         onPress={() => setShowSchedule(true)}
                       />
                       {regScheduled ? (
-                        <ActionKey label="Complete registry" onPress={() => setShowComplete(true)} />
+                        <>
+                          <ActionKey label="Complete registry" onPress={() => setShowComplete(true)} />
+                          <ActionKey outline tone={b.danger} label="Cancel appointment" onPress={() => setShowCancelRegistry(true)} />
+                        </>
                       ) : null}
+                    </View>
+                  ) : null}
+                  {showCancelRegistry ? (
+                    <View style={{ gap: 8 }}>
+                      <RemarksField label="Reason for cancelling appointment" value={cancelRegistryReason} onChangeText={setCancelRegistryReason} />
+                      <View style={{ flexDirection: "row", gap: 8 }}>
+                        <ActionKey
+                          tone={b.danger}
+                          label={busyReg ? "Cancelling…" : "Confirm cancel appointment"}
+                          onPress={async () => {
+                            await deedAction(`/api/crm/sales-deed/registry/${Number((registry as Row).Id)}/cancel`, { Reason: cancelRegistryReason }, "Appointment cancelled");
+                            setShowCancelRegistry(false);
+                          }}
+                        />
+                        <ActionKey outline label="Cancel" onPress={() => setShowCancelRegistry(false)} />
+                      </View>
                     </View>
                   ) : null}
                   {showSchedule ? (

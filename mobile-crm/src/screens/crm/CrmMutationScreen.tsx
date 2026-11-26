@@ -2,6 +2,7 @@
 // Completed. Workflow: Applied → QueryRaised → (resubmit) → Applied → Approved.
 // Endpoints:
 //   GET  /api/crm/mutation/booking/:bookingId → mutation row or null
+//   GET  /api/crm/mutation/eligible-bookings  → bookings with completed registry
 //   POST /api/crm/mutation                    → create tracker
 //   PUT  /api/crm/mutation/:id                → update fields
 //   PUT  /api/crm/mutation/:id/query          → raise query (Remarks required)
@@ -17,6 +18,7 @@ import { crmGet, crmSend, type Row } from "@/api/crmApi";
 import { toast } from "@/components/Toast";
 import { TextField, RemarksField } from "@/components/form/Form";
 import { DateField } from "@/components/form/DateField";
+import { OptionPickerModal, PickerRow } from "@/components/OptionPicker";
 import { fonts } from "@/theme/fonts";
 import { useBrand } from "@/theme/ThemeContext";
 import type { MainStackParamList } from "@/navigation/MainStack";
@@ -30,7 +32,10 @@ const STATUS_COLOR: Record<string, string> = {
 
 export default function CrmMutationScreen() {
   const { params } = useRoute<RouteProp<MainStackParamList, "CrmMutation">>();
-  const { bookingId } = params;
+  const initialBookingId = params?.bookingId;
+  const [selectedBookingId, setSelectedBookingId] = useState<number | null>(initialBookingId ?? null);
+  const [showPicker, setShowPicker] = useState(false);
+
   const { canDoAction } = useAuth();
   const b = useBrand();
   const qc = useQueryClient();
@@ -38,9 +43,19 @@ export default function CrmMutationScreen() {
   const canCreate = canDoAction("crm-mutation", "create");
   const canEdit = canDoAction("crm-mutation", "edit");
 
+  // Eligible bookings for when bookingId is not passed in route
+  const eligibleQ = useQuery<Row[]>({
+    queryKey: ["crm-mutation-eligible-bookings"],
+    queryFn: () => crmGet<Row[]>("/api/crm/mutation/eligible-bookings").then((d) => (Array.isArray(d) ? d : [])),
+    enabled: selectedBookingId == null,
+  });
+
+  const activeBookingId = selectedBookingId;
+
   const mutQ = useQuery<Row | null>({
-    queryKey: ["crm-mutation-booking", bookingId],
-    queryFn: () => crmGet(`/api/crm/mutation/booking/${bookingId}`),
+    queryKey: ["crm-mutation-booking", activeBookingId],
+    queryFn: () => crmGet<Row | null>(`/api/crm/mutation/booking/${activeBookingId!}`),
+    enabled: activeBookingId != null,
   });
 
   const [busy, setBusy] = useState(false);
@@ -72,8 +87,9 @@ export default function CrmMutationScreen() {
   const [showApprove, setShowApprove] = useState(false);
 
   const invalidate = () => {
-    ["crm-mutation-booking", "crm-booking-legal-mil", "crm-booking"].forEach((k) =>
-      qc.invalidateQueries({ queryKey: [k, bookingId] })
+    if (!activeBookingId) return;
+    ["crm-mutation-booking", "crm-booking-legal-mil", "crm-booking", "crm-mutation-eligible-bookings"].forEach((k) =>
+      qc.invalidateQueries({ queryKey: [k, activeBookingId] })
     );
   };
 
@@ -88,9 +104,10 @@ export default function CrmMutationScreen() {
   };
 
   const createMutation = async () => {
+    if (!activeBookingId) return;
     setBusy(true);
     try {
-      const payload: Record<string, unknown> = { BookingId: bookingId };
+      const payload: Record<string, unknown> = { BookingId: activeBookingId };
       if (appNo.trim()) payload.ApplicationNo = appNo.trim();
       if (appDate) payload.ApplicationDate = appDate;
       if (authority.trim()) payload.Authority = authority.trim();
@@ -103,6 +120,45 @@ export default function CrmMutationScreen() {
     } catch (e) { toast.error((e as Error).message); }
     finally { setBusy(false); }
   };
+
+  // If no booking selected yet, show eligible bookings picker
+  if (!activeBookingId) {
+    const eligible = eligibleQ.data ?? [];
+    const options = eligible.map((e) => ({
+      key: String(e.Id),
+      label: `${e.ApplicantName} (${e.BookingNo})`,
+      sublabel: [e.UnitNo && `Unit ${e.UnitNo}`, e.RegNo && `Registry ${e.RegNo}`, e.DeedNo && `Deed ${e.DeedNo}`].filter(Boolean).join(" · "),
+    }));
+
+    return (
+      <ScrollView style={{ flex: 1, backgroundColor: b.surface }} contentContainerStyle={{ padding: 16, gap: 16 }}>
+        <Section title="Start Property Mutation">
+          <Text style={{ fontSize: 13, fontFamily: fonts.body.regular, color: b.textSecondary }}>
+            Choose a booking whose Sale Deed Registry is Completed to start its Khata / Mutation tracker.
+          </Text>
+          <PickerRow
+            label="Eligible Booking"
+            required
+            value=""
+            placeholder={eligibleQ.isLoading ? "Loading eligible bookings…" : "Choose a booking…"}
+            onPress={() => setShowPicker(true)}
+          />
+        </Section>
+
+        <OptionPickerModal
+          visible={showPicker}
+          title="Select Booking for Mutation"
+          options={options}
+          searchable
+          onSelect={(k) => {
+            setSelectedBookingId(Number(k));
+            setShowPicker(false);
+          }}
+          onClose={() => setShowPicker(false)}
+        />
+      </ScrollView>
+    );
+  }
 
   if (mutQ.isLoading) {
     return (

@@ -3,11 +3,14 @@
 // Endpoint: GET /api/crm/oc-cc/board → { projects, blocks, held }
 import { ActivityIndicator, ScrollView, Text, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
-import { Award, CheckCircle2, Clock, XCircle } from "lucide-react-native";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { Award, CheckCircle2, ChevronRight, Clock, FilePlus2, XCircle } from "lucide-react-native";
 import { crmGet, type Row } from "@/api/crmApi";
+import type { MainStackParamList } from "@/navigation/MainStack";
 import { fonts } from "@/theme/fonts";
 import { useBrand } from "@/theme/ThemeContext";
-import { Kv, Pill, Section, fmtDate, money } from "./ui";
+import { Kv, Pill, Section, Tap, fmtDate, money } from "./ui";
 
 type ProjectRow = Row & {
   ProjectId: number; ProjectName: string;
@@ -49,6 +52,7 @@ function CoverageBar({ covered, total }: { covered: number; total: number }) {
 
 export default function CrmOcCcBoardScreen() {
   const b = useBrand();
+  const nav = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
 
   const boardQ = useQuery<BoardData>({
     queryKey: ["crm-oc-cc-board"],
@@ -77,6 +81,24 @@ export default function CrmOcCcBoardScreen() {
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: b.surface }} contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 56 }}>
+
+      {/* Quick Action: Manage Certificates */}
+      <Tap
+        onPress={() => nav.navigate("CrmRegister", { register: "oc-cc" })}
+        style={({ pressed }) => ({
+          flexDirection: "row", alignItems: "center", gap: 10, padding: 14, borderRadius: 16,
+          backgroundColor: b.surfaceCard, borderWidth: 1, borderColor: b.border, opacity: pressed ? 0.8 : 1,
+        })}
+      >
+        <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: b.accentSoft, alignItems: "center", justifyContent: "center" }}>
+          <Award size={18} color={b.accent} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 14.5, fontFamily: fonts.heading.semibold, color: b.textPrimary }}>Manage Certificates</Text>
+          <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: b.textSecondary }}>Add, edit, or view certificate numbers and issue dates</Text>
+        </View>
+        <ChevronRight size={18} color={b.textFaint} />
+      </Tap>
 
       {/* Summary banner */}
       {totalWaiting > 0 ? (

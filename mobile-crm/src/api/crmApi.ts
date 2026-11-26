@@ -33,6 +33,8 @@ export const getBookingPayments = (id: number) => crmGet<{
   booking: Row; milestones: Row[];
   summary: { totalDue: number; totalPaid: number; balance: number; waivedDue: number; waivedCount: number; overdue: number };
   money: Row;
+  /** Every waiver on the booking (getBookingWaivers): who asked, who decided, why; reversal state. */
+  waivers?: Row[];
 }>(`/api/crm/payments/booking/${id}`);
 
 /** The booking's journey, step by step (crmBookings.js GET /:id/lifecycle). */

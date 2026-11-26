@@ -2,8 +2,8 @@
 // sheet (project, period, order), and one card per row with the buyer's Call / WhatsApp keys and the list's own job
 // (Log call). Tap a card for the booking, customer, ticket or document. The same rows the web page shows.
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import { useQuery } from "@tanstack/react-query";
+import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -11,12 +11,14 @@ import { ChevronRight, Plus, Search, SlidersHorizontal, X } from "lucide-react-n
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { DataList } from "@/components/list/DataList";
-import { crmGet, type Row } from "@/api/crmApi";
+import { crmGet, crmSend, type Row } from "@/api/crmApi";
 import { openDocument } from "@/utils/documents";
+import { toast } from "@/components/Toast";
+import { DateField } from "@/components/form/DateField";
 import { useAuth } from "@/auth/AuthContext";
 import type { MainStackParamList } from "@/navigation/MainStack";
-import { pairParent, registerByKey, type CrmOpen, type CrmRegister } from "./crmRegisters";
-import { AccentAvatar, ActionKey, CRM, ContactKeys, Pill, useCardStyle } from "./ui";
+import { pairParent, registerByKey, type ActionDialog, type CardAction, type CrmOpen, type CrmRegister, type EditForm } from "./crmRegisters";
+import { AccentAvatar, ActionKey, CRM, ContactKeys, Figure, Pill, useCardStyle } from "./ui";
 
 const ALL = "All";
 
@@ -27,6 +29,7 @@ export function useCrmCanOpen() {
   return (o: CrmOpen | null | undefined): o is CrmOpen =>
     !!o && (o.to === "document" || (o.to === "application" ? canDoAction("crm-applications", "edit") :
       (o.to === "booking" ? canAccessPage("crm-bookings") || canAccessPage("crm-payments")
+        : o.to === "payment-plan" ? canAccessPage("crm-payments") || canAccessPage("crm-bookings")
         : o.to === "ticket" ? canAccessPage("crm-service-tickets")
         : o.to === "construction-updates" ? canAccessPage("crm-construction-updates")
         : o.to === "oc-cc-board" ? canAccessPage("crm-oc-cc")
@@ -42,6 +45,20 @@ export function useCrmCanOpen() {
     : o.to === "sale-deed" ? canAccessPage("crm-sales-deed")
     : o.to === "noc" ? canAccessPage("crm-noc")
     : o.to === "mutation" ? canAccessPage("crm-mutation")
+    : o.to === "bank-details" ? canAccessPage("crm-customer-bank-details")
+    : o.to === "oc-cc-cert" ? canAccessPage("crm-oc-cc")
+    : o.to === "afs-qp" ? canAccessPage("crm-afs-query-payment")
+    : o.to === "possession" ? canAccessPage("crm-pre-possession") || canAccessPage("crm-possession-notice") || canAccessPage("crm-handover")
+    : o.to === "parking-allotment" ? canAccessPage("crm-parking-booking")
+    : o.to === "welcome-call" ? canAccessPage("crm-welcome-calls")
+    : o.to === "on-account" ? canAccessPage("crm-payments")
+    : o.to === "credit-note" ? canAccessPage("crm-refunds")
+    : o.to === "unit-change" ? canAccessPage("crm-bookings")
+    : o.to === "legal-milestone" ? canAccessPage("crm-legal-milestones")
+    : o.to === "loan-tracking" ? canAccessPage("crm-loan-details")
+    : o.to === "booking-amendment" ? canAccessPage("crm-bookings")
+    : o.to === "demand-detail" ? canAccessPage("crm-payments")
+    : o.to === "payment" ? canAccessPage("crm-payments")
         : canAccessPage("crm-customer-360"))));
 }
 
@@ -51,6 +68,7 @@ export function useCrmOpen() {
   return (o: CrmOpen | null | undefined) => {
     if (!canOpen(o)) return;
     if (o.to === "booking") nav.navigate("CrmBooking", { bookingId: o.bookingId, title: o.title });
+    else if (o.to === "payment-plan") nav.navigate("CrmBooking", { bookingId: o.bookingId, title: o.title, focus: "money" });
     else if (o.to === "customer") nav.navigate("CrmCustomer", { customerId: o.customerId, title: o.title });
     else if (o.to === "ticket") nav.navigate("CrmTicket", { ticketId: o.ticketId });
     else if (o.to === "application") nav.navigate("CrmApplicationForm", { applicationId: o.applicationId });
@@ -68,6 +86,20 @@ export function useCrmOpen() {
     else if (o.to === "sale-deed") nav.navigate("CrmSaleDeed", { bookingId: o.bookingId, title: o.title });
     else if (o.to === "noc") nav.navigate("CrmNoc", { bookingId: o.bookingId, title: o.title });
     else if (o.to === "mutation") nav.navigate("CrmMutation", { bookingId: o.bookingId, title: o.title });
+    else if (o.to === "bank-details") nav.navigate("CrmBankDetails", { bookingId: o.bookingId, row: o.row });
+    else if (o.to === "oc-cc-cert") nav.navigate("CrmOcCcCert", { cert: o.cert });
+    else if (o.to === "afs-qp") nav.navigate("CrmAfsQueryPayment", { id: o.id, title: o.title });
+    else if (o.to === "possession") nav.navigate("CrmPossession", { bookingId: o.bookingId, title: o.title });
+    else if (o.to === "parking-allotment") nav.navigate("CrmParkingAllotment", { allotment: o.allotment });
+    else if (o.to === "welcome-call") nav.navigate("CrmWelcomeCall", { bookingId: o.bookingId, title: o.title });
+    else if (o.to === "on-account") nav.navigate("CrmOnAccountAdjust", { deposit: o.deposit });
+    else if (o.to === "credit-note") nav.navigate("CrmCreditNote", { creditNoteId: o.creditNoteId, title: o.title });
+    else if (o.to === "unit-change") nav.navigate("CrmUnitChange", { changeId: o.changeId, title: o.title });
+    else if (o.to === "legal-milestone") nav.navigate("CrmLegalMilestone", { bookingId: o.bookingId, title: o.title });
+    else if (o.to === "loan-tracking") nav.navigate("CrmLoanTracking", { bookingId: o.bookingId, title: o.title });
+    else if (o.to === "booking-amendment") nav.navigate("CrmBookingAmendment", { amendmentId: o.amendmentId, title: o.title, amendment: o.amendment });
+    else if (o.to === "demand-detail") nav.navigate("CrmDemandDetail", { milestoneId: o.milestoneId, title: o.title, demand: o.demand });
+    else if (o.to === "payment") nav.navigate("CrmPayment", { bookingId: o.bookingId, milestoneId: o.milestoneId, title: o.title });
     else openDocument(o.path, o.name).catch((e: Error) => Alert.alert("Could not open", e.message));
   };
 }
@@ -144,6 +176,182 @@ function FilterSheet({ open, onClose, reg, projects, project, setProject, period
   );
 }
 
+/** A setup list's add / edit form (crmRegisters.ts EditForm) as a bottom sheet: the fields, Save, and the server's
+ * message when it refuses. Values go as typed; a blank number goes as null (the server's "not set"). */
+function EditSheet({ form, row, onClose, onSaved, onOpen, canDelete }: { form: EditForm; row: Row | "new" | null; onClose: () => void; onSaved: () => void; onOpen?: { label: string; go: () => void } | null; canDelete?: boolean }) {
+  const insets = useSafeAreaInsets();
+  const isNew = row === "new";
+  const [vals, setVals] = useState<Record<string, unknown>>({});
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    if (!row) return;
+    const v: Record<string, unknown> = {};
+    for (const f of form.fields) {
+      const cur = row === "new" ? undefined : row[f.key];
+      v[f.key] = f.kind === "switch" ? cur !== false && cur !== 0 : f.kind === "choice" && cur == null ? f.options?.[0]?.value ?? ""
+        : cur == null ? "" : f.kind === "date" ? String(cur).slice(0, 10) : String(cur);
+    }
+    setVals(v); setErr(""); setBusy(false);
+  }, [row, form]);
+  const save = async () => {
+    const body: Record<string, unknown> = {};
+    for (const f of form.fields) {
+      const v = vals[f.key];
+      body[f.key] = f.kind === "number" ? (String(v ?? "").trim() === "" ? null : Number(v)) : f.kind === "date" ? (String(v ?? "").trim() || null)
+        : f.kind === "text" ? String(v ?? "").trim() : v;
+    }
+    const problem = form.check?.(vals);
+    if (problem) { setErr(problem); return; }
+    setBusy(true); setErr("");
+    try {
+      const full = !isNew && form.extra ? { ...form.extra(row as Row), ...body } : body;
+      let res: unknown;
+      if (isNew) res = await crmSend(form.path, "POST", full);
+      else res = await crmSend(form.savePath ? form.savePath(row as Row) : `${form.path}/${(row as Row).Id}`, "PUT", full);
+      toast.success(form.saved ? form.saved(res) : "Saved");
+      onSaved(); onClose();
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setBusy(false); }
+  };
+  // The web page's Delete: its confirm words, then DELETE path/:Id; locked (with the web's reason) while in use.
+  const delLock = !isNew && row && form.del?.locked ? form.del.locked(row as Row) : null;
+  const remove = () => {
+    if (!form.del || isNew || !row) return;
+    Alert.alert("Delete", form.del.ask(row as Row), [
+      { text: "Cancel", style: "cancel" },
+      { text: "Delete", style: "destructive", onPress: async () => {
+        setBusy(true);
+        try { const dres = await crmSend<{ message?: string }>(`${form.path}/${(row as Row).Id}`, "DELETE"); toast.success(dres?.message || form.del!.done); onSaved(); onClose(); }
+        catch (e) { setErr(e instanceof Error ? e.message : String(e)); setBusy(false); }
+      } },
+    ]);
+  };
+  return (
+    <Modal visible={!!row} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)" }} onPress={onClose} />
+      <View style={{ backgroundColor: colors.background, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: insets.bottom + 20, gap: 14 }}>
+        <View style={{ flexDirection: "row", alignItems: "center" }}>
+          <Text style={{ flex: 1, fontSize: 18, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{isNew ? `New ${form.noun}` : `Edit ${form.noun}`}</Text>
+          <Pressable onPress={onClose} hitSlop={10} accessibilityLabel="Close"><X size={18} color={colors.mutedForeground} /></Pressable>
+        </View>
+        {onOpen ? (
+          <View style={{ flexDirection: "row" }}>
+            <ActionKey outline label={onOpen.label} onPress={() => { onClose(); onOpen.go(); }} />
+          </View>
+        ) : null}
+        <ScrollView style={{ maxHeight: 460 }} contentContainerStyle={{ gap: 14 }} keyboardShouldPersistTaps="handled">
+        {form.fields.map((f) => f.kind === "choice" ? (
+          <View key={f.key} style={{ gap: 6 }}>
+            <Text style={{ fontSize: 12.5, fontFamily: fonts.body.medium, color: colors.mutedForeground }}>{f.label}</Text>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+              {(f.options ?? []).map((o) => <Chip key={o.value} label={o.label} active={vals[f.key] === o.value} onPress={() => setVals((s) => ({ ...s, [f.key]: o.value }))} />)}
+            </View>
+          </View>
+        ) : f.kind === "switch" ? (
+          <View key={f.key} style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 4 }}>
+            <Text style={{ fontSize: 14.5, fontFamily: fonts.body.medium, color: colors.foreground }}>{f.label}</Text>
+            <Switch value={!!vals[f.key]} onValueChange={(on) => setVals((s) => ({ ...s, [f.key]: on }))} trackColor={{ true: CRM }} />
+          </View>
+        ) : (
+          <View key={f.key} style={{ gap: 6 }}>
+            <Text style={{ fontSize: 12.5, fontFamily: fonts.body.medium, color: colors.mutedForeground }}>{f.label}</Text>
+            <TextInput value={String(vals[f.key] ?? "")} onChangeText={(t) => setVals((s) => ({ ...s, [f.key]: t }))}
+              keyboardType={f.kind === "number" ? "decimal-pad" : "default"} placeholder={f.hint ?? (f.kind === "date" ? "YYYY-MM-DD" : undefined)} placeholderTextColor={`${colors.mutedForeground}99`}
+              style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, fontFamily: fonts.body.regular, color: colors.foreground, backgroundColor: colors.card }} />
+          </View>
+        ))}
+        </ScrollView>
+        {err ? <Text style={{ fontSize: 13, fontFamily: fonts.body.medium, color: "#ef4444" }}>{err}</Text> : null}
+        <Pressable onPress={save} disabled={busy}
+          style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 14, borderRadius: 14, backgroundColor: CRM, opacity: busy ? 0.6 : pressed ? 0.85 : 1 })}>
+          {busy ? <ActivityIndicator size="small" color="#fff" /> : null}
+          <Text style={{ fontSize: 15, fontFamily: fonts.heading.semibold, color: "#fff" }}>{isNew ? `Add ${form.noun}` : "Save"}</Text>
+        </Pressable>
+        {canDelete && form.del && !isNew ? (
+          delLock ? (
+            <Text style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: colors.mutedForeground, textAlign: "center" }}>{delLock}</Text>
+          ) : (
+            <Pressable onPress={remove} disabled={busy}
+              style={({ pressed }) => ({ alignItems: "center", paddingVertical: 12, borderRadius: 14, borderWidth: 1, borderColor: colors.destructive, opacity: busy ? 0.6 : pressed ? 0.8 : 1 })}>
+              <Text style={{ fontSize: 14.5, fontFamily: fonts.heading.semibold, color: colors.destructive }}>Delete</Text>
+            </Pressable>
+          )
+        ) : null}
+      </View>
+    </Modal>
+  );
+}
+
+/** A web page's confirm dialog (crmRegisters.ts ActionDialog) as a bottom sheet: its title and line, the rows, the
+ * warning, the notes box, its two keys; then its server call and its message. */
+function ActionSheet({ d, onClose, onDone }: { d: ActionDialog | null; onClose: () => void; onDone: () => void }) {
+  const insets = useSafeAreaInsets();
+  const [notes, setNotes] = useState("");
+  const [dateVal, setDateVal] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { if (d) { setNotes(""); setDateVal(""); setBusy(false); } }, [d]);
+  if (!d) return null;
+  const go = async () => {
+    setBusy(true);
+    try {
+      const body = d.notes || d.send || d.date ? { ...(d.send ?? {}), ...(d.notes ? { [d.notes.key]: notes.trim() || undefined } : {}), ...(d.date ? { [d.date.key]: dateVal || undefined } : {}) } : undefined;
+      const res = await crmSend(d.path, d.method, body);
+      toast.success(d.done(res)); onDone(); onClose();
+    } catch (e) { toast.error(e instanceof Error ? e.message : String(e)); setBusy(false); }
+  };
+  const tone = d.danger ? colors.destructive : CRM;
+  return (
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)" }} onPress={onClose} />
+      <View style={{ backgroundColor: colors.background, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: insets.bottom + 20, gap: 14 }}>
+        <View style={{ gap: 4 }}>
+          <Text style={{ fontSize: 18, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{d.title}</Text>
+          {d.note ? <Text style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>{d.note}</Text> : null}
+        </View>
+        {d.body ? <Text style={{ fontSize: 14, lineHeight: 20, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>{d.body}</Text> : null}
+        {d.rows?.length ? (
+          <View style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 14 }}>
+            {d.rows.map(([label, value], i) => (
+              <View key={label} style={{ flexDirection: "row", justifyContent: "space-between", gap: 12, paddingHorizontal: 12, paddingVertical: 9, borderTopWidth: i ? 1 : 0, borderTopColor: colors.border }}>
+                <Text style={{ fontSize: 12.5, fontFamily: fonts.body.medium, color: colors.mutedForeground }}>{label}</Text>
+                <Text style={{ flexShrink: 1, textAlign: "right", fontSize: 13.5, fontFamily: fonts.body.medium, color: colors.foreground, fontVariant: ["tabular-nums"] }}>{value || "—"}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
+        {d.date ? <DateField label={d.date.label} value={dateVal} onChange={(v: string) => setDateVal(v)} /> : null}
+        {d.info ? (
+          <View style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9 }}>
+            <Text style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: colors.foreground }}>{d.info}</Text>
+          </View>
+        ) : null}
+        {d.warn ? (
+          <View style={{ borderWidth: 1, borderColor: `${colors.destructive}66`, borderLeftWidth: 3, borderLeftColor: colors.destructive, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9 }}>
+            <Text style={{ fontSize: 12.5, fontFamily: fonts.body.medium, color: colors.destructive }}>{d.warn}</Text>
+          </View>
+        ) : null}
+        {d.notes ? (
+          <View style={{ gap: 6 }}>
+            <Text style={{ fontSize: 12.5, fontFamily: fonts.body.medium, color: colors.mutedForeground }}>{d.notes.label}</Text>
+            <TextInput value={notes} onChangeText={setNotes} multiline placeholder={d.notes.placeholder} placeholderTextColor={`${colors.mutedForeground}99`}
+              style={{ minHeight: 64, textAlignVertical: "top", borderWidth: 1, borderColor: colors.border, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14.5, fontFamily: fonts.body.regular, color: colors.foreground, backgroundColor: colors.card }} />
+          </View>
+        ) : null}
+        <View style={{ flexDirection: "row", gap: 10 }}>
+          <Pressable onPress={onClose} style={{ flex: 1, alignItems: "center", paddingVertical: 13, borderRadius: 14, borderWidth: 1, borderColor: colors.border }}>
+            <Text style={{ fontSize: 14.5, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{d.cancel}</Text>
+          </Pressable>
+          <Pressable onPress={go} disabled={busy || (!!d.notes?.required && !notes.trim()) || (!!d.date?.required && !dateVal)}
+            style={({ pressed }) => ({ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 13, borderRadius: 14, backgroundColor: tone, opacity: busy || (!!d.notes?.required && !notes.trim()) ? 0.5 : pressed ? 0.85 : 1 })}>
+            {busy ? <ActivityIndicator size="small" color="#fff" /> : null}
+            <Text style={{ fontSize: 14.5, fontFamily: fonts.heading.semibold, color: "#fff" }}>{busy ? d.busy : d.confirm}</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 export default function CrmRegisterScreen() {
   const { params } = useRoute<RouteProp<MainStackParamList, "CrmRegister">>();
   const reg = registerByKey(params.register)!;
@@ -153,11 +361,13 @@ export default function CrmRegisterScreen() {
   const canOpen = useCrmCanOpen();
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
+  const qc = useQueryClient();
   const [status, setStatus] = useState(ALL);
   const [project, setProject] = useState(ALL);
   const [period, setPeriod] = useState<Period>("all");
   const [sort, setSort] = useState<Sort>("default");
   const [sheet, setSheet] = useState(false);
+  const [editing, setEditing] = useState<Row | "new" | null>(null);
   // A paired list (Welcome Calls: To call / History) switches in place; filters start afresh on the other list.
   const parent = reg.pair ? reg : pairParent(reg.key);
   useEffect(() => { setStatus(ALL); setProject(ALL); setPeriod("all"); setSort("default"); }, [reg.key]);
@@ -173,9 +383,22 @@ export default function CrmRegisterScreen() {
     queryKey: ["crm", reg.key, serverTerm],
     queryFn: async () => {
       const qs = reg.serverSearch ? `?page=1&pageSize=200${serverTerm ? `&search=${encodeURIComponent(serverTerm)}` : ""}` : "";
-      return reg.rows(await crmGet(`${reg.path}${qs}`));
+      const body = await crmGet(`${reg.path}${qs}`);
+      // Kept whole for the figures band, which reads the same response.
+      qc.setQueryData(["crm-body", reg.key, serverTerm], body);
+      return reg.rows(body);
     },
   });
+  // The web page's figures band: from a summary route, or from the list's own response (read from the cache, no fetch).
+  const bandQ = useQuery({
+    queryKey: reg.band?.path ? ["crm-band", reg.key] : ["crm-body", reg.key, serverTerm],
+    queryFn: () => crmGet(reg.band!.path!),
+    enabled: !!reg.band?.path,
+  });
+  useEffect(() => { if (reg.band?.path && query.dataUpdatedAt) void bandQ.refetch(); }, [query.dataUpdatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  const figures = reg.band && bandQ.data ? reg.band.figures(bandQ.data) : [];
+  const lead = reg.band?.lead && bandQ.data ? reg.band.lead(bandQ.data) : null;
+  const leadTotal = lead ? lead.bar.reduce((s, x) => s + x.amount, 0) : 0;
 
   const rows = query.data ?? [];
   const projectOf = (r: Row) => (reg.projectOf ? reg.projectOf(r) : r.ProjectName) || null;
@@ -205,7 +428,33 @@ export default function CrmRegisterScreen() {
 
   const activeFilters = (project !== ALL ? 1 : 0) + (period !== "all" ? 1 : 0) + (sort !== "default" ? 1 : 0);
   const create = reg.createAction && reg.createAction.pages.some((p) => canDoAction(p, "create")) ? reg.createAction : null;
-  const action = reg.cardAction && reg.cardAction.pages.some((p) => canDoAction(p, reg.cardAction!.right)) ? reg.cardAction : null;
+  // The card's key: the first of the list's keys this person may use whose `when` holds for the row.
+  const actionsAll = reg.cardAction ? (Array.isArray(reg.cardAction) ? reg.cardAction : [reg.cardAction]) : [];
+  // Keys only for approvers ask the server once (approval-workflows can-act, the web's useCanApprove).
+  const approverModules = [...new Set(actionsAll.map((a) => a.approver).filter((m): m is string => !!m))];
+  const approverQ = useQuery({ queryKey: ["can-act", ...approverModules], enabled: approverModules.length > 0, staleTime: 5 * 60_000,
+    queryFn: async () => Object.fromEntries(await Promise.all(approverModules.map(async (m) =>
+      [m, await crmGet<{ canAct: boolean }>(`/api/approval-workflows/can-act?module=${encodeURIComponent(m)}`).then((d) => !!d.canAct).catch(() => false)] as const))) });
+  const actions = actionsAll.filter((a) => a.pages.some((p) => canDoAction(p, a.right)) && (!a.approver || !!approverQ.data?.[a.approver]));
+  const actionsFor = (r: Row) => actions.filter((a) => !a.when || a.when(r));
+  const actionFor = (r: Row) => actionsFor(r)[0] ?? null;
+  const [dialog, setDialog] = useState<ActionDialog | null>(null);
+  const listAction = reg.listAction && reg.listAction.pages.some((p) => canDoAction(p, reg.listAction!.right)) ? reg.listAction : null;
+  const [listBusy, setListBusy] = useState(false);
+  const runAction = (r: Row, chosen?: CardAction) => {
+    const action = chosen ?? actionFor(r);
+    if (!action) return;
+    if (action.dialog) { setDialog(action.dialog(r)); return; }
+    if (action.call) {
+      const c = action.call(r);
+      crmSend(c.path, c.method).then((d) => { toast.success(c.done(d)); void query.refetch(); }).catch((e: Error) => toast.error(e.message));
+      return;
+    }
+    if (action.to) { const to = action.to(r); (nav.navigate as (s: string, p?: object) => void)(to.screen, to.params); }
+  };
+  const form = reg.editForm;
+  const canAdd = !!form && !form.noAdd && form.pages.some((p) => canDoAction(p, "create"));
+  const canEdit = !!form && form.pages.some((p) => canDoAction(p, "edit"));
 
   return (
     <>
@@ -255,7 +504,46 @@ export default function CrmRegisterScreen() {
             </View>
             {create ? (
               <View style={{ flexDirection: "row", marginTop: 10 }}>
-                <ActionKey label={create.label} icon={Plus} onPress={() => nav.navigate(create.screen as never)} />
+                <ActionKey label={create.label} icon={Plus} onPress={() => (nav.navigate as (s: string, p?: object) => void)(create.screen, create.params)} />
+              </View>
+            ) : null}
+            {lead ? (
+              <View style={{ marginTop: 10, gap: 6 }}>
+                <Text style={{ fontSize: 24, fontFamily: fonts.heading.bold, color: colors.foreground, fontVariant: ["tabular-nums"] }}>{lead.value}</Text>
+                <Text style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>{lead.note}</Text>
+                <View style={{ flexDirection: "row", height: 10, borderRadius: 5, overflow: "hidden", backgroundColor: colors.border }}>
+                  {lead.bar.filter((x) => x.amount > 0).map((x, i) => (
+                    <View key={i} style={{ width: `${leadTotal > 0 ? (x.amount / leadTotal) * 100 : 0}%`, minWidth: 3,
+                      backgroundColor: x.tone === "danger" ? colors.destructive : x.tone === "accent" ? CRM : colors.mutedForeground }} />
+                  ))}
+                </View>
+              </View>
+            ) : null}
+            {figures.length ? (
+              <View style={{ gap: 10, marginTop: 10 }}>
+                {[0, 2].map((i) => (
+                  <View key={i} style={{ flexDirection: "row", gap: 10 }}>
+                    {figures.slice(i, i + 2).map((f) => <Figure key={f.label} label={f.label} value={f.value} sub={f.note} tone={f.alert ? colors.destructive : undefined} />)}
+                  </View>
+                ))}
+              </View>
+            ) : null}
+            {listAction ? (
+              <View style={{ flexDirection: "row", marginTop: 10 }}>
+                <ActionKey label={listBusy && listAction.call ? listAction.call.busy : listAction.label} onPress={() => {
+                  if (listAction.screen) { nav.navigate(listAction.screen as never); return; }
+                  if (listAction.dialog) { setDialog(listAction.dialog(project !== ALL ? project : null)); return; }
+                  const c = listAction.call;
+                  if (!c || listBusy) return;
+                  setListBusy(true);
+                  crmSend(c.path, c.method).then((d) => { toast.success(c.done(d)); void query.refetch(); })
+                    .catch((e: Error) => toast.error(e.message || "That didn't go through")).finally(() => setListBusy(false));
+                }} />
+              </View>
+            ) : null}
+            {canAdd ? (
+              <View style={{ flexDirection: "row", marginTop: 10 }}>
+                <ActionKey label={`New ${form!.noun}`} icon={Plus} onPress={() => setEditing("new")} />
               </View>
             ) : null}
             {query.data ? (
@@ -274,13 +562,18 @@ export default function CrmRegisterScreen() {
           const amount = reg.amount?.(r);
           const mobile = reg.mobile ? reg.mobile(r) : r.Mobile;
           const lines = (reg.lines?.(r) ?? []).filter((l): l is string => typeof l === "string" && l.trim() !== "");
-          const footer = !!(amount || mobile || (action && (!action.when || action.when(r))));
+          const action = actionFor(r);
+          const rowActions = actionsFor(r);
+          const footer = !!(amount || mobile || action);
           const avatarText = reg.avatar?.(r);
           const initText = avatarText ? (avatarText).trim().split(/\s+/).filter(Boolean).slice(0, 2).map((p: string) => p[0]).join("").toUpperCase() || "?" : null;
+          // If this row has a navigable target (booking, invoice, etc.), tap goes there;
+          // the edit sheet opens only for pure setup registers that have no dedicated screen.
+          const tapEdits = canEdit && !target;
           return (
             <Pressable
-              disabled={!target}
-              onPress={() => open(target)}
+              disabled={!target && !canEdit}
+              onPress={() => (tapEdits ? setEditing(r) : open(target))}
               style={({ pressed }) => ({
                 ...card, padding: 16, marginBottom: 12, opacity: pressed ? 0.8 : 1,
               })}
@@ -293,7 +586,7 @@ export default function CrmRegisterScreen() {
                   {reg.sub(r) ? <Text numberOfLines={1} style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 3, fontVariant: ["tabular-nums"] }}>{reg.sub(r)}</Text> : null}
                 </View>
                 {st ? <Pill label={st} /> : null}
-                {target && !footer ? <ChevronRight size={18} color={colors.mutedForeground} style={{ marginTop: 2 }} /> : null}
+                {(target || tapEdits) && !footer ? <ChevronRight size={18} color={colors.mutedForeground} style={{ marginTop: 2 }} /> : null}
               </View>
               {lines.length ? (
                 <View style={{ marginTop: 10, gap: 4 }}>
@@ -313,12 +606,15 @@ export default function CrmRegisterScreen() {
                     ) : null}
                   </View>
                   {mobile ? <ContactKeys mobile={mobile} compact /> : null}
-                  {action && (!action.when || action.when(r)) ? (
-                    <Pressable onPress={() => { const to = action.to(r); (nav.navigate as (s: string, p: object) => void)(to.screen, to.params); }}
-                      style={({ pressed }) => ({ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, backgroundColor: CRM, opacity: pressed ? 0.75 : 1 })}>
-                      <Text style={{ fontSize: 12, fontFamily: fonts.heading.semibold, color: "#fff" }}>{action.label}</Text>
-                    </Pressable>
-                  ) : target ? <ChevronRight size={18} color={colors.mutedForeground} /> : null}
+                  {action ? rowActions.map((a) => {
+                    const c = a.danger ? colors.destructive : CRM;
+                    return (
+                      <Pressable key={a.label} onPress={() => runAction(r, a)}
+                        style={({ pressed }) => ({ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: c, backgroundColor: a.outline ? "transparent" : c, opacity: pressed ? 0.75 : 1 })}>
+                        <Text style={{ fontSize: 12, fontFamily: fonts.heading.semibold, color: a.outline ? c : "#fff" }}>{a.label}</Text>
+                      </Pressable>
+                    );
+                  }) : target || tapEdits ? <ChevronRight size={18} color={colors.mutedForeground} /> : null}
                 </View>
               ) : null}
             </Pressable>
@@ -328,6 +624,9 @@ export default function CrmRegisterScreen() {
       <FilterSheet open={sheet} onClose={() => setSheet(false)} reg={reg} projects={projects}
         project={project} setProject={setProject} period={period} setPeriod={setPeriod} sort={sort} setSort={setSort}
         onReset={() => { setProject(ALL); setPeriod("all"); setSort("default"); }} />
+      <ActionSheet d={dialog} onClose={() => setDialog(null)} onDone={() => { void query.refetch(); }} />
+      {form ? <EditSheet form={form} row={editing} canDelete={form.pages.some((p) => canDoAction(p, "delete"))} onClose={() => setEditing(null)} onSaved={() => { void query.refetch(); }}
+        onOpen={(() => { const t = editing && editing !== "new" ? reg.open?.(editing) : null; return t && canOpen(t) ? { label: t.to === "booking" ? "Open booking" : "Open", go: () => open(t) } : null; })()} /> : null}
     </>
   );
 }

@@ -1,16 +1,18 @@
 // NOC (No Objection Certificate) lifecycle screen.
 // Context: GET /api/crm/noc/booking/:bookingId/context → { booking, agreement, existingNocs, loanDetail }
 // Create: POST /api/crm/noc; submit/approve/reject/mark-issued via PUT /:id/<action>
+// Edit notes: PUT /api/crm/noc/:id
 import { useState } from "react";
-import { ActivityIndicator, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from "react-native";
 import { useRoute, type RouteProp } from "@react-navigation/native";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
-import { Building2, CheckCircle2, FileText, XCircle } from "lucide-react-native";
+import { Building2, CheckCircle2, FileText, Landmark, PenLine, ShieldCheck, XCircle } from "lucide-react-native";
 import { useAuth } from "@/auth/AuthContext";
 import { crmGet, crmSend, type Row } from "@/api/crmApi";
 import { toast } from "@/components/Toast";
 import { TextField, RemarksField } from "@/components/form/Form";
 import { DateField } from "@/components/form/DateField";
+import { OptionPickerModal, PickerRow } from "@/components/OptionPicker";
 import { fonts } from "@/theme/fonts";
 import { useBrand } from "@/theme/ThemeContext";
 import type { MainStackParamList } from "@/navigation/MainStack";
@@ -23,6 +25,15 @@ type Ctx = {
   loanDetail: Row | null;
 };
 
+interface EligibleBooking {
+  Id: number;
+  BookingNo: string;
+  UnitNo?: string | null;
+  ApplicantName: string;
+  NocType: string;
+  HasLoan: number;
+}
+
 const STATUS_COLOR: Record<string, string> = {
   Pending: "#f59e0b",
   Approved: "#10b981",
@@ -30,17 +41,29 @@ const STATUS_COLOR: Record<string, string> = {
   Rejected: "#ef4444",
 };
 
-function NocCard({ noc, canEdit, onAction, busy }: {
-  noc: Row; canEdit: boolean;
+function NocCard({
+  noc,
+  canEdit,
+  onAction,
+  onEditNotes,
+  busy,
+}: {
+  noc: Row;
+  canEdit: boolean;
   onAction: (action: "submit" | "approve" | "reject" | "mark-issued", note?: string) => Promise<void>;
+  onEditNotes: (notes: string) => Promise<void>;
   busy: boolean;
 }) {
   const b = useBrand();
   const [rejectNote, setRejectNote] = useState("");
   const [showReject, setShowReject] = useState(false);
+  const [showEditNotes, setShowEditNotes] = useState(false);
+  const [editNotesText, setEditNotesText] = useState(String(noc.Notes ?? ""));
+
   const tone = STATUS_COLOR[noc.Status] ?? b.textSecondary;
   const isPending = noc.Status === "Pending";
   const isApproved = noc.Status === "Approved";
+  const isIssued = noc.Status === "Issued";
 
   return (
     <View style={{ backgroundColor: b.surfaceCard, borderRadius: 14, padding: 16, gap: 10, borderWidth: 1, borderColor: b.border }}>
@@ -56,19 +79,39 @@ function NocCard({ noc, canEdit, onAction, busy }: {
       {noc.IssuedDate ? <Kv label="Issued date" value={fmtDate(noc.IssuedDate)} /> : null}
       {noc.Reason ? <Kv label="Reason" value={noc.Reason} /> : null}
       {noc.Notes ? <Kv label="Notes" value={noc.Notes} /> : null}
-      {canEdit && isPending && !noc.SubmittedAt ? (
-        <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
+
+      {/* Action buttons */}
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
+        {canEdit && isPending && !noc.SubmittedAt ? (
           <ActionKey label={busy ? "Submitting…" : "Submit for approval"} onPress={() => onAction("submit")} />
-        </View>
-      ) : null}
-      {canEdit && isPending && noc.SubmittedAt ? (
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
-          <ActionKey label={busy && !showReject ? "Approving…" : "Approve"} onPress={() => onAction("approve")} />
-          <ActionKey outline tone="#ef4444" label="Reject" onPress={() => setShowReject(true)} />
-        </View>
-      ) : null}
+        ) : null}
+
+        {canEdit && isPending && noc.SubmittedAt ? (
+          <>
+            <ActionKey label={busy && !showReject ? "Approving…" : "Approve"} onPress={() => onAction("approve")} />
+            <ActionKey outline tone="#ef4444" label="Reject" onPress={() => setShowReject(true)} />
+          </>
+        ) : null}
+
+        {canEdit && isApproved ? (
+          <ActionKey label={busy ? "Marking…" : "Mark as Issued"} onPress={() => onAction("mark-issued")} />
+        ) : null}
+
+        {canEdit && !isIssued ? (
+          <ActionKey
+            outline
+            label="Edit Notes"
+            onPress={() => {
+              setEditNotesText(String(noc.Notes ?? ""));
+              setShowEditNotes(true);
+            }}
+          />
+        ) : null}
+      </View>
+
+      {/* Reject sheet */}
       {showReject ? (
-        <View style={{ gap: 8 }}>
+        <View style={{ gap: 8, marginTop: 6 }}>
           <RemarksField label="Rejection note (optional)" value={rejectNote} onChangeText={setRejectNote} />
           <View style={{ flexDirection: "row", gap: 8 }}>
             <ActionKey tone="#ef4444" label={busy ? "Rejecting…" : "Confirm reject"} onPress={() => { onAction("reject", rejectNote); setShowReject(false); }} />
@@ -76,9 +119,21 @@ function NocCard({ noc, canEdit, onAction, busy }: {
           </View>
         </View>
       ) : null}
-      {canEdit && isApproved ? (
-        <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
-          <ActionKey label={busy ? "Marking…" : "Mark as Issued"} onPress={() => onAction("mark-issued")} />
+
+      {/* Edit Notes sheet */}
+      {showEditNotes ? (
+        <View style={{ gap: 8, marginTop: 6, paddingTop: 8, borderTopWidth: 1, borderTopColor: b.border }}>
+          <RemarksField label="Edit notes" value={editNotesText} onChangeText={setEditNotesText} />
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            <ActionKey
+              label={busy ? "Saving…" : "Save Notes"}
+              onPress={async () => {
+                await onEditNotes(editNotesText);
+                setShowEditNotes(false);
+              }}
+            />
+            <ActionKey outline label="Cancel" onPress={() => setShowEditNotes(false)} />
+          </View>
         </View>
       ) : null}
     </View>
@@ -86,7 +141,6 @@ function NocCard({ noc, canEdit, onAction, busy }: {
 }
 
 function CreateNocForm({ bookingId, ctx, onCreated }: { bookingId: number; ctx: Ctx; onCreated: () => void }) {
-  const b = useBrand();
   const loan = ctx.loanDetail;
   const isBank = !!(loan && (loan.FinancingType === "Bank" || loan.BankName));
   const [nocDate, setNocDate] = useState("");
@@ -113,8 +167,11 @@ function CreateNocForm({ bookingId, ctx, onCreated }: { bookingId: number; ctx: 
       await crmSend("/api/crm/noc", "POST", payload);
       toast.success("NOC created");
       onCreated();
-    } catch (e) { toast.error((e as Error).message); }
-    finally { setBusy(false); }
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -138,22 +195,37 @@ function CreateNocForm({ bookingId, ctx, onCreated }: { bookingId: number; ctx: 
 
 export default function CrmNocScreen() {
   const { params } = useRoute<RouteProp<MainStackParamList, "CrmNoc">>();
-  const { bookingId } = params;
+  const initialBookingId = params?.bookingId;
+  const [selectedBookingId, setSelectedBookingId] = useState<number | null>(initialBookingId ?? null);
+  const [showPicker, setShowPicker] = useState(false);
+
   const { canDoAction } = useAuth();
   const b = useBrand();
   const qc = useQueryClient();
   const canEdit = canDoAction("crm-noc", "edit");
+  const canCreate = canDoAction("crm-noc", "create");
+
+  // Eligible bookings for when bookingId is not passed directly
+  const eligibleQ = useQuery<EligibleBooking[]>({
+    queryKey: ["crm-noc-eligible-bookings"],
+    queryFn: () => crmGet<EligibleBooking[]>("/api/crm/noc/eligible-bookings").then((d) => (Array.isArray(d) ? d : [])),
+    enabled: selectedBookingId == null,
+  });
+
+  const activeBookingId = selectedBookingId;
 
   const ctxQ = useQuery<Ctx>({
-    queryKey: ["crm-noc-ctx", bookingId],
-    queryFn: () => crmGet(`/api/crm/noc/booking/${bookingId}/context`),
+    queryKey: ["crm-noc-ctx", activeBookingId],
+    queryFn: () => crmGet<Ctx>(`/api/crm/noc/booking/${activeBookingId!}/context`),
+    enabled: activeBookingId != null,
   });
 
   const [busy, setBusy] = useState(false);
 
   const invalidate = () => {
-    ["crm-noc-ctx", "crm-booking-legal-mil", "crm-booking"].forEach((k) =>
-      qc.invalidateQueries({ queryKey: [k, bookingId] })
+    if (!activeBookingId) return;
+    ["crm-noc-ctx", "crm-booking-legal-mil", "crm-booking", "crm-noc-eligible-bookings"].forEach((k) =>
+      qc.invalidateQueries({ queryKey: [k, activeBookingId] })
     );
   };
 
@@ -171,9 +243,64 @@ export default function CrmNocScreen() {
       };
       toast.success(labels[action] ?? "Done");
       invalidate();
-    } catch (e) { toast.error((e as Error).message); }
-    finally { setBusy(false); }
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
   };
+
+  const editNotes = async (nocId: number, newNotes: string) => {
+    setBusy(true);
+    try {
+      await crmSend(`/api/crm/noc/${nocId}`, "PUT", { Notes: newNotes.trim() || null });
+      toast.success("Notes saved");
+      invalidate();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // If no booking is selected yet
+  if (!activeBookingId) {
+    const eligible = eligibleQ.data ?? [];
+    const options = eligible.map((e) => ({
+      key: String(e.Id),
+      label: `${e.ApplicantName} (${e.BookingNo})`,
+      sublabel: `${e.NocType === "Bank" ? "Bank NOC" : "Developer NOC"}${e.UnitNo ? ` · Unit ${e.UnitNo}` : ""}`,
+    }));
+
+    return (
+      <ScrollView style={{ flex: 1, backgroundColor: b.surface }} contentContainerStyle={{ padding: 16, gap: 16 }}>
+        <Section title="Request NOC">
+          <Text style={{ fontSize: 13, fontFamily: fonts.body.regular, color: b.textSecondary }}>
+            Choose a booking whose Agreement for Sale is registered to view its status or request a NOC.
+          </Text>
+          <PickerRow
+            label="Eligible Booking"
+            required
+            value=""
+            placeholder={eligibleQ.isLoading ? "Loading eligible bookings…" : "Select a booking…"}
+            onPress={() => setShowPicker(true)}
+          />
+        </Section>
+
+        <OptionPickerModal
+          visible={showPicker}
+          title="Select Booking for NOC"
+          options={options}
+          searchable
+          onSelect={(k) => {
+            setSelectedBookingId(Number(k));
+            setShowPicker(false);
+          }}
+          onClose={() => setShowPicker(false)}
+        />
+      </ScrollView>
+    );
+  }
 
   if (ctxQ.isLoading) {
     return (
@@ -194,14 +321,23 @@ export default function CrmNocScreen() {
 
   const ctx = ctxQ.data;
   const nocs = ctx.existingNocs ?? [];
-  // Active NOC = any that isn't Rejected
   const activeNoc = nocs.find((n) => n.Status !== "Rejected");
-  const canCreate = canDoAction("crm-noc", "create") && !activeNoc;
+  const canCreateHere = canCreate && !activeNoc;
   const agreement = ctx.agreement;
   const agrRegistered = agreement?.Status === "Registered";
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: b.surface }} contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 48 }}>
+      {/* Booking banner */}
+      <View style={{ backgroundColor: b.surfaceCard, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: b.border, gap: 4 }}>
+        <Text style={{ fontSize: 15, fontFamily: fonts.heading.semibold, color: b.textPrimary }}>
+          {ctx.booking.ApplicantName as string}
+        </Text>
+        <Text style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: b.textSecondary }}>
+          {[ctx.booking.BookingNo, ctx.booking.UnitNo, ctx.booking.ProjectName].filter(Boolean).join(" · ")}
+        </Text>
+      </View>
+
       {/* Pre-condition notice */}
       {!agrRegistered ? (
         <View style={{ backgroundColor: b.warningSoft, borderRadius: 12, padding: 14, flexDirection: "row", gap: 10, alignItems: "flex-start" }}>
@@ -225,6 +361,7 @@ export default function CrmNocScreen() {
                 canEdit={canEdit}
                 busy={busy}
                 onAction={(action, note) => doAction(Number(noc.Id), action, note)}
+                onEditNotes={(newNotes) => editNotes(Number(noc.Id), newNotes)}
               />
             ))}
           </View>
@@ -234,8 +371,8 @@ export default function CrmNocScreen() {
       )}
 
       {/* Create form */}
-      {canCreate && agrRegistered ? <CreateNocForm bookingId={bookingId} ctx={ctx} onCreated={invalidate} /> : null}
-      {canCreate && !agrRegistered ? (
+      {canCreateHere && agrRegistered ? <CreateNocForm bookingId={activeBookingId} ctx={ctx} onCreated={invalidate} /> : null}
+      {canCreateHere && !agrRegistered ? (
         <View style={{ backgroundColor: b.surfaceCard, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: b.border }}>
           <Text style={{ fontSize: 13, fontFamily: fonts.body.regular, color: b.textSecondary }}>
             Raise the NOC once the agreement is registered.

@@ -45,11 +45,12 @@ const boxStyle = () => ({
 });
 
 export function TextField({
-  label, value, onChangeText, placeholder, required, error, autoCapitalize, keyboardType, multiline, disabled,
+  label, value, onChangeText, onBlur, placeholder, required, error, autoCapitalize, keyboardType, multiline, disabled,
 }: {
   label: string;
   value: string;
   onChangeText: (v: string) => void;
+  onBlur?: () => void;
   placeholder?: string;
   required?: boolean;
   error?: string | null;
@@ -64,6 +65,7 @@ export function TextField({
       <TextInput
         value={value}
         onChangeText={onChangeText}
+        onBlur={onBlur}
         placeholder={placeholder}
         placeholderTextColor={`${colors.mutedForeground}99`}
         autoCapitalize={autoCapitalize}

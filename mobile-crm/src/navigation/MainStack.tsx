@@ -28,6 +28,7 @@ import CrmRegisterScreen from "@/screens/crm/CrmRegisterScreen";
 import UnitMatrixScreen from "@/screens/crm/UnitMatrixScreen";
 import ParkingMatrixScreen from "@/screens/crm/ParkingMatrixScreen";
 import BookingDetailScreen from "@/screens/crm/BookingDetailScreen";
+import CrmBookingNewScreen from "@/screens/crm/CrmBookingNewScreen";
 import CrmAgreementScreen from "@/screens/crm/CrmAgreementScreen";
 import CrmNocScreen from "@/screens/crm/CrmNocScreen";
 import CrmSaleDeedScreen from "@/screens/crm/CrmSaleDeedScreen";
@@ -35,16 +36,23 @@ import CrmMutationScreen from "@/screens/crm/CrmMutationScreen";
 import CrmConstructionUpdatesScreen from "@/screens/crm/CrmConstructionUpdatesScreen";
 import CrmOcCcBoardScreen from "@/screens/crm/CrmOcCcBoardScreen";
 import CrmCancellationScreen from "@/screens/crm/CrmCancellationScreen";
-import CrmRefundScreen from "@/screens/crm/CrmRefundScreen";
+import CrmCancellationNewScreen from "@/screens/crm/CrmCancellationNewScreen";
+import CrmRefundScreen, { NewRefundScreen } from "@/screens/crm/CrmRefundScreen";
 import CrmInvoiceScreen from "@/screens/crm/CrmInvoiceScreen";
-import CrmResaleScreen from "@/screens/crm/CrmResaleScreen";
+import CrmResaleScreen, { NewResaleScreen } from "@/screens/crm/CrmResaleScreen";
 import CrmMoneyReceiptScreen from "@/screens/crm/CrmMoneyReceiptScreen";
 import CrmBrokerageScreen from "@/screens/crm/CrmBrokerageScreen";
 import CrmTransferDeedScreen from "@/screens/crm/CrmTransferDeedScreen";
 import CrmOwnershipChangeScreen from "@/screens/crm/CrmOwnershipChangeScreen";
+import CrmCreditNoteScreen from "@/screens/crm/CrmCreditNoteScreen";
+import CrmUnitChangeScreen from "@/screens/crm/CrmUnitChangeScreen";
+import CrmLegalMilestoneScreen from "@/screens/crm/CrmLegalMilestoneScreen";
+import CrmLoanTrackingScreen from "@/screens/crm/CrmLoanTrackingScreen";
+import CrmBookingAmendmentScreen from "@/screens/crm/CrmBookingAmendmentScreen";
+import CrmDemandDetailScreen from "@/screens/crm/CrmDemandDetailScreen";
 import Customer360Screen from "@/screens/crm/Customer360Screen";
 import TicketScreen from "@/screens/crm/TicketScreen";
-import { NewTicketScreen, CustomerFormScreen, ApplicationFormScreen, WelcomeChecklistScreen, PossessionScreen, PaymentScreen, WelcomeCallScreen } from "@/screens/crm/CrmForms";
+import { NewTicketScreen, CustomerFormScreen, ApplicationFormScreen, WelcomeChecklistScreen, PossessionScreen, PaymentScreen, WelcomeCallScreen, BankDetailsScreen, OnAccountAdjustScreen, BookingChargesScreen, ParkingAllotmentScreen, ParkingSaleScreen, OcCcCertificateScreen, AfsQueryPaymentScreen, AfsStartScreen, CustomerImportScreen } from "@/screens/crm/CrmForms";
 import { pairParent, registerByKey, useHasCrm } from "@/screens/crm/crmRegisters";
 import { Tap } from "@/screens/crm/ui";
 import { ShellMenusProvider, TopHeader, useMenuCount, useShellMenus } from "./TopHeader";
@@ -77,20 +85,33 @@ export type MainStackParamList = {
   CrmRegister: { register: string };
   CrmUnitMatrix: undefined;
   CrmParkingMatrix: undefined;
-  CrmBooking: { bookingId: number; title?: string };
+  CrmBooking: { bookingId: number; title?: string; focus?: "money" };
+  CrmBookingNew: { applicationId?: number } | undefined;
   CrmCustomer: { customerId: number; title?: string };
   CrmTicket: { ticketId: number };
   CrmTicketNew: { bookingId: number; title?: string };
-  CrmCustomerForm: { customerId?: number } | undefined;
+  CrmBankDetails: { bookingId: number; row: Record<string, any> };
+  CrmOnAccountAdjust: { deposit: Record<string, any> };
+  CrmBookingCharges: { bookingId: number; title?: string };
+  CrmRefundNew: undefined;
+  CrmCancellationNew: undefined;
+  CrmParkingAllotment: { allotment: Record<string, any> };
+  CrmParkingSale: undefined;
+  CrmResaleNew: undefined;
+  CrmAfsQueryPayment: { id: number; title?: string };
+  CrmAfsStart: { kind: "qp" | "registry" };
+  CrmCustomerImport: undefined;
+  CrmOcCcCert: { cert?: Record<string, any>; status?: string } | undefined;
+  CrmCustomerForm: { customerId?: number; lead?: { Id: number; LeadUid?: string; CustomerName?: string; Mobile?: string; AltMobile?: string; Email?: string } } | undefined;
   CrmWelcomeChecklist: { bookingId: number; title?: string };
   CrmPossession: { bookingId: number; title?: string };
-  CrmApplicationForm: { applicationId?: number; customer?: { Id: number; Name: string } } | undefined;
+  CrmApplicationForm: { applicationId?: number; customer?: { Id: number; Name: string }; pick?: { ProjectId: number; UnitId?: number; PlotId?: number } } | undefined;
   CrmWelcomeCall: { bookingId: number; title?: string };
   CrmPayment: { bookingId: number; milestoneId?: number; title?: string };
-  CrmAgreement: { bookingId: number; title?: string };
-  CrmNoc: { bookingId: number; title?: string };
-  CrmSaleDeed: { bookingId: number; title?: string };
-  CrmMutation: { bookingId: number; title?: string };
+  CrmAgreement: { bookingId?: number; title?: string } | undefined;
+  CrmNoc: { bookingId?: number; title?: string } | undefined;
+  CrmSaleDeed: { bookingId?: number; title?: string } | undefined;
+  CrmMutation: { bookingId?: number; title?: string } | undefined;
   CrmConstructionUpdates: { projectId: number; projectName?: string };
   CrmOcCcBoard: undefined;
   CrmCancellation: { cancellationId: number; title?: string };
@@ -101,6 +122,12 @@ export type MainStackParamList = {
   CrmBrokerage: { brokerageId: number; title?: string };
   CrmTransferDeed: { deedId: number; title?: string };
   CrmOwnershipChange: { changeId: number; title?: string };
+  CrmCreditNote: { creditNoteId: number; title?: string };
+  CrmUnitChange: { changeId: number; title?: string };
+  CrmLegalMilestone: { bookingId: number; title?: string };
+  CrmLoanTracking: { bookingId: number; title?: string };
+  CrmBookingAmendment: { amendmentId: number; title?: string; amendment?: Record<string, any> };
+  CrmDemandDetail: { milestoneId: number; title?: string; demand?: Record<string, any> };
 };
 
 const Stack = createNativeStackNavigator<MainStackParamList>();
@@ -200,19 +227,34 @@ export default function MainStack() {
         <Stack.Screen name="CrmUnitMatrix" component={UnitMatrixScreen} options={{ title: "Unit Matrix" }} />
         <Stack.Screen name="CrmParkingMatrix" component={ParkingMatrixScreen} options={{ title: "Parking Matrix" }} />
         <Stack.Screen name="CrmBooking" component={BookingDetailScreen} options={({ route }) => ({ title: route.params.title || "Booking" })} />
+        <Stack.Screen name="CrmBookingNew" component={CrmBookingNewScreen} options={{ title: "New Booking" }} />
         <Stack.Screen name="CrmCustomer" component={Customer360Screen} options={{ title: "Customer 360" }} />
         <Stack.Screen name="CrmTicket" component={TicketScreen} options={{ title: "Service Ticket" }} />
         <Stack.Screen name="CrmTicketNew" component={NewTicketScreen} options={{ title: "New Service Ticket" }} />
         <Stack.Screen name="CrmApplicationForm" component={ApplicationFormScreen} options={({ route }) => ({ title: route.params?.applicationId ? "Edit Application" : "New Application" })} />
         <Stack.Screen name="CrmPossession" component={PossessionScreen} options={{ title: "Possession & Handover" }} />
         <Stack.Screen name="CrmWelcomeChecklist" component={WelcomeChecklistScreen} options={{ title: "Welcome Checklist" }} />
+        <Stack.Screen name="CrmBankDetails" component={BankDetailsScreen} options={{ title: "Bank and KYC" }} />
+        <Stack.Screen name="CrmParkingAllotment" component={ParkingAllotmentScreen} options={{ title: "Parking allotment" }} />
+        <Stack.Screen name="CrmOcCcCert" component={OcCcCertificateScreen}
+          options={({ route }) => ({ title: route.params?.cert ? (route.params.cert.CertType === "CC" ? "Completion Certificate" : route.params.cert.CertType === "OC" ? "Occupancy Certificate" : "Certificate") : "File Application" })} />
+        <Stack.Screen name="CrmCustomerImport" component={CustomerImportScreen} options={{ title: "Import customers" }} />
+        <Stack.Screen name="CrmAfsQueryPayment" component={AfsQueryPaymentScreen} options={({ route }) => ({ title: route.params.title || "AFS Query Payment" })} />
+        <Stack.Screen name="CrmAfsStart" component={AfsStartScreen} options={({ route }) => ({ title: route.params.kind === "qp" ? "Start Registration Fee Tracker" : "Start AFS Registry" })} />
+        <Stack.Screen name="CrmResaleNew" component={NewResaleScreen} options={{ title: "New resale or buy-back" }} />
+        <Stack.Screen name="CrmParkingSale" component={ParkingSaleScreen} options={{ title: "New standalone parking sale" }} />
+        <Stack.Screen name="CrmRefundNew" component={NewRefundScreen} options={{ title: "New Refund" }} />
+        <Stack.Screen name="CrmCancellationNew" component={CrmCancellationNewScreen} options={{ title: "New Cancellation" }} />
+        <Stack.Screen name="CrmBookingCharges" component={BookingChargesScreen} options={{ title: "Parking & Extra Charges" }} />
+        <Stack.Screen name="CrmOnAccountAdjust" component={OnAccountAdjustScreen}
+          options={({ route }) => ({ title: `Adjust ${route.params.deposit.ReceiptNo || `deposit #${route.params.deposit.Id}`}` })} />
         <Stack.Screen name="CrmCustomerForm" component={CustomerFormScreen} options={({ route }) => ({ title: route.params?.customerId ? "Edit Customer" : "New Customer" })} />
         <Stack.Screen name="CrmWelcomeCall" component={WelcomeCallScreen} options={{ title: "Log Welcome Call" }} />
         <Stack.Screen name="CrmPayment" component={PaymentScreen} options={({ route }) => ({ title: route.params.milestoneId ? "Submit Payment" : "On-account Deposit" })} />
-        <Stack.Screen name="CrmAgreement" component={CrmAgreementScreen} options={{ title: "Agreement" }} />
-        <Stack.Screen name="CrmNoc" component={CrmNocScreen} options={({ route }) => ({ title: route.params.title || "NOC" })} />
-        <Stack.Screen name="CrmSaleDeed" component={CrmSaleDeedScreen} options={{ title: "Sale Deed" }} />
-        <Stack.Screen name="CrmMutation" component={CrmMutationScreen} options={{ title: "Mutation" }} />
+        <Stack.Screen name="CrmAgreement" component={CrmAgreementScreen} options={({ route }) => ({ title: route.params?.title || "Agreement" })} />
+        <Stack.Screen name="CrmNoc" component={CrmNocScreen} options={({ route }) => ({ title: route.params?.title || "NOC" })} />
+        <Stack.Screen name="CrmSaleDeed" component={CrmSaleDeedScreen} options={({ route }) => ({ title: route.params?.title || "Sale Deed" })} />
+        <Stack.Screen name="CrmMutation" component={CrmMutationScreen} options={({ route }) => ({ title: route.params?.title || "Mutation" })} />
         <Stack.Screen name="CrmConstructionUpdates" component={CrmConstructionUpdatesScreen} options={({ route }) => ({ title: route.params.projectName || "Construction Updates" })} />
         <Stack.Screen name="CrmOcCcBoard" component={CrmOcCcBoardScreen} options={{ title: "OC / CC Board" }} />
         <Stack.Screen name="CrmCancellation" component={CrmCancellationScreen} options={({ route }) => ({ title: route.params.title || "Cancellation" })} />
@@ -223,6 +265,12 @@ export default function MainStack() {
         <Stack.Screen name="CrmBrokerage" component={CrmBrokerageScreen} options={({ route }) => ({ title: route.params.title || "Brokerage" })} />
         <Stack.Screen name="CrmTransferDeed" component={CrmTransferDeedScreen} options={({ route }) => ({ title: route.params.title || "Transfer Deed" })} />
         <Stack.Screen name="CrmOwnershipChange" component={CrmOwnershipChangeScreen} options={({ route }) => ({ title: route.params.title || "Ownership Change" })} />
+        <Stack.Screen name="CrmCreditNote" component={CrmCreditNoteScreen} options={({ route }) => ({ title: route.params.title || "Credit Note" })} />
+        <Stack.Screen name="CrmUnitChange" component={CrmUnitChangeScreen} options={({ route }) => ({ title: route.params.title || "Unit Change" })} />
+        <Stack.Screen name="CrmLegalMilestone" component={CrmLegalMilestoneScreen} options={({ route }) => ({ title: route.params.title || "Legal Milestones" })} />
+        <Stack.Screen name="CrmLoanTracking" component={CrmLoanTrackingScreen} options={({ route }) => ({ title: route.params.title || "Home Loan Tracking" })} />
+        <Stack.Screen name="CrmBookingAmendment" component={CrmBookingAmendmentScreen} options={({ route }) => ({ title: route.params.title || "Booking Amendment" })} />
+        <Stack.Screen name="CrmDemandDetail" component={CrmDemandDetailScreen} options={({ route }) => ({ title: route.params.title || "Milestone Demand" })} />
       </Stack.Navigator>
     </ShellMenusProvider>
   );
