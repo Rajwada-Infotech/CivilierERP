@@ -15,6 +15,7 @@ import { SHEET_CSS, Detail, Dimension, Skel } from "@/components/sheet/Sheet";
 interface FinanceDashboardData {
   paymentsMade: { totalCount: number; todayCount: number; totalAmount: number; todayAmount: number; pendingApprovalCount?: number };
   invoices: { totalCount: number; paidCount: number; pendingApprovalCount: number };
+  overdue: { invoiceCount: number; invoiceAmount: number; paymentCount: number; paymentAmount: number };
   receivedPayments: { totalCount: number; todayCount: number; totalAmount: number; todayAmount: number; approvedCount: number; draftCount: number };
   cheques: { totalCount: number; activeCount: number; inactiveCount: number };
   cards: { totalCount: number; activeCount: number; inactiveCount: number };
@@ -58,6 +59,7 @@ interface MonthlyIncomePoint {
 const EMPTY_DATA: FinanceDashboardData = {
   paymentsMade: { totalCount: 0, todayCount: 0, totalAmount: 0, todayAmount: 0 },
   invoices: { totalCount: 0, paidCount: 0, pendingApprovalCount: 0 },
+  overdue: { invoiceCount: 0, invoiceAmount: 0, paymentCount: 0, paymentAmount: 0 },
   receivedPayments: { totalCount: 0, todayCount: 0, totalAmount: 0, todayAmount: 0, approvedCount: 0, draftCount: 0 },
   cheques: { totalCount: 0, activeCount: 0, inactiveCount: 0 },
   cards: { totalCount: 0, activeCount: 0, inactiveCount: 0 },
@@ -80,6 +82,7 @@ function normalise(raw: any): FinanceDashboardData {
   return {
     paymentsMade,
     invoices: raw.invoices ?? EMPTY_DATA.invoices,
+    overdue: raw.overdue ?? EMPTY_DATA.overdue,
     receivedPayments: raw.receivedPayments ?? EMPTY_DATA.receivedPayments,
     cheques: raw.cheques ?? EMPTY_DATA.cheques,
     cards: raw.cards ?? EMPTY_DATA.cards,
@@ -371,6 +374,22 @@ const FinanceDashboard = () => {
                     <button key={b.label} onClick={() => navigate(b.path)} style={{ textAlign: "left", padding: "12px 14px", borderLeft: i ? "1px solid var(--rule-soft)" : 0 }}>
                       <span className="label link" style={{ color: "var(--ink)" }}>{b.label}</span>
                       <span className="figure" style={{ display: "block", fontSize: 24, marginTop: 6, color: b.red ? "var(--red)" : undefined }}>{fmtInt(b.value)}</span>
+                      <span style={{ display: "block", fontSize: 12, color: "var(--graphite)", marginTop: 2 }}>{b.sub}</span>
+                    </button>
+                  ))}
+                </div>
+                {/* Overdue: invoice instalments past their due date, and outgoing cheques past their date that haven't cleared. */}
+                <div style={{ border: "1px solid var(--ink)", borderTop: 0, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
+                  {[
+                    { label: "Invoices overdue", count: n0(data.overdue.invoiceCount), amount: n0(data.overdue.invoiceAmount), sub: "instalments past their due date", path: "/finance/invoice" },
+                    { label: "Payments overdue", count: n0(data.overdue.paymentCount), amount: n0(data.overdue.paymentAmount), sub: "cheques past their date, not cleared", path: "/payments" },
+                  ].map((b, i) => (
+                    <button key={b.label} onClick={() => navigate(b.path)} style={{ textAlign: "left", padding: "12px 14px", borderLeft: i ? "1px solid var(--rule-soft)" : 0 }}>
+                      <span className="label link" style={{ color: b.count ? "var(--red)" : "var(--ink)" }}>{b.label}</span>
+                      <span style={{ display: "flex", alignItems: "baseline", gap: 10, marginTop: 6 }}>
+                        <span className="figure" style={{ fontSize: 24, color: b.count ? "var(--red)" : undefined }}>{fmtInt(b.count)}</span>
+                        {b.count > 0 && <span className="figure" style={{ fontSize: 14, color: "var(--red)" }}>{money(b.amount)}</span>}
+                      </span>
                       <span style={{ display: "block", fontSize: 12, color: "var(--graphite)", marginTop: 2 }}>{b.sub}</span>
                     </button>
                   ))}
