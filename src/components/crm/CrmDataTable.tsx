@@ -837,6 +837,8 @@ interface CrmGridProps<T> {
   onSelect?: (next: Map<string | number, T>) => void;
   /** Leave out the row-number column. */
   noRowNumbers?: boolean;
+  /** On a phone: each row drawn as a card instead of the table row. */
+  mobileCardRenderer?: (row: T) => React.ReactNode;
 }
 
 /** The grid itself: row numbers, sortable and resizable headers, the viewer's columns, and the footer pager. */
