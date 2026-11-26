@@ -17,10 +17,15 @@ const { writeAudit, nextCodeSql, codePrefix } = require("./legalAudit");
 const { pageable } = require("./paging");
 const router = express.Router();
 router.use(apiRateLimit);
+// Project access (User / Role Project Access): a restricted user reaches only lands / enquiries of their projects.
+const projectGuard = require("./projectGuard");
+router.use(async (req, _res, next) => { try { req.legalScope = await projectGuard.getProjectScope(req.user); } catch { /* unrestricted */ } next(); });
+router.param("landId", projectGuard.landParam("land"));
 const PAGE = "legal-land-master";
 const STAGE = "Amendment Approver";
 
-const TYPES = ["Clerical correction", "Mutation / LR record update", "Resurvey / area correction", "Conversion of land type", "Court order", "Boundary correction", "Other"];
+const TYPES = ["Clerical correction", "Mutation / LR record update", "Resurvey / area correction", "Conversion of land type", "Court order", "Boundary correction",
+  "Ownership correction", "Dag correction", "Khatian correction", "Land area correction", "Document replacement", "Other"];
 // Plain fields of the land that an amendment may change: [column, label, kind, max/options]
 const FIELDS = [
   ["LandName", "Land title / name", "text", 200], ["RsKhatianNo", "RS Khatian number", "text", 50], ["RsDagNo", "RS Dag / Plot number", "text", 50],
@@ -36,7 +41,7 @@ const FIELD = Object.fromEntries(FIELDS.map((f) => [f.field, f]));
 // Record sections an amendment may add to, edit or remove from. Columns: [column, label, kind, max | options, required]
 const col = (name, label, kind, extra, required) => ({ name, label, kind, ...(Array.isArray(extra) ? { options: extra } : extra ? { max: extra } : {}), required: !!required });
 const DOC_SECTIONS = ["Property", "Ownership", "Legal", "Purchase / Sale", "Registration", "Loan & Mortgage", "Mutation", "Payment", "Tax", "Survey & Valuation", "Other"];
-const CLEARANCE_STATUS = ["Not Applied", "Applied", "Under Processing", "Obtained", "Rejected"];
+const CLEARANCE_STATUS = ["Not Applied", "Not Applicable", "Application Submitted", "Under Review", "Query Raised", "Query Replied", "Approved", "Rejected", "Expired"];
 const SECTIONS = {
   rs: { title: "RS record", table: "LegalLandRsRecord", pk: "RsRecordId", ops: ["add", "edit", "remove"],
     cols: [col("RsKhatianNo", "RS Khatian", "text", 50, true), col("RsDagNo", "RS Dag", "text", 50, true), col("RecordedHolder", "Recorded holder", "text", 200), col("Area", "Area", "number"), col("Share", "Share", "text", 60), col("Remarks", "Remarks", "text", 500)],
@@ -79,7 +84,7 @@ async function currentRows(pool, landId) {
     rs: await q("SELECT RsRecordId AS id, * FROM dbo.LegalLandRsRecord WHERE LandId = @L AND IsActive = 1 ORDER BY RsRecordId"),
     lr: await q("SELECT LrRecordId AS id, * FROM dbo.LegalLandLrRecord WHERE LandId = @L AND IsActive = 1 ORDER BY LrRecordId"),
     owner: await q("SELECT RecordId AS id, * FROM dbo.LegalOwnershipRecord WHERE LandId = @L AND IsActive = 1 AND ValidTo IS NULL ORDER BY ValidFrom, RecordId"),
-    mutation: await q("SELECT MutationId AS id, * FROM dbo.LegalMutation WHERE LandId = @L AND IsActive = 1 ORDER BY MutationId"),
+    mutation: await q("SELECT MutationId AS id, * FROM dbo.LegalMutation WHERE LandId = @L AND IsActive = 1 AND Kind = N'Mutation' ORDER BY MutationId"),
     clearance: (await q("SELECT Kind AS id, * FROM dbo.LegalLandClearance WHERE LandId = @L"))
       .concat(["LA", "ULC"].map((k) => ({ id: k, Kind: k, Status: "Not Applied" }))).filter((r, i, a) => a.findIndex((x) => x.Kind === r.Kind) === i),
     document: await q(`SELECT d.DocumentId AS id, d.DocumentCode, d.DocTypeId, t.DocTypeName, d.RelatedSection, d.Title, d.DocumentNo, d.DocumentDate, d.CurrentVersionNo
@@ -216,6 +221,8 @@ router.post("/land/:landId", requirePageRight(PAGE, "edit"), async (req, res) =>
     await writeAudit(pool, req, { action: "Amendment requested", entityType: "Land Amendment", entityId: AmendmentId, landId,
       oldValue: Object.fromEntries(changes.map((c) => [c.field || c.label, c.from])), newValue: Object.fromEntries(changes.map((c) => [c.field || c.label, c.to])),
       remarks: `Amendment ${AmendmentNo} · ${type}: ${reason}`.slice(0, 1000) });
+    await require("../../services/legalNotify").notify(pool, { roles: ["Amendment Approver"], except: userOf(req), type: "legal_amendment",
+      title: `Amendment request: ${land.LandCode}`, body: `Amendment ${AmendmentNo} · ${type}: ${reason}`.slice(0, 300), refId: landId });
     res.status(201).json({ id: AmendmentId, message: `Amendment ${AmendmentNo} sent for approval` });
   } catch (err) {
     console.error("[legal-amendment] request:", err.message);
@@ -299,6 +306,7 @@ router.post("/:id/approve", requirePageRight(PAGE, "view"), async (req, res) => 
     if (!a.changes.length) {
       await pool.request().input("Id", sql.Int, id).input("U", sql.Int, userOf(req)).input("R", sql.NVarChar(1000), remarks.slice(0, 1000))
         .query("UPDATE dbo.LegalLandAmendment SET Status = N'Open', DecidedBy = @U, DecidedAt = SYSUTCDATETIME(), DecisionRemarks = @R WHERE AmendmentId = @Id AND Status = N'Pending'");
+      await require("./landFlow").logDecision(pool, a.LandId, "Amendment", "Approve", { reason: `Amendment ${a.AmendmentNo}: ${remarks}`, userId: userOf(req) });
       await writeAudit(pool, req, { action: "Amendment approved", entityType: "Land Amendment", entityId: id, landId: a.LandId, remarks: `Amendment ${a.AmendmentNo} · ${a.AmendType}: ${remarks}`.slice(0, 1000) });
       return res.json({ message: `Amendment ${a.AmendmentNo} approved — ${a.LandCode} is open for editing. After the edits, send it for verification.` });
     }
@@ -349,6 +357,7 @@ router.post("/:id/reject", requirePageRight(PAGE, "view"), async (req, res) => {
     if (a.Status !== "Pending") return res.status(409).json({ error: `This amendment is already ${a.Status.toLowerCase()}` });
     await pool.request().input("Id", sql.Int, id).input("U", sql.Int, userOf(req)).input("R", sql.NVarChar(1000), remarks.slice(0, 1000))
       .query("UPDATE dbo.LegalLandAmendment SET Status = N'Rejected', DecidedBy = @U, DecidedAt = SYSUTCDATETIME(), DecisionRemarks = @R WHERE AmendmentId = @Id AND Status = N'Pending'");
+    await require("./landFlow").logDecision(pool, a.LandId, "Amendment", "Reject", { reason: remarks, userId: userOf(req) });
     await writeAudit(pool, req, { action: "Amendment rejected", entityType: "Land Amendment", entityId: id, landId: a.LandId, remarks: `Amendment ${a.AmendmentNo}: ${remarks}`.slice(0, 1000) });
     res.json({ message: `Amendment ${a.AmendmentNo} rejected` });
   } catch (err) {

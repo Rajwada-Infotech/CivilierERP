@@ -29,9 +29,25 @@ const { canAct, ownWork, isAdmin } = require("./approvalAuthority");
 const { isSuperAdmin } = require("./approvalAuthority");
 const router = express.Router();
 router.use(apiRateLimit);
+// Project access (User / Role Project Access): a restricted user reaches only lands / enquiries of their projects.
+const projectGuard = require("./projectGuard");
+router.use(async (req, _res, next) => { try { req.legalScope = await projectGuard.getProjectScope(req.user); } catch { /* unrestricted */ } next(); });
 
 // Cached per path; any successful write anywhere drops it (writeInvalidator).
-const listCache = cache("legal-masters", 120, { shared: true, dropOnAnyWrite: true });
+const sharedListCache = cache("legal-masters", 120, { shared: true, dropOnAnyWrite: true });
+// The shared cache is for unrestricted users only: a project-restricted user's list is never cached or served from it.
+const listCache = (req, res, next) => (req.legalScope ? next() : sharedListCache(req, res, next));
+
+/** SQL limiting a master's rows to the user's projects (alias a), or null. Ids are integers from the access table. */
+function projectScopeSql(cfg, a, scope) {
+  if (!scope) return null;
+  const ids = scope.map(Number).filter(Number.isInteger);
+  const list = ids.length ? ids.join(",") : "-1";
+  if (cfg.table === "LegalLand" || cfg.table === "LegalLandEnquiry") return `${a}.ProjectId IN (${list})`;
+  if (cfg.parent === "LandId") return `${a}.LandId IN (SELECT LandId FROM dbo.LegalLand WHERE ProjectId IN (${list}))`;
+  if (cfg.parent === "EnquiryId") return `${a}.EnquiryId IN (SELECT EnquiryId FROM dbo.LegalLandEnquiry WHERE ProjectId IN (${list}))`;
+  return null;
+}
 
 const STALE_LINK_DAYS = 90;
 
@@ -87,8 +103,48 @@ const withRight = (action) => (req, res, next) => {
   if (!cfg) return;
   // The approval setup (Approval Control, Approval Workflow, Reminder & SLA) is changed only by an
   // administrator, whatever rights a user has been given on the page.
+  // The verification setup may also be changed by a Legal Admin (Approval Control).
   if (cfg.adminOnly && action !== "view" && !isAdmin(req)) {
-    return res.status(403).json({ error: `Only an administrator can change ${cfg.title}` });
+    if (!cfg.legalAdmin) return res.status(403).json({ error: `Only an administrator can change ${cfg.title}` });
+    return canAct(req, "Legal Admin", null).then((ok) => ok ? requirePageRight(cfg.pageKey, "view")(req, res, next)
+      : res.status(403).json({ error: `Only an administrator or a Legal Admin can change ${cfg.title}` }), (e) => res.status(500).json({ error: e.message }));
+  }
+  return withRightRest(cfg, action, req, res, next);
+};
+const withRightRest = (cfg, action, req, res, next) => {
+  // Project access on writes: the land / enquiry written to (body or the existing row) must be in the user's projects.
+  if (action !== "view" && req.legalScope && (cfg.table === "LegalLand" || cfg.table === "LegalLandEnquiry" || cfg.parent === "LandId" || cfg.parent === "EnquiryId")) {
+    const orig = next;
+    next = async (err) => {
+      if (err) return orig(err);
+      try {
+        const sc = req.legalScope;
+        const inScope = (p) => p != null && sc.includes(Number(p));
+        const pg = require("./projectGuard");
+        const b = req.body || {};
+        let ok = true;
+        if (b.ProjectId !== undefined && b.ProjectId !== null && b.ProjectId !== "") ok = inScope(b.ProjectId);
+        if (ok && b.LandId) ok = await pg.canLand(req, Number(b.LandId));
+        if (ok && b.EnquiryId) ok = await pg.canEnquiry(req, Number(b.EnquiryId));
+        if (ok && req.params.id) {
+          const row = (await getPool().request().input("Id", sql.Int, Number(req.params.id))
+            .query(`SELECT TOP 1 ${cfg.table === "LegalLand" || cfg.table === "LegalLandEnquiry" ? "ProjectId" : cfg.parent === "LandId" ? "LandId" : "EnquiryId"} AS v FROM dbo.${cfg.table} WHERE ${cfg.pk} = @Id`)).recordset[0];
+          if (row) ok = cfg.table === "LegalLand" || cfg.table === "LegalLandEnquiry" ? inScope(row.v) : cfg.parent === "LandId" ? await pg.canLand(req, row.v) : await pg.canEnquiry(req, row.v);
+        }
+        return ok ? orig() : res.status(403).json({ error: "This belongs to a project you have no access to" });
+      } catch (e) { return orig(e); }
+    };
+  }
+  // A land section with its own right set (migration 710) decides create / edit / delete there.
+  const sec = require("./sectionRights");
+  const section = sec.SECTION_OF[cfg.key ?? req.params.master];
+  if (section && action !== "view" && !(req.params.master === "land" && action === "create")) {
+    return requirePageRight(cfg.pageKey, "view")(req, res, async () => {
+      try {
+        if (await sec.canSection(req, section, action)) return next();
+        return res.status(403).json({ error: `You cannot ${action} in this section of the land (Role Rights → Legal - Land sections)` });
+      } catch (e) { return next(e); }
+    });
   }
   return requirePageRight(cfg.pageKey, action)(req, res, next);
 };
@@ -285,10 +341,13 @@ function sendDbError(res, cfg, err, where) {
 }
 
 // ── Routes ────────────────────────────────────────────────────────────────────────────────────────
-router.get("/meta", (req, res) => {
+router.get("/meta", async (req, res) => {
+  // A Legal Admin edits the verification setup (adminOnly + legalAdmin masters) although its page grants only view.
+  const legalAdmin = !isAdmin(req) && await canAct(req, "Legal Admin", null).catch(() => false);
   res.json(PAGED.map(([key, m]) => ({
-    key, title: m.title, group: m.group, pageKey: m.pageKey, desc: m.desc, pk: m.pk, parent: m.parent, noDelete: !!m.noDelete, superAdminDelete: !!m.superAdminDelete, adminOnly: !!m.adminOnly,
-    extras: (m.extras || []).map(({ name, label, whatsapp, after }) => ({ name, label, whatsapp: !!whatsapp, after })),
+    key, title: m.title, group: m.group, pageKey: m.pageKey, desc: m.desc, pk: m.pk, parent: m.parent, noDelete: !!m.noDelete, superAdminDelete: !!m.superAdminDelete,
+    adminOnly: !!m.adminOnly && !(m.legalAdmin && legalAdmin), legalAdminEdit: !!(m.legalAdmin && legalAdmin),
+    extras: (m.extras || []).map(({ name, label, whatsapp, after, hidden }) => ({ name, label, whatsapp: !!whatsapp, after, hidden: !!hidden })),
     fields: m.fields.map(({ name, label, type, required, options, ref, filterBy, blankOk, fill, default: def, upper, max, mask, auto, suggest, party, hidden, system, multi }) =>
       ({ name, label, type, required: !!required, options, ref, filterBy, blankOk: !!blankOk, fill, default: def, upper: !!upper, max, mask, auto: !!auto, suggest, party, hidden: !!hidden, system: !!system, multi: !!multi,
         creatable: type === "ref" && creatableRef(ref) })),
@@ -470,6 +529,11 @@ function pagedWhere(cfg, master, q, request) {
     if (q.project === "none") where.push("b.ProjectId IS NULL");
     else { const p = Number(q.project); if (Number.isInteger(p) && p > 0) { request.input("Proj", sql.Int, p); where.push("b.ProjectId = @Proj"); } }
   }
+  // A land's own records (RS / LR registers, taxes, payments …) follow the project of their land.
+  else if (q.project !== undefined && q.project !== "" && q.project !== "all" && cfg.parent === "LandId") {
+    if (q.project === "none") where.push("b.LandId IN (SELECT LandId FROM dbo.LegalLand WHERE ProjectId IS NULL)");
+    else { const p = Number(q.project); if (Number.isInteger(p) && p > 0) { request.input("Proj", sql.Int, p); where.push("b.LandId IN (SELECT LandId FROM dbo.LegalLand WHERE ProjectId = @Proj)"); } }
+  }
   const nf = NAMED_FILTERS[master]?.[String(q.filter || "")];
   if (nf) where.push(nf);
   return where;
@@ -483,8 +547,9 @@ router.get("/:master", withRight("view"), listCache, async (req, res) => {
     const withWa = (cfg.extras || []).some((x) => x.whatsapp) && (await usersHaveWhatsApp(getPool()));
     const order = cfg.orderBy.split(",").map((s) => s.trim());
     if (req.query.page === undefined) {
+      const sc = projectScopeSql(cfg, "t", req.legalScope);
       const result = await getPool().request().input("Parent", sql.Int, parentId)
-        .query(`${baseSql(cfg, parentId, withWa)} ORDER BY ${order.map((s) => `t.${s}`).join(", ")}`);
+        .query(`${baseSql(cfg, parentId, withWa)}${sc ? ` AND ${sc}` : ""} ORDER BY ${order.map((s) => `t.${s}`).join(", ")}`);
       return res.json(maskRows(cfg, result.recordset));
     }
     // One page: the base list wrapped, then searched / filtered / sorted / cut on the server.
@@ -492,6 +557,7 @@ router.get("/:master", withRight("view"), listCache, async (req, res) => {
     const pageSize = Math.min(PAGE_MAX, Math.max(1, Number.parseInt(req.query.pageSize, 10) || 20));
     const request = getPool().request().input("Parent", sql.Int, parentId).input("Off", sql.Int, (page - 1) * pageSize).input("Size", sql.Int, pageSize);
     const where = pagedWhere(cfg, req.params.master, req.query, request);
+    { const sc = projectScopeSql(cfg, "b", req.legalScope); if (sc) where.push(sc); }
     const hasActive = hasCol(cfg, "IsActive");
     const status = String(req.query.status || "all");
     const statusSql = hasActive && status === "active" ? "b.IsActive = 1" : hasActive && status === "inactive" ? "b.IsActive = 0" : null;
@@ -785,10 +851,19 @@ router.put("/:master/:id", withRight("edit"), async (req, res) => {
   try {
     const pool = getPool();
     // A registered land is locked: its details change only through an approved amendment (landAmendment.js).
-    if (cfg?.table === "LegalLand") {
-      const st = (await pool.request().input("Id", sql.Int, id).query("SELECT WorkflowStatus FROM dbo.LegalLand WHERE LandId = @Id")).recordset[0];
-      if (st?.WorkflowStatus === "Registered") return res.status(409).json({ error: "This land is registered and locked. Use Request amendment (Legal Flow Chart) to change its details." });
+    if (cfg?.table === "LegalLand" && await require("./landAmendment").isLocked(pool, id)) {
+      return res.status(409).json({ error: "This land is registered and locked. Use Request amendment to change its details." });
     }
+    // Optimistic concurrency: the form sends when the record was last changed (__updatedAt). If someone else saved it
+    // since, this save is refused instead of overwriting their change.
+    if (req.body?.__updatedAt) {
+      const cur = (await pool.request().input("Id", sql.Int, id).query(
+        `IF COL_LENGTH('dbo.${cfg.table}', 'UpdatedAt') IS NOT NULL EXEC sp_executesql N'SELECT UpdatedAt, (SELECT name FROM dbo.users WHERE id = t.UpdatedBy) AS ByName FROM dbo.${cfg.table} t WHERE ${cfg.pk} = @I', N'@I INT', @I = @Id`)).recordset?.[0];
+      if (cur?.UpdatedAt && new Date(cur.UpdatedAt).getTime() !== new Date(req.body.__updatedAt).getTime()) {
+        return res.status(409).json({ error: `${cur.ByName ?? "Someone"} changed this record after you opened it — reload to see their change, then edit again`, conflict: true });
+      }
+    }
+    delete req.body.__updatedAt;
     await resolveParties(pool, cfg, req.body, req.user?.userId, res.locals.added = []);
     await resolveNewRefs(pool, cfg, req.body, req.user?.userId, res.locals.added);
     // A refused save (validation, a business rule, a duplicate…) takes back the list entries it just added.

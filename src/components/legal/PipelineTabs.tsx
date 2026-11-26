@@ -6,10 +6,11 @@ import { ArrowRight2 } from "iconsax-react";
  * Enquiry → Deed registry search → Land conversion → Deed Process → LA & ULC → Deed Registration → Post-registration.
  * (Verification and approvals are in Approvals, not a pipeline stage.)
  */
-export type PipelineStage = "enquiry" | "search" | "verify" | "deed" | "clearance" | "registration" | "post";
+export type PipelineStage = "enquiry" | "search" | "verification" | "verify" | "deed" | "clearance" | "registration" | "post";
 export const PIPELINE: { key: PipelineStage; label: string; path: string; hint: string }[] = [
   { key: "enquiry", label: "Enquiries", path: "/legal/land/enquiries", hint: "Land offered or found — record it under a project" },
   { key: "search", label: "Deed search", path: "/legal/land/deed-search", hint: "Search the registry offices year by year" },
+  { key: "verification", label: "Legal verification", path: "/legal/land/verification", hint: "The legal checks on an enquiry, activity by activity" },
   { key: "verify", label: "Land conversion", path: "/legal/land/properties?filter=verification", hint: "Converted lands being entered and verified — before Deed Process" },
   { key: "deed", label: "Deed Process", path: "/legal/land/deed-process", hint: "Deed details completed, then sent for final approval" },
   { key: "clearance", label: "LA & ULC", path: "/legal/land/la-ulc", hint: "Apply for and obtain the clearances" },

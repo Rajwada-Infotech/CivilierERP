@@ -59,6 +59,8 @@ export function InlineRecordEditor({ master, id, landId, title, onDone }: { mast
     const payload: Record<string, unknown> = {};
     for (const f of cfg.fields) if (!f.system && !f.auto) payload[f.name] = f.type === "bit" ? !!v[f.name] : v[f.name] === "" ? null : v[f.name];
     if (cfg.parent) payload[cfg.parent] = landId;
+    // Optimistic concurrency: refused if someone else saved this entry after it was opened here.
+    if (raw?.UpdatedAt) payload.__updatedAt = raw.UpdatedAt;
     setBusy(true);
     try {
       const r = id == null ? await addLegalRow(master, payload) : await updateLegalRow(master, id, payload);

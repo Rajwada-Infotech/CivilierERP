@@ -1,7 +1,8 @@
 import { usePaged } from "@/components/legal/usePaged";
+import { DueBadge, dueRow, dueLevel, DUE_BG } from "@/components/legal/DueBadge";
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DocumentText } from "iconsax-react";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -9,24 +10,24 @@ import { LegalShell } from "@/components/legal/LegalShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { getDeedProcessLands, updateDeedProcess, approveDeedProcess, requestDeedApproval, type DeedProcessLand } from "@/api/legalLandApi";
 import { askLegal } from "@/components/legal/LegalAsk";
-import { uploadLegalFile, openLegalFile } from "@/api/legalMastersApi";
+import { uploadLegalFile, openLegalFile, getLegalLookup } from "@/api/legalMastersApi";
 import { LegalFileLink } from "@/components/legal/LegalDocumentPreview";
 import { ExternalLink, Upload } from "lucide-react";
 
 const fmt = (d: string | null) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—");
 const today = new Date().toISOString().slice(0, 10);
-const daysLeft = (d: string) => Math.round((new Date(d).getTime() - new Date(today).getTime()) / 86_400_000);
 
 /** The deed department's list: verified lands with the timeline the verifier set. */
 export default function LandDeedProcessPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const canEdit = usePageRights("legal-land-master").canEdit;
+  const users = useQuery({ queryKey: ["legal-lookup", "user"], queryFn: () => getLegalLookup("user"), staleTime: 600_000 });
   const list = usePaged(["legal-deed-process"], (qs) => getDeedProcessLands(qs));
   const { data, isLoading, error } = list;
   const [editing, setEditing] = useState<{ id: number; date: string } | null>(null);
 
-  const save = async (l: DeedProcessLand, body: { targetDate?: string; completed?: boolean; deedFileId?: number | null }) => {
+  const save = async (l: DeedProcessLand, body: { targetDate?: string; completed?: boolean; deedFileId?: number | null; deedStage?: string | null; drafterId?: number | null }) => {
     try {
       toast.success((await updateDeedProcess(l.LandId, body)).message);
       setEditing(null);
@@ -97,10 +98,9 @@ export default function LandDeedProcessPage() {
               <tbody>
                 {lands.map((l) => {
                   const done = l.WorkflowStatus === "Deed Completed";
-                  const left = l.DeedTargetDate ? daysLeft(l.DeedTargetDate) : null;
                   return (
-                    <tr key={l.LandId} title="Open all details" onClick={(e) => { if (!(e.target as HTMLElement).closest("button, input, a, [role=dialog]")) navigate(`/legal/land/deed-process/${l.LandId}`); }}
-                      className={`cursor-pointer border-t border-border align-top hover:bg-muted/40 ${!done && left != null && left < 0 ? "bg-destructive/10" : ""}`}>
+                    <tr key={l.LandId} title="Open all details" onClick={(e) => { if (!(e.target as HTMLElement).closest("button, input, select, textarea, label, a, [role=dialog]")) navigate(`/legal/land/deed-process/${l.LandId}`); }}
+                      className={`cursor-pointer border-t border-border align-top hover:bg-muted/40 ${dueRow(l.DeedTargetDate, done)}`}>
                       <td className="px-3 py-2 font-mono font-semibold">{l.LandCode}</td>
                       <td className="px-3 py-2">{l.LandName}</td>
                       <td className="px-3 py-2 text-xs text-muted-foreground">{[l.MouzaName, l.DistrictName].filter(Boolean).join(" · ") || "—"}</td>
@@ -114,8 +114,7 @@ export default function LandDeedProcessPage() {
                           </span>
                         ) : (
                           <>
-                            {fmt(l.DeedTargetDate)}
-                            {!done && left != null && <span className={`block ${left < 0 ? "text-destructive" : "text-muted-foreground"}`}>{left < 0 ? `${-left} days overdue` : left === 0 ? "due today" : `${left} days left`}</span>}
+                            <DueBadge date={l.DeedTargetDate} done={done} />
                             {!done && data?.canEditTimeline && <button className="mt-1 block text-xs underline" onClick={() => setEditing({ id: l.LandId, date: l.DeedTargetDate ?? "" })}>Change</button>}
                           </>
                         )}
@@ -132,6 +131,18 @@ export default function LandDeedProcessPage() {
                         ) : "—"}
                       </td>
                       <td className="px-3 py-2 text-xs">
+                        {l.WorkflowStatus === "Deed Process" && (canEdit ? (
+                          <span className="mb-1 flex flex-col gap-1">
+                            <select aria-label="Deed stage" className="border border-border bg-background px-1 py-0.5 text-xs" value={l.DeedApprovalRequestedAt ? "Submitted" : l.DeedStage ?? "Not Started"}
+                              disabled={!!l.DeedApprovalRequestedAt} onChange={(e) => save(l, { deedStage: e.target.value, drafterId: l.DeedDrafterId ?? null })}>
+                              {l.DeedApprovalRequestedAt ? <option>Submitted</option> : (data?.deedStages ?? ["Not Started"]).map((st) => <option key={st}>{st}</option>)}
+                            </select>
+                            <select aria-label="Drafting by" className="border border-border bg-background px-1 py-0.5 text-xs" value={l.DeedDrafterId ?? ""}
+                              onChange={(e) => save(l, { deedStage: l.DeedStage ?? null, drafterId: e.target.value ? Number(e.target.value) : null })}>
+                              <option value="">Drafting by…</option>{(users.data ?? []).map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
+                            </select>
+                          </span>
+                        ) : <span className="mb-1 block">Stage: <b>{l.DeedApprovalRequestedAt ? "Submitted" : l.DeedStage ?? "Not Started"}</b>{l.DeedDrafterName ? ` · ${l.DeedDrafterName}` : ""}</span>)}
                         {l.DeedChangedAt ? <b className="block text-amber-600">Changed — new version needed{l.DeedChangedByName ? ` (changed by ${l.DeedChangedByName})` : ""}</b> : null}
                         {l.DeedApprovalRequestedAt && l.L2Status !== "Approved" && <span className="block text-sky-700 dark:text-sky-400">Sent for final approval{l.DeedApprovalRequestedByName ? ` by ${l.DeedApprovalRequestedByName}` : ""}</span>}
                         <span className="block">Approval: <b className={l.L2Status === "Approved" ? "text-emerald-600" : l.L1Status === "Rejected" ? "text-destructive" : l.L1Status === "On Hold" ? "text-amber-600" : ""}>{l.L2Status === "Approved" ? "Approved" : l.L1Status ?? "Pending"}</b>{l.L1By && l.L1Status !== "Pending" ? ` · ${l.L1By}` : ""}</span>

@@ -1,4 +1,5 @@
 import { usePaged } from "@/components/legal/usePaged";
+import { DueBadge, dueRow, dueLevel, DUE_BG } from "@/components/legal/DueBadge";
 import { useEffect, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
@@ -16,7 +17,7 @@ import { getLegalLookup, uploadLegalFile } from "@/api/legalMastersApi";
 import { deedRegistrationAction } from "@/api/legalLandApi";
 import {
   getDeedRegList, getDeedRegLand, saveConsideration, addStampQuery, deleteStampQuery, saveFinalRegistration, addDeedTracking, inr,
-  addPayment, deletePayment, addInstalment, deleteInstalment, getInstalmentTemplates, applyInstalmentTemplate,
+  addPayment, deletePayment, setPaymentStatus, addInstalment, deleteInstalment, getInstalmentTemplates, applyInstalmentTemplate,
   type DeedRegRow, type DeedRegLand, type StampQuery, type TrackRow, type PaymentRow, type ScheduleRow, type RevisionRow, type ValuationRow,
 } from "@/api/legalDeedRegApi";
 
@@ -257,7 +258,7 @@ function Consideration({ l, revisions, valuation, editable, onSaved }: { l: Deed
       {revisions.length > 0 && (
         <div className="border border-border">
           <p className="border-b border-border bg-muted/40 px-3 py-1.5 text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground">Consideration history</p>
-          <table className="w-full text-left text-xs"><tbody>
+          <div className="overflow-x-auto"><table className="w-full text-left text-xs"><tbody>
             {revisions.map((r) => (
               <tr key={r.RevisionId} className="border-t border-border first:border-t-0">
                 <td className="px-3 py-1.5 tabular-nums">{r.RevisionDate}</td>
@@ -265,7 +266,7 @@ function Consideration({ l, revisions, valuation, editable, onSaved }: { l: Deed
                 <td className="px-3 py-1.5 text-muted-foreground">{r.Reason ?? ""}{r.ValuationDate ? ` · valuation ${r.ValuationDate}` : ""}{r.ByName ? ` — ${r.ByName}` : ""}</td>
               </tr>
             ))}
-          </tbody></table>
+          </tbody></table></div>
         </div>
       )}
     </div>
@@ -367,7 +368,7 @@ function Payments({ l, payments, schedule, editable, onSaved }: { l: DeedRegLand
         <div className={`flex flex-wrap items-center justify-between gap-3 border-l-4 px-3 py-2 ${next?.status === "Overdue" ? "border-destructive bg-destructive/10" : "border-sky-600 bg-sky-600/5"}`}>
           <div className="text-sm">
             {next ? (
-              <><b>{next.status === "Overdue" ? "Overdue" : "Next"}: {next.Label ?? next.Purpose ?? "Instalment"}</b> — {inr(next.short)} due {next.DueDate}
+              <><b>{next.status === "Overdue" ? "Overdue" : "Next"}: {next.Label ?? next.Purpose ?? "Instalment"}</b> — {inr(next.short)} <DueBadge date={next.DueDate} />
                 {overdue.length > 1 && <span className="text-destructive"> · {overdue.length} instalments overdue</span>}</>
             ) : <><b>{inr(due)} still to pay</b> — no instalment planned for it yet</>}
             <span className="block text-xs text-muted-foreground">Final Registration opens when the full consideration is paid.</span>
@@ -407,7 +408,7 @@ function Payments({ l, payments, schedule, editable, onSaved }: { l: DeedRegLand
                 </select>
               </label>
               {chosenTpl && (
-                <table className="w-full text-left text-xs"><tbody>
+                <div className="overflow-x-auto"><table className="w-full text-left text-xs"><tbody>
                   {chosenTpl.lines.map((x) => {
                     const d = new Date(`${l.ConsDate ?? today()}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + Number(x.DueDays));
                     return (
@@ -418,7 +419,7 @@ function Payments({ l, payments, schedule, editable, onSaved }: { l: DeedRegLand
                       </tr>
                     );
                   })}
-                </tbody></table>
+                </tbody></table></div>
               )}
               <div className="flex gap-2">
                 <button className={primary} disabled={busy || !tpl} onClick={applyTpl}>{schedule.length ? "Replace schedule with this" : "Make schedule"}</button>
@@ -475,7 +476,7 @@ function Payments({ l, payments, schedule, editable, onSaved }: { l: DeedRegLand
                   <span className="w-5 shrink-0 text-xs text-muted-foreground">{k + 1}</span>
                   <span className="min-w-[10rem] flex-1">
                     <span className="block text-sm font-semibold">{r.Label ?? r.Purpose ?? "Instalment"}</span>
-                    <span className="block text-xs text-muted-foreground">Due {r.DueDate}{r.Label && r.Purpose ? ` · ${r.Purpose}` : ""}</span>
+                    <span className="block text-xs text-muted-foreground"><DueBadge date={r.DueDate} done={r.status === "Paid"} label="Due" />{r.Label && r.Purpose ? ` · ${r.Purpose}` : ""}</span>
                   </span>
                   <span className="text-right">
                     <span className="block text-sm font-bold tabular-nums">{inr(r.Amount)}</span>
@@ -545,13 +546,26 @@ function Payments({ l, payments, schedule, editable, onSaved }: { l: DeedRegLand
                     </span>
                   </span>
                   <span className={`text-sm font-bold tabular-nums ${r.Purpose === "Refund" ? "text-rose-600" : ""}`}>{r.Purpose === "Refund" ? "−" : ""}{inr(r.Amount)}</span>
-                  {editable && <button className={`${small} text-rose-600`} onClick={() => remove("Remove this payment?", () => deletePayment(r.PaymentId))}>Delete</button>}
+                  {(() => {
+                    const ps = (r as { PaymentStatus?: string }).PaymentStatus ?? "Cleared";
+                    const tone = ps === "Cleared" ? "border-emerald-600 text-emerald-700" : ps === "Pending" ? "border-amber-500 text-amber-700" : "border-destructive text-destructive";
+                    const mark = async (to: string) => {
+                      const reason = to === "Cleared" ? "" : await askLegal({ title: `Mark this payment ${to.toLowerCase()}?`, message: "The payment stays in the history; only cleared payments count as paid.", input: { label: "Reason", required: true }, confirmText: to });
+                      if (reason === null) return;
+                      run(() => setPaymentStatus(r.PaymentId, to, reason || undefined));
+                    };
+                    return <>
+                      <span className={`border px-1.5 py-0.5 text-[0.625rem] font-semibold uppercase ${tone}`}>{ps}</span>
+                      {editable && ps === "Pending" && <><button className={small} onClick={() => mark("Cleared")}>Cleared</button><button className={`${small} text-rose-600`} onClick={() => mark("Failed")}>Failed</button></>}
+                      {editable && ps === "Cleared" && <><button className={small} onClick={() => mark("Refunded")}>Refunded</button><button className={`${small} text-rose-600`} onClick={() => mark("Reversed")} title="A wrong entry — reversed, kept in the history">Reverse</button></>}
+                    </>;
+                  })()}
                 </li>
               ))}
               <li className="flex justify-between px-3 py-2.5 text-sm font-bold"><span>Total paid</span><span className="tabular-nums">{inr(paid)}</span></li>
             </ol>
           ) : <p className="text-sm text-muted-foreground">No payment recorded yet.</p>}
-          <p className="text-[0.6875rem] text-muted-foreground">This is the only place this purchase is paid. A payment cannot be dated in the future or be more than what is still to pay.</p>
+          <p className="text-[0.6875rem] text-muted-foreground">This is the only place this purchase is paid. A payment cannot be dated in the future or be more than what is still to pay, and the same transaction cannot be entered twice. Payments are never deleted: a wrong one is reversed, a bounced one marked failed — only cleared payments count.</p>
         </div>
       )}
     </div>
@@ -574,7 +588,7 @@ function StampDuty({ id, rows, editable, onSaved }: { id: number; rows: StampQue
   };
   return (
     <div className="space-y-3">
-      <table className="w-full text-left text-sm">
+      <div className="overflow-x-auto"><table className="w-full text-left text-sm">
         <thead className="text-[0.6875rem] uppercase tracking-wider text-muted-foreground"><tr><th className="py-1">Query date</th><th className="py-1">Fee type</th><th className="py-1 text-right">Amount</th><th className="py-1">Remarks</th>{editable && <th />}</tr></thead>
         <tbody>
           {rows.map((r) => (
@@ -588,7 +602,7 @@ function StampDuty({ id, rows, editable, onSaved }: { id: number; rows: StampQue
           {!rows.length && <tr><td colSpan={5} className="py-2 text-xs text-muted-foreground">No query yet</td></tr>}
           {rows.length > 0 && <tr className="border-t-2 border-border"><td colSpan={2} className="py-1.5 text-xs font-semibold uppercase">Total</td><td className="py-1.5 text-right font-bold tabular-nums">{inr(total)}</td><td colSpan={2} /></tr>}
         </tbody>
-      </table>
+      </table></div>
       {editable && (
         <div className="legal-g4 border border-border bg-muted/30 p-3">
           <label className="text-xs">Query date<input type="date" className={field} value={f.queryDate} onChange={(e) => setF({ ...f, queryDate: e.target.value })} /></label>

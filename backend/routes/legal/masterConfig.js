@@ -32,6 +32,41 @@
 // A `label` is evaluated with the master's table aliased as r.
 // Decimal fields take `min`, `maxValue` and `signed` (GPS coordinates).
 
+
+/**
+ * The same land entered twice: a plot is the same land when its Mouza and RS Dag (or LR Dag) match — whatever the project.
+ * Looks in every land (its main Dag and its RS / LR records) and every open enquiry (not rejected, not converted), in all
+ * projects, and returns a message naming the existing one and its project — or null. `self` leaves out the record being
+ * saved: { enquiryId } and/or { landId }. Dag fields may hold a list ("433, 434").
+ */
+async function dagClash(pool, mouzaId, dags, self = {}) {
+  if (!mouzaId) return null;
+  for (const [kind, raw] of dags) {
+    for (const dag of String(raw || "").split(/[,;/]/).map((x) => x.trim()).filter(Boolean)) {
+      const col = kind === "RS" ? "RsDagNo" : "LrDagNo";
+      const rec = kind === "RS" ? "Rs" : "Lr";
+      const has = (c) => `(',' + REPLACE(ISNULL(${c}, N''), N' ', N'') + ',') LIKE N'%,' + @D + N',%'`;
+      const r = await pool.request().input("M", mouzaId).input("D", dag.replace(/\s/g, "")).input("E", self.enquiryId || 0).input("L", self.landId || 0).query(`
+        SELECT TOP 1 * FROM (
+          SELECT 1 AS o, l.LandCode AS Ref, N'land' AS Kind, l.WorkflowStatus AS St, p.name AS Project
+          FROM dbo.LegalLand l LEFT JOIN dbo.enterprise p ON p.id = l.ProjectId
+          WHERE l.IsActive = 1 AND l.LandId <> @L AND (@E = 0 OR ISNULL(l.EnquiryId, 0) <> @E)
+            AND ((l.MouzaId = @M AND ${has("l." + col)})
+              OR EXISTS (SELECT 1 FROM dbo.LegalLand${rec}Record x WHERE x.LandId = l.LandId AND x.IsActive = 1 AND x.MouzaId = @M AND ${has("x." + col)}))
+          UNION ALL
+          SELECT 2, e.EnquiryNo, N'enquiry', e.EnquiryStatus, p.name
+          FROM dbo.LegalLandEnquiry e LEFT JOIN dbo.enterprise p ON p.id = e.ProjectId
+          WHERE e.IsActive = 1 AND e.LandId IS NULL AND e.EnquiryStatus <> N'Rejected' AND e.EnquiryId <> @E
+            AND ((e.MouzaId = @M AND ${has("e." + col)})
+              OR EXISTS (SELECT 1 FROM dbo.LegalEnquiry${rec}Record x WHERE x.EnquiryId = e.EnquiryId AND x.IsActive = 1 AND x.MouzaId = @M AND ${has("x." + col)}))
+        ) z ORDER BY o`);
+      const c = r.recordset[0];
+      if (c) return `${kind} Dag ${dag} in this Mouza is already ${c.Kind} ${c.Ref}${c.Project ? ` (project ${c.Project})` : " (no project)"}${c.St ? ` · ${c.St}` : ""} — the same land cannot be entered twice; open that one instead`;
+    }
+  }
+  return null;
+}
+
 const LAND_CLASSES = ["Sali", "Suna", "Danga", "Bastu", "Doba", "Pukur", "Bagan", "Khamar", "Karkhana", "Commercial", "Others"];
 const ACTIVE = { name: "IsActive", label: "Status", type: "bit", default: true };
 const PAN = { name: "Pan", label: "PAN", type: "text", max: 10, upper: true, pattern: "^[A-Z]{5}[0-9]{4}[A-Z]$", patternMsg: "PAN must look like ABCDE1234F" };
@@ -67,6 +102,13 @@ const LAND_ID = { name: "LandId", label: "Land property", type: "ref", ref: "lan
 const landChild = (title, table, pk, desc, rest) => ({
   title, group: "Land Management", pageKey: "legal-land-master", table, pk, parent: "LandId", desc, ...rest,
 });
+// Post-registration mutation / conversion: tell the employee when it is assigned to them.
+const postRegAssigned = async (pool, req, row, before, kind) => {
+  if (!row?.AssignedUserId || Number(row.AssignedUserId) === Number(before?.AssignedUserId)) return;
+  const l = (await pool.request().input("L", row.LandId).query("SELECT LandCode FROM dbo.LegalLand WHERE LandId = @L")).recordset[0];
+  await require("../../services/legalNotify").notify(pool, { users: [row.AssignedUserId], except: req?.user?.userId, type: "legal_postreg_assigned",
+    title: `${kind} assigned: ${l?.LandCode ?? ""}`, body: `${row.ApplicationNo ? `Application ${row.ApplicationNo} · ` : ""}${row.DueDate ? `target ${String(row.DueDate).slice(0, 10)} · ` : ""}Open Legal → Post-registration.`, refId: row.LandId });
+};
 // Enquiry RS / LR records: a converted enquiry is read-only (its land holds the records now).
 const enquiryOpen = async (pool, values) => {
   const e = values?.EnquiryId && (await pool.request().input("E", values.EnquiryId).query("SELECT LandId FROM dbo.LegalLandEnquiry WHERE EnquiryId = @E")).recordset[0];
@@ -251,19 +293,11 @@ const MASTERS = {
         whatsapp: "(SELECT u.WhatsAppNo FROM dbo.LegalLandEnquiry e JOIN dbo.users u ON u.id = e.CreatedBy WHERE e.EnquiryId = t.EnquiryId)",
         userId: "(SELECT e.CreatedBy FROM dbo.LegalLandEnquiry e WHERE e.EnquiryId = t.EnquiryId)" },
       // A registered land opens for editing while an approved amendment is open (migration 702).
-      { name: "AmendmentOpen", label: "Amendment open", sql: "(SELECT COUNT(*) FROM dbo.LegalLandAmendment a WHERE a.LandId = t.LandId AND a.Status = N'Open')" },
+      { name: "AmendmentOpen", label: "Amendment open", hidden: true, sql: "(SELECT COUNT(*) FROM dbo.LegalLandAmendment a WHERE a.LandId = t.LandId AND a.Status = N'Open')" },
     ],
     // The same Mouza and Dag number twice is almost always the same land entered twice.
-    check: async (pool, values, id) => {
-      const dags = [["RsDagNo", "RS Dag"], ["LrDagNo", "LR Dag"]].filter(([f]) => values[f]);
-      if (!values.MouzaId || !dags.length) return null;
-      for (const [f, label] of dags) {
-        const r = await pool.request().input("M", values.MouzaId).input("D", String(values[f])).input("Id", id || 0)
-          .query(`SELECT TOP 1 LandCode FROM dbo.LegalLand WHERE MouzaId = @M AND ${f} = @D AND LandId <> @Id AND IsActive = 1`);
-        if (r.recordset.length) return `${r.recordset[0].LandCode} already has this Mouza and ${label} ${values[f]} — open that land instead of adding it again`;
-      }
-      return null;
-    },
+    // The same Mouza and Dag is the same land — in any project, as a land or an open enquiry.
+    check: async (pool, values, id) => dagClash(pool, values.MouzaId, [["RS", values.RsDagNo], ["LR", values.LrDagNo]], { landId: id || 0, enquiryId: values.EnquiryId || 0 }),
     fields: [
       { name: "LandCode", label: "Land ID", type: "text", max: 30, auto: "LND" },
       { name: "LandName", label: "Land title / name", type: "text", required: true, max: 200 },
@@ -360,11 +394,13 @@ const MASTERS = {
     noDelete: true, superAdminDelete: true,
     extras: [
       { name: "LandCode", label: "Land conversion", sql: "(SELECT l.LandCode FROM dbo.LegalLand l WHERE l.LandId = t.LandId)" },
+      // Earlier rejected enquiries for the same plot (Mouza + RS or LR Dag), in any project.
+      { name: "RejectedBefore", label: "Rejected before", hidden: true, sql: "(SELECT STRING_AGG(r.EnquiryNo, N', ') FROM dbo.LegalLandEnquiry r WHERE r.EnquiryId <> t.EnquiryId AND r.EnquiryStatus = N'Rejected' AND r.MouzaId = t.MouzaId AND ((t.RsDagNo IS NOT NULL AND r.RsDagNo = t.RsDagNo) OR (t.LrDagNo IS NOT NULL AND r.LrDagNo = t.LrDagNo)))" },
       // Deed Registry Search: offices still open (the enquiry's actions open once every office's search is complete).
       { name: "OfficesPending", label: "Deed search offices open", sql: "(SELECT COUNT(*) FROM dbo.LegalEnquiryOfficeSearch x WHERE x.EnquiryId = t.EnquiryId AND x.Status = N'Pending')" },
       { name: "OfficesTotal", label: "Deed search offices", sql: "(SELECT COUNT(*) FROM dbo.LegalEnquiryOfficeSearch x WHERE x.EnquiryId = t.EnquiryId)" },
       // Office types that apply to the enquiry's state: 0 means the setup is missing; more means its timelines just need creating.
-      { name: "OfficeTypesForState", label: "Office types for the state", sql: "(SELECT COUNT(*) FROM dbo.LegalRegistrationOfficeType ot LEFT JOIN dbo.LegalDistrict dd ON dd.DistrictId = t.DistrictId WHERE ot.IsActive = 1 AND ot.OnEnquiry = 1 AND (ot.StateName IS NULL OR ot.StateName = dd.State))" },
+      { name: "OfficeTypesForState", label: "Office types for the state", hidden: true, sql: "(SELECT COUNT(*) FROM dbo.LegalRegistrationOfficeType ot LEFT JOIN dbo.LegalDistrict dd ON dd.DistrictId = t.DistrictId WHERE ot.IsActive = 1 AND ot.OnEnquiry = 1 AND (ot.StateName IS NULL OR ot.StateName = dd.State))" },
       { name: "OfficesOverdue", label: "Deed search offices overdue", sql: "(SELECT COUNT(*) FROM dbo.LegalEnquiryOfficeSearch x WHERE x.EnquiryId = t.EnquiryId AND t.EnquiryStatus <> N'Rejected' AND x.Status = N'Pending' AND x.DueDate < CAST(GETDATE() AS DATE))" },
       // Who raised the enquiry, with a WhatsApp link so anyone can talk to them about it.
       { name: "EnquiryBy", label: "Entry by", after: "EnquiryNo", sql: "(SELECT u.name FROM dbo.users u WHERE u.id = t.CreatedBy)",
@@ -372,9 +408,15 @@ const MASTERS = {
     ],
     // Deed Registry Search timelines start here: one per office type (ADSR, DSR, RA Calcutta, BLRO), due = enquiry date
     // + that office's time limit.
-    afterWrite: async (pool, _req, row) => {
+    afterWrite: async (pool, req, row, before) => {
       await require("./enquirySearch").ensureOfficeTimelines(pool, row.EnquiryId);
+      // A new enquiry: the legal team (verifiers) hears of it.
+      if (!before) await require("../../services/legalNotify").notify(pool, { roles: ["Verifier"], except: req?.user?.userId, type: "legal_enquiry_new",
+        title: `New land enquiry: ${row.EnquiryNo ?? ""}`, body: `${row.LandLocation ?? ""} — deed registry search starts now.`.slice(0, 300), refId: row.EnquiryId, refType: "legal_enquiry" });
     },
+    // The same plot raised twice (in any project): blocked while the other is a land or an open enquiry. A rejected
+    // enquiry for the plot does not block a new one; it shows as "Rejected before" on the list.
+    check: async (pool, values, id) => dagClash(pool, values.MouzaId, [["RS", values.RsDagNo], ["LR", values.LrDagNo]], { enquiryId: id || 0 }),
     guard: async (pool, id, values) => {
       const r = await pool.request().input("Id", id).query("SELECT EnquiryStatus, (SELECT LandCode FROM dbo.LegalLand l WHERE l.LandId = e.LandId) AS LandCode FROM dbo.LegalLandEnquiry e WHERE EnquiryId = @Id");
       const row = r.recordset[0];
@@ -426,7 +468,7 @@ const MASTERS = {
     desc: "Revisional Survey Khatian / Dag of this enquiry land.",
     label: "'RS Kh ' + RsKhatianNo + ' / Dag ' + RsDagNo", orderBy: "RsKhatianNo, RsDagNo",
     unique: [["EnquiryId", "RsKhatianNo", "RsDagNo"], "This RS Khatian and Dag are already on this enquiry"],
-    check: enquiryOpen, afterWrite: syncEnquiryPlots, afterDelete: syncEnquiryPlots,
+    check: async (pool, values, id) => (await enquiryOpen(pool, values, id)) || dagClash(pool, values.MouzaId, [["RS", values.RsDagNo]], { enquiryId: values.EnquiryId }), afterWrite: syncEnquiryPlots, afterDelete: syncEnquiryPlots,
     fields: [
       { name: "EnquiryId", label: "Enquiry", type: "ref", ref: "land-enquiry", required: true },
       { name: "MouzaId", label: "Mouza", type: "ref", ref: "mouza" },
@@ -445,7 +487,7 @@ const MASTERS = {
     desc: "Land Reforms Khatian / Dag (RoR) of this enquiry land.",
     label: "'LR Kh ' + LrKhatianNo + ' / Dag ' + LrDagNo", orderBy: "LrKhatianNo, LrDagNo",
     unique: [["EnquiryId", "LrKhatianNo", "LrDagNo"], "This LR Khatian and Dag are already on this enquiry"],
-    check: enquiryOpen, afterWrite: syncEnquiryPlots, afterDelete: syncEnquiryPlots,
+    check: async (pool, values, id) => (await enquiryOpen(pool, values, id)) || dagClash(pool, values.MouzaId, [["LR", values.LrDagNo]], { enquiryId: values.EnquiryId }), afterWrite: syncEnquiryPlots, afterDelete: syncEnquiryPlots,
     fields: [
       { name: "EnquiryId", label: "Enquiry", type: "ref", ref: "land-enquiry", required: true },
       { name: "MouzaId", label: "Mouza", type: "ref", ref: "mouza" },
@@ -462,6 +504,8 @@ const MASTERS = {
   },
   // One land property's RS and LR records and its parties (opened from the property's page).
   "land-rs-record": {
+    // The same Mouza + Dag on another land or an open enquiry (any project) is the same land.
+    check: async (pool, values) => dagClash(pool, values.MouzaId, [["RS", values.RsDagNo]], { landId: values.LandId, enquiryId: (await pool.request().input("L", values.LandId || 0).query("SELECT EnquiryId FROM dbo.LegalLand WHERE LandId = @L")).recordset[0]?.EnquiryId || 0 }),
     title: "RS Record", group: "Land Management", pageKey: "legal-land-master", table: "LegalLandRsRecord", pk: "RsRecordId", parent: "LandId", review: REVIEW,
     afterWrite: async (pool, _req, row) => {
       await pool.request().input("Id", row.RsRecordId).query(`
@@ -500,6 +544,8 @@ const MASTERS = {
     ],
   },
   "land-lr-record": {
+    // The same Mouza + Dag on another land or an open enquiry (any project) is the same land.
+    check: async (pool, values) => dagClash(pool, values.MouzaId, [["LR", values.LrDagNo]], { landId: values.LandId, enquiryId: (await pool.request().input("L", values.LandId || 0).query("SELECT EnquiryId FROM dbo.LegalLand WHERE LandId = @L")).recordset[0]?.EnquiryId || 0 }),
     title: "LR Record of Rights", group: "Land Management", pageKey: "legal-land-master", table: "LegalLandLrRecord", pk: "LrRecordId", parent: "LandId", review: REVIEW,
     afterWrite: async (pool, _req, row) => {
       await pool.request().input("Id", row.LrRecordId).query(`
@@ -1226,7 +1272,10 @@ const MASTERS = {
   mutation: landChild("Mutation", "LegalMutation", "MutationId",
     "The mutation application at the BL&LRO, tracked apart from registration: a registered deed is not a completed mutation.", {
       label: "ISNULL(r.ApplicationNo, 'Mutation ' + CAST(r.MutationId AS NVARCHAR(10))) + ' - ' + r.ApplicationStatus", orderBy: "MutationId",
+      // V2.1: the same table holds post-registration conversions (Kind = Conversion, see "conversion").
+      scope: { column: "Kind", value: "Mutation" },
       review: { field: "ApplicationStatus", by: "DecidedBy", at: "DecidedAt", free: ["Not Applied", "Draft", "Submitted", "Under Process", "Hearing Scheduled", "Objection Raised", "Correction Required"] },
+      afterWrite: (pool, req, row, before) => postRegAssigned(pool, req, row, before, "Mutation"),
       fields: [
         LAND_ID,
         { name: "RegisteredDeedId", label: "Registered deed", type: "ref", ref: "registered-deed", filterBy: "LandId" },
@@ -1239,13 +1288,21 @@ const MASTERS = {
         { name: "PreviousKhatian", label: "Previous Khatian", type: "text", max: 60 },
         { name: "PreviousOwner", label: "Previous owner(s)", type: "text", max: 300 },
         { name: "NewOwner", label: "New owner(s)", type: "text", required: true, max: 300 },
+        { name: "ApplicantName", label: "Applicant", type: "text", max: 200 },
+        { name: "AssignedUserId", label: "Assigned employee", type: "ref", ref: "user" },
+        { name: "DueDate", label: "Internal target date", type: "date" },
+        { name: "Fee", label: "Fee (₹)", type: "decimal" },
+        { name: "PaymentRef", label: "Payment reference", type: "text", max: 100 },
+        { name: "PaymentDate", label: "Payment date", type: "date" },
         { name: "ApplicationStatus", label: "Application status", type: "select", required: true, options: MUTATION_STATUSES, default: "Draft" },
         { name: "HearingDate", label: "Hearing date", type: "date" },
         { name: "ObjectionDetails", label: "Objection details", type: "textarea", max: 1000, requiredWhen: { field: "ApplicationStatus", values: ["Objection Raised"] } },
         { name: "OrderNo", label: "Mutation order number", type: "text", max: 80, requiredWhen: { field: "ApplicationStatus", values: ["Approved"] } },
         { name: "OrderDate", label: "Mutation order date", type: "date", requiredWhen: { field: "ApplicationStatus", values: ["Approved"] } },
+        { name: "CompletionDate", label: "Completed on", type: "date" },
         { name: "DocFileId", label: "Application copy", type: "file" },
         { name: "OrderFileId", label: "Mutation order", type: "file" },
+        { name: "ReportFileId", label: "Report", type: "file" },
         { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
         ACTIVE,
       ],
@@ -1287,6 +1344,73 @@ const MASTERS = {
         { name: "ReceiptFileId", label: "Receipt", type: "file" },
         VERIFICATION,
         { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
+  // Post-registration land conversion (V2.1): same table as mutation, Kind = Conversion — its own deadline, assignee,
+  // documents and status history. Rule conversion_after_mutation (Setup → Legal Rules) holds it at "Applied" until
+  // the land has an approved mutation.
+  conversion: landChild("Land Conversion", "LegalMutation", "MutationId",
+    "The land-use conversion application after registration, tracked apart from mutation. Estimated durations are internal targets, not government timelines.", {
+      pageKey: "legal-conversion-master",
+      label: "ISNULL(r.ApplicationNo, 'Conversion ' + CAST(r.MutationId AS NVARCHAR(10))) + ' - ' + r.ApplicationStatus", orderBy: "MutationId",
+      scope: { column: "Kind", value: "Conversion" },
+      afterWrite: (pool, req, row, before) => postRegAssigned(pool, req, row, before, "Conversion"),
+      check: async (pool, values) => {
+        if (!["Under Process", "Hearing Scheduled", "Approved"].includes(values.ApplicationStatus)) return null;
+        const rule = (await pool.request().query("SELECT IsBlocking, IsActive FROM dbo.LegalRuleConfig WHERE RuleKey = N'conversion_after_mutation'")).recordset[0];
+        if (!rule?.IsActive || !rule?.IsBlocking) return null;
+        const ok = (await pool.request().input("L", values.LandId).query("SELECT COUNT(*) AS n FROM dbo.LegalMutation WHERE LandId = @L AND IsActive = 1 AND Kind = N'Mutation' AND ApplicationStatus = N'Approved'")).recordset[0].n;
+        return ok ? null : "Conversion can go beyond Submitted only after the land's mutation is approved (Setup → Legal Rules)";
+      },
+      fields: [
+        LAND_ID,
+        { name: "ApplicationNo", label: "Conversion application number", type: "text", max: 80 },
+        { name: "ApplicationDate", label: "Application date", type: "date" },
+        { name: "OfficeName", label: "Authority / office", type: "text", required: true, max: 200 },
+        { name: "MouzaId", label: "Mouza", type: "ref", ref: "mouza" },
+        { name: "DagNo", label: "Dag number", type: "text", max: 60 },
+        { name: "PreviousKhatian", label: "Khatian", type: "text", max: 60 },
+        { name: "ApplicantName", label: "Applicant", type: "text", max: 200 },
+        { name: "AssignedUserId", label: "Assigned employee", type: "ref", ref: "user" },
+        { name: "DueDate", label: "Internal target date", type: "date" },
+        { name: "CurrentClass", label: "Current land classification", type: "text", max: 60 },
+        { name: "RequestedClass", label: "Requested land classification", type: "text", required: true, max: 60 },
+        { name: "Fee", label: "Fee (₹)", type: "decimal" },
+        { name: "PaymentRef", label: "Payment reference", type: "text", max: 100 },
+        { name: "PaymentDate", label: "Payment date", type: "date" },
+        { name: "ApplicationStatus", label: "Application status", type: "select", required: true, options: MUTATION_STATUSES, default: "Draft" },
+        { name: "HearingDate", label: "Hearing date", type: "date" },
+        { name: "InspectionDate", label: "Inspection date", type: "date" },
+        { name: "ObjectionDetails", label: "Objection details", type: "textarea", max: 1000, requiredWhen: { field: "ApplicationStatus", values: ["Objection Raised"] } },
+        { name: "OrderNo", label: "Conversion order number", type: "text", max: 80, requiredWhen: { field: "ApplicationStatus", values: ["Approved"] } },
+        { name: "OrderDate", label: "Conversion order date", type: "date", requiredWhen: { field: "ApplicationStatus", values: ["Approved"] } },
+        { name: "CompletionDate", label: "Completed on", type: "date" },
+        { name: "DocFileId", label: "Application copy", type: "file" },
+        { name: "OrderFileId", label: "Conversion order", type: "file" },
+        { name: "ReportFileId", label: "Report", type: "file" },
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
+  // Picker over both kinds (for queries); not a screen of its own.
+  "post-reg-application": landChild("Mutation / Conversion Application", "LegalMutation", "MutationId", "Mutation and conversion applications of a land.", {
+    adminOnly: true, noDelete: true,
+    label: "r.Kind + ' ' + ISNULL(r.ApplicationNo, CAST(r.MutationId AS NVARCHAR(10))) + ' - ' + r.ApplicationStatus", orderBy: "MutationId",
+    fields: [LAND_ID, { name: "Kind", label: "Type", type: "select", required: true, options: ["Mutation", "Conversion"] }, { name: "ApplicationNo", label: "Application number", type: "text", max: 80 }, ACTIVE],
+  }),
+  "application-query": landChild("Application Query", "LegalApplicationQuery", "QueryId",
+    "Queries raised on a mutation or conversion application, and the replies sent.", {
+      pageKey: "legal-application-query-master",
+      label: "CONVERT(NVARCHAR(10), r.QueryDate, 105) + ' - ' + LEFT(r.QueryText, 60)", orderBy: "MutationId, QueryDate",
+      fields: [
+        LAND_ID,
+        { name: "MutationId", label: "Application", type: "ref", ref: "post-reg-application", filterBy: "LandId", required: true },
+        { name: "QueryDate", label: "Query date", type: "date", required: true },
+        { name: "QueryText", label: "Query", type: "textarea", required: true, max: 1000 },
+        { name: "ResponseDate", label: "Response date", type: "date" },
+        { name: "ResponseText", label: "Response", type: "textarea", max: 1000 },
+        { name: "FileId", label: "Query / reply copy", type: "file" },
         ACTIVE,
       ],
     }),
@@ -1602,7 +1726,7 @@ const MASTERS = {
     label: "Stage + ' - ' + (SELECT name FROM dbo.users WHERE id = r.ApproverId)", orderBy: "Stage, ApproverId", adminOnly: true,
     unique: [["Stage", "ApproverId"], "This user already has this approval role"],
     fields: [
-      { name: "Stage", label: "Approval role", type: "select", required: true, options: ["Verifier", "Approver", "Legal Reviewer", "Amendment Approver"] },
+      { name: "Stage", label: "Approval role", type: "select", required: true, options: ["Verifier", "Approver", "Legal Reviewer", "Amendment Approver", "Legal Admin", "Search Executive"] },
       // Several users can be picked when adding (one row each); a row is edited one user at a time.
       { name: "ApproverId", label: "Users", type: "ref", ref: "user", required: true, multi: true },
       { name: "Remarks", label: "Remarks", type: "textarea", max: 500 },
@@ -1655,6 +1779,51 @@ const MASTERS = {
       { name: "RecipientRoleId", label: "Remind role (blank = task owner)", type: "ref", ref: "role" },
       { name: "EscalationRoleId", label: "Escalate to role", type: "ref", ref: "role" },
       { name: "WorkingDaysOnly", label: "Count working days only", type: "bit", default: true },
+      ACTIVE,
+    ],
+  },
+
+  // Legal verification workspace (V2): the activity list, what each waits for, and the reminder days.
+  "verification-activity": {
+    adminOnly: true, legalAdmin: true,
+    title: "Verification Activities", group: "Workflow", pageKey: "legal-verification-activity-master", table: "LegalActivityTemplate", pk: "TemplateId",
+    desc: "The legal verification checklist every new workspace starts with: duration, department and whether it is mandatory.",
+    label: "ActivityName", orderBy: "ActivityNo",
+    unique: [["ActivityNo"], "An activity with this number already exists"],
+    fields: [
+      { name: "ActivityNo", label: "No.", type: "int", required: true, min: 1 },
+      { name: "ActivityCode", label: "Code", type: "text", required: true, max: 20, upper: true },
+      { name: "ActivityName", label: "Activity", type: "text", required: true, max: 150 },
+      { name: "Department", label: "Department", type: "text", max: 80 },
+      { name: "DefaultDays", label: "Expected duration (days)", type: "int", min: 0 },
+      { name: "Stage", label: "Stage", type: "select", required: true, options: ["Verification", "Post-registration"], default: "Verification" },
+      { name: "IsMandatory", label: "Mandatory before legal review", type: "bit", default: true },
+      { name: "Description", label: "Notes", type: "textarea", max: 500 },
+      ACTIVE,
+    ],
+  },
+  "activity-dependency": {
+    adminOnly: true, legalAdmin: true,
+    title: "Activity Dependencies", group: "Workflow", pageKey: "legal-activity-dependency-master", table: "LegalActivityDependency", pk: "DependencyId",
+    desc: "An activity cannot be completed until the activities it depends on are completed (or overridden with a reason).",
+    label: "TemplateId", orderBy: "TemplateId",
+    unique: [["TemplateId", "DependsOnTemplateId"], "This dependency already exists"],
+    fields: [
+      { name: "TemplateId", label: "Activity", type: "ref", ref: "verification-activity", required: true },
+      { name: "DependsOnTemplateId", label: "Waits for", type: "ref", ref: "verification-activity", required: true },
+      { name: "IsMandatory", label: "Blocks completion", type: "bit", default: true },
+      { name: "Remarks", label: "Why", type: "text", max: 300 },
+      ACTIVE,
+    ],
+  },
+  "activity-reminder": {
+    adminOnly: true, legalAdmin: true,
+    title: "Activity Reminder Days", group: "Workflow", pageKey: "legal-activity-reminder-master", table: "LegalActivityReminderRule", pk: "RuleId",
+    desc: "Days before an activity's due date when its assignee is reminded (0 = on the due date). Overdue activities are reminded daily.",
+    label: "DaysBefore", orderBy: "DaysBefore",
+    unique: [["DaysBefore"], "A reminder for this many days already exists"],
+    fields: [
+      { name: "DaysBefore", label: "Days before due date", type: "int", required: true, min: 0, max: 90 },
       ACTIVE,
     ],
   },
@@ -1857,4 +2026,4 @@ const EXTERNAL_REFS = {
   company: { sql: "SELECT id AS value, name AS label FROM dbo.enterprise WHERE business_type = 'C' AND (discontinue IS NULL OR discontinue = 0) ORDER BY name", exists: "SELECT 1 FROM dbo.enterprise WHERE id = @v AND business_type = 'C'" },
 };
 
-module.exports = { MASTERS, EXTERNAL_REFS, DUE_DILIGENCE_CHECKS, VERIFICATION_CHECKS, FINAL_CHECKS };
+module.exports = { MASTERS, EXTERNAL_REFS, DUE_DILIGENCE_CHECKS, VERIFICATION_CHECKS, FINAL_CHECKS, dagClash };

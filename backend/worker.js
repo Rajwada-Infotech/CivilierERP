@@ -5,7 +5,7 @@ const { getRedis } = require("./redis");
 const { runTicketEscalationJob } = require("./services/ticketEscalationService");
 const { runRecordsRetentionJob } = require("./services/recordsRetentionService");
 const { runWorkerRetentionJob } = require("./services/workerRetentionService");
-const { runDeedOverdueJob, runDeedSearchOverdueJob } = require("./services/legalDeedOverdue");
+const { runDeedOverdueJob, runDeedSearchOverdueJob, runPostRegOverdueJob, runDeedSearchDueSoonJob, runActivityDueJob } = require("./services/legalDeedOverdue");
 const { getPool } = require("./db");
 
 let workerInterval = null;
@@ -150,6 +150,9 @@ async function startWorker() {
     await settlePaidCrmRefunds();
     await runDeedOverdueJob().catch((e) => logger.error({ event: "WORKER_DEED_OVERDUE_ERROR", err: e }, "Deed overdue alerts failed"));
     await runDeedSearchOverdueJob().catch((e) => logger.error({ event: "WORKER_DEED_SEARCH_OVERDUE_ERROR", err: e }, "Deed search overdue alerts failed"));
+    await runPostRegOverdueJob().catch((e) => logger.error({ event: "WORKER_POSTREG_OVERDUE_ERROR", err: e }, "Post-registration overdue alerts failed"));
+    await runDeedSearchDueSoonJob().catch((e) => logger.error({ event: "WORKER_DEED_SEARCH_DUE_ERROR", err: e }, "Deed search due-soon alerts failed"));
+    await runActivityDueJob().catch((e) => logger.error({ event: "WORKER_LEGAL_ACTIVITY_DUE_ERROR", err: e }, "Legal activity reminders failed"));
     logger.info({ event: "WORKER_INIT_DONE" }, "Initial decay & cleanup complete");
   } catch (err) {
     logger.error({ event: "WORKER_INIT_ERROR", err }, "Worker init failed");
@@ -171,6 +174,9 @@ async function startWorker() {
       await cleanupInactiveUsers();
       await runDeedOverdueJob().catch((e) => logger.error({ event: "WORKER_DEED_OVERDUE_ERROR", err: e }, "Deed overdue alerts failed"));
     await runDeedSearchOverdueJob().catch((e) => logger.error({ event: "WORKER_DEED_SEARCH_OVERDUE_ERROR", err: e }, "Deed search overdue alerts failed"));
+    await runPostRegOverdueJob().catch((e) => logger.error({ event: "WORKER_POSTREG_OVERDUE_ERROR", err: e }, "Post-registration overdue alerts failed"));
+    await runDeedSearchDueSoonJob().catch((e) => logger.error({ event: "WORKER_DEED_SEARCH_DUE_ERROR", err: e }, "Deed search due-soon alerts failed"));
+    await runActivityDueJob().catch((e) => logger.error({ event: "WORKER_LEGAL_ACTIVITY_DUE_ERROR", err: e }, "Legal activity reminders failed"));
     } catch (err) {
       logger.error({ event: "WORKER_ERROR", err }, "Worker interval crashed");
     }

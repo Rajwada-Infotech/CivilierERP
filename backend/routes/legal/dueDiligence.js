@@ -16,6 +16,10 @@ const apiRateLimit = require("../../middleware/apiRateLimit");
 
 const router = express.Router();
 router.use(apiRateLimit);
+// Project access (User / Role Project Access): a restricted user reaches only lands / enquiries of their projects.
+const projectGuard = require("./projectGuard");
+router.use(async (req, _res, next) => { try { req.legalScope = await projectGuard.getProjectScope(req.user); } catch { /* unrestricted */ } next(); });
+router.param("landId", projectGuard.landParam("land"));
 const LAND_PAGE = "legal-land-master";
 
 const AREAS = {

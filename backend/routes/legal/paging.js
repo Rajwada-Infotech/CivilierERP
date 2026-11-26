@@ -24,6 +24,7 @@ const matches = (row, q) => {
 function pageable(key = null, { kinds = {} } = {}) {
   return (req, res, next) => {
     if (req.query.page === undefined) return next();
+    // (req.legalScope is set by the project-scope middleware on the Legal routers.)
     const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
     const pageSize = Math.min(PAGE_MAX, Math.max(1, Number.parseInt(req.query.pageSize, 10) || 20));
     const json = res.json.bind(res);
@@ -31,6 +32,8 @@ function pageable(key = null, { kinds = {} } = {}) {
       const list = key ? body?.[key] : body;
       if (res.statusCode >= 400 || !Array.isArray(list)) return json(body);
       let rows = list;
+      // Project access: a user restricted to some projects sees only their rows.
+      if (req.legalScope) rows = rows.filter((r) => r.ProjectId != null && req.legalScope.includes(Number(r.ProjectId)));
       const project = String(req.query.project ?? "all");
       if (project === "none") rows = rows.filter((r) => !Number(r.ProjectId));
       else if (project !== "all" && Number(project) > 0) rows = rows.filter((r) => Number(r.ProjectId) === Number(project));
