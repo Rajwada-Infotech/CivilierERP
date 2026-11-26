@@ -277,7 +277,6 @@ const FinanceDashboard = () => {
   const net = received - paid;
   const receivedPct = share(received, received + paid);
   const readAt = dataUpdatedAt ? new Date(dataUpdatedAt) : new Date();
-  const todayNet = n0(data.receivedPayments.todayAmount) - n0(data.paymentsMade.todayAmount);
 
   return (
     <div>
@@ -358,24 +357,11 @@ const FinanceDashboard = () => {
             )}
           </Detail>
 
-          <Detail tag="B" title="Today">
-            {isLoading ? (<><Skel h={40} /><Skel h={40} /><Skel h={40} /></>) : (
+          <Detail tag="B" title="Invoices and approvals">
+            {isLoading ? <Skel h={90} /> : (
               <div>
-                {[
-                  { label: "Received today", value: money(data.receivedPayments.todayAmount), sub: `${fmtInt(data.receivedPayments.todayCount)} receipt${n0(data.receivedPayments.todayCount) === 1 ? "" : "s"}`, path: "/received-payments", color: undefined as string | undefined },
-                  { label: "Paid out today", value: money(data.paymentsMade.todayAmount), sub: `${fmtInt(data.paymentsMade.todayCount)} payment${n0(data.paymentsMade.todayCount) === 1 ? "" : "s"}`, path: "/payments", color: undefined },
-                  { label: "Net for today", value: money(todayNet), sub: todayNet < 0 ? "more went out than came in" : "in hand after today's payments", path: "/reports", color: todayNet < 0 ? "var(--red)" : undefined },
-                ].map((s, i) => (
-                  <button key={s.label} onClick={() => navigate(s.path)} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, padding: "13px 0", borderTop: i ? "1px solid var(--rule-soft)" : 0, width: "100%" }}>
-                    <span style={{ minWidth: 0 }}>
-                      <span className="label link" style={{ color: "var(--ink)" }}>{s.label}</span>
-                      <span style={{ display: "block", fontSize: 12, color: "var(--graphite)", marginTop: 4 }}>{s.sub}</span>
-                    </span>
-                    <span className="figure" style={{ fontSize: 28, whiteSpace: "nowrap", color: s.color }}>{s.value}</span>
-                  </button>
-                ))}
-                {/* Invoices and approvals waiting: all time, not only today. */}
-                <div style={{ marginTop: 6, border: "1px solid var(--ink)", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))" }}>
+                {/* Invoices and approvals waiting (all time). */}
+                <div style={{ border: "1px solid var(--ink)", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))" }}>
                   {[
                     { label: "Invoices", value: data.invoices.totalCount, sub: "booked", path: "/finance/invoice", red: false },
                     { label: "Invoices paid", value: data.invoices.paidCount, sub: `of ${fmtInt(data.invoices.totalCount)}`, path: "/finance/invoice", red: false },
