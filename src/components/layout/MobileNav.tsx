@@ -48,7 +48,7 @@ import { engineeringNavItems } from "./sidebars/EngineeringSidebar";
 import { buildFinanceNavItems } from "./sidebars/FinanceSidebar";
 import { materialNavItems } from "./sidebars/MaterialSidebar";
 import { fixedAssetNavItems } from "./sidebars/FixedAssetSidebar";
-import { maintenanceNavItems } from "./sidebars/MaintenanceSidebar";
+import { maintenanceNavFor } from "./sidebars/MaintenanceSidebar";
 import { followupNavItems } from "./sidebars/FollowupSidebar";
 import { buildAdminNavItems } from "./sidebars/AdminSidebar";
 import { dbaNavItems } from "./sidebars/DbaSidebar";
@@ -264,7 +264,7 @@ export const MobileNav: React.FC = () => {
       case "fixed-asset":
         return adaptItems(fixedAssetNavItems as DesktopNavItem[]);
       case "maintenance":
-        return adaptItems(maintenanceNavItems as DesktopNavItem[]);
+        return adaptItems(maintenanceNavFor(isSuperAdmin) as DesktopNavItem[]);
       case "finance":
         return adaptItems(
           buildFinanceNavItems(overdueCount) as DesktopNavItem[],

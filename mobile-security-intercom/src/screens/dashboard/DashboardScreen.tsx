@@ -13,6 +13,8 @@ import { useVisitorQueue, refusedWhileQueued } from "@/visitors/offlineQueue";
 import { useVisitorEvents } from "@/visitors/useSecuritySocket";
 import { TrackingCard } from "@/tracking/TrackingCard";
 import { PatrolCard } from "@/tracking/PatrolCard";
+import { AdBanner } from "@/ads/AdBanner";
+import { AdPopup } from "@/ads/AdPopup";
 import { fetchWithAuth } from "@/services/fetchWithAuth";
 import { View, Text, ScrollView, RefreshControl, Alert } from "react-native";
 import Svg, { G, Line, Rect, Text as SvgText } from "react-native-svg";
@@ -397,6 +399,9 @@ export default function DashboardScreen() {
             <Detail tag="A" title="Waiting for you" note={data?.pending.length ? `${data.pending.length} at the gate` : "Nobody waiting"}>
               <VisitorList rows={data?.pending ?? []} loading={loading} showFlat={false} onOpen={openVisitor} empty="Nobody is waiting at the gate for you." />
             </Detail>
+            {/* Ads: residents only (Maintenance → Ads on the web). The space takes no room when there are none. */}
+            <AdBanner enabled />
+            <AdPopup enabled />
             <Detail tag="B" title="This week">
               <StatGrid
                 cols={3}
