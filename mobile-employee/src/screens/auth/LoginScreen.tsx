@@ -1,6 +1,7 @@
 // Employee sign-in: the e-mail on the employee's Employee Master record and the password HR set on Employee Portal Access.
 import { useState } from "react";
 import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Eye, EyeOff } from "lucide-react-native";
 import { useAuth } from "@/auth/AuthContext";
 import { Body, Field, Input, Key, Label, Notice, SheetFrame, TitleBlock } from "@/components/sheet/Sheet";
@@ -35,10 +36,11 @@ export default function LoginScreen() {
     }
   };
 
+  const insets = useSafeAreaInsets();
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: "center", padding: 12 }} keyboardShouldPersistTaps="handled">
+        <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: "center", padding: 12, paddingTop: insets.top + 12, paddingBottom: insets.bottom + 12 }} keyboardShouldPersistTaps="handled">
           <SheetFrame>
             <TitleBlock eyebrow="CivilierERP · Employee Portal" title="Sign in" subtitle="Attendance, leave and payslips" action={<Logo />} />
             <View style={{ borderTopWidth: 1, borderTopColor: S.rule, padding: 16, gap: 16 }}>
