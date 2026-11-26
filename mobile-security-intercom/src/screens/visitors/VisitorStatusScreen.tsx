@@ -20,6 +20,8 @@ import { nativeCallsAvailable } from "@/screens/calls/callSupport";
 import { onQueuedSent } from "@/visitors/offlineQueue";
 import { useVisitorEvents } from "@/visitors/useSecuritySocket";
 import { useSecurityView } from "@/navigation/securityRole";
+import { markRequestSeen } from "@/notifications/seenStore";
+import { dismissRequestNotifications } from "@/notifications/pushNotifications";
 
 // Approval is the one place the app uses green: the guard reads it from across the gate.
 const GREEN = "#1f9d55";
@@ -122,6 +124,12 @@ export default function VisitorStatusScreen() {
   // A request opened later from a list (already answered) stays on screen.
   const waited = useRef(!!params.queuedId);
   const [backIn, setBackIn] = useState<number | null>(null);
+  // The guard has the answer in front of them: it no longer counts in the bell or sits in the notification shade.
+  useEffect(() => {
+    if (!v || pending || !isGuard) return;
+    void markRequestSeen(v.id);
+    void dismissRequestNotifications(v.id);
+  }, [v, pending, isGuard]);
   useEffect(() => {
     if (pending) waited.current = true;
     else if (v && waited.current && isGuard && backIn === null) setBackIn(4);

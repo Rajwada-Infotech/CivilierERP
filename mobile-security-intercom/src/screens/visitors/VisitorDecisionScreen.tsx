@@ -101,7 +101,7 @@ export default function VisitorDecisionScreen() {
   }
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingBottom: 40 }}>
+    <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingBottom: 96 }}>
       <SheetFrame>
         <View style={{ paddingHorizontal: 16, paddingTop: 18, paddingBottom: 14, gap: 6 }}>
           <Label>Flat {flat} · {v.gateName}</Label>

@@ -14,6 +14,7 @@ import type * as NotificationsModule from "expo-notifications";
 import Constants, { ExecutionEnvironment } from "expo-constants";
 import { isRunningInExpoGo } from "expo";
 import * as SecureStore from "expo-secure-store";
+import { isRequestSeen } from "./seenStore";
 import { fetchWithAuth } from "@/services/fetchWithAuth";
 
 const TOKEN_KEY = "push_token";
@@ -33,12 +34,12 @@ export function notifications(): typeof NotificationsModule | null {
   const mod: typeof NotificationsModule = require("expo-notifications");
   // While the app is open, still show the notification as a banner.
   mod.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldPlaySound: true,
-      shouldSetBadge: false,
-      shouldShowBanner: true,
-      shouldShowList: true,
-    }),
+    // An answer the guard already saw on screen (the socket beat the push) isn't shown again.
+    handleNotification: async (n) => {
+      const id = Number(n.request.content.data?.requestId);
+      const show = !(Number.isInteger(id) && (await isRequestSeen(id)));
+      return { shouldPlaySound: show, shouldSetBadge: false, shouldShowBanner: show, shouldShowList: show };
+    },
   });
   return (loaded = mod);
 }
@@ -107,5 +108,18 @@ export async function unregisterPushAsync(portal = false): Promise<void> {
     await SecureStore.deleteItemAsync(TOKEN_KEY);
   } catch {
     /* logging out must always succeed */
+  }
+}
+
+/** Takes this request's notifications off the phone's notification shade (the person has seen the answer in the app). */
+export async function dismissRequestNotifications(requestId: number) {
+  const N = notifications();
+  if (!N) return;
+  try {
+    for (const n of await N.getPresentedNotificationsAsync()) {
+      if (Number(n.request.content.data?.requestId) === requestId) await N.dismissNotificationAsync(n.request.identifier);
+    }
+  } catch {
+    /* nothing to clear */
   }
 }

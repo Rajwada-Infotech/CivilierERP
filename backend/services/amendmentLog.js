@@ -105,6 +105,9 @@ async function snapshotRow(pool, table, pkCol, id) {
 // fieldLabels is an optional { fieldName: "Display Label" } map for nicer
 // column names in the UI; unmapped fields fall back to an auto-humanized
 // version of the raw column name (see humanizeFieldName).
+/** SQL for a stored project / company: its enterprise name when an id was stored, else the text as it is. */
+const NAME_OF = (col) => `COALESCE((SELECT TOP 1 e.name FROM dbo.enterprise e WHERE e.id = TRY_CAST(${col} AS INT)), ${col})`;
+
 async function recordAmendment({
   refDocType,
   refDocId,
@@ -140,11 +143,18 @@ async function recordAmendment({
 
   const pool = getPool();
 
+  // Some documents keep the project / company as an id (Payment's PProject holds "1012"): store the name instead.
+  const idOf = (v) => (v != null && /^\d+$/.test(String(v).trim()) ? Number(v) : null);
+  const projectId = idOf(projectName);
+  const companyId = idOf(companyName);
+  if (projectId) projectName = null;
+  if (companyId) companyName = null;
+
   // Callers that don't pass the names (BOQ, Work Order, Work Done all passed null, leaving the Amendment page's
   // project / company blank) get them from the document's own ids.
   if (!projectName || !companyName) {
-    const pid = after?.ProjectId ?? before?.ProjectId ?? null;
-    const cid = after?.CompanyId ?? before?.CompanyId ?? null;
+    const pid = projectId ?? after?.ProjectId ?? before?.ProjectId ?? null;
+    const cid = companyId ?? after?.CompanyId ?? before?.CompanyId ?? null;
     if (pid || cid) {
       try {
         const names = (
@@ -228,10 +238,11 @@ async function listAmendments(module) {
     return `@t${i}`;
   });
   const result = await request.query(`
-    SELECT Id, AmendmentNo, RefDocType, RefDocId, RefDocNo, ProjectName, CompanyName,
-           Description, AmendmentDate, CreatedBy, CreatedAt
-    FROM dbo.Amendments
-    WHERE IsDeleted = 0 AND RefDocType IN (${placeholders.join(",")})
+    SELECT a.Id, a.AmendmentNo, a.RefDocType, a.RefDocId, a.RefDocNo,
+           ${NAME_OF("a.ProjectName")} AS ProjectName, ${NAME_OF("a.CompanyName")} AS CompanyName,
+           a.Description, a.AmendmentDate, a.CreatedBy, a.CreatedAt
+    FROM dbo.Amendments a
+    WHERE a.IsDeleted = 0 AND RefDocType IN (${placeholders.join(",")})
     ORDER BY CreatedAt DESC;
   `);
   return result.recordset.map((row) => ({
@@ -245,9 +256,13 @@ async function getAmendmentDetail(id) {
   const headerResult = await pool
     .request()
     .input("Id", sql.Int, id)
-    .query(`SELECT * FROM dbo.Amendments WHERE Id = @Id AND IsDeleted = 0;`);
-  const header = headerResult.recordset[0];
-  if (!header) return null;
+    .query(`SELECT a.*, ${NAME_OF("a.ProjectName")} AS ProjectNameShown, ${NAME_OF("a.CompanyName")} AS CompanyNameShown
+            FROM dbo.Amendments a WHERE a.Id = @Id AND a.IsDeleted = 0;`);
+  const row = headerResult.recordset[0];
+  if (!row) return null;
+  const { ProjectNameShown, CompanyNameShown, ...header } = row;
+  header.ProjectName = ProjectNameShown;
+  header.CompanyName = CompanyNameShown;
 
   const linesResult = await pool
     .request()

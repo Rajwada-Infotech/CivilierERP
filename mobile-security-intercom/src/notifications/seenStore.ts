@@ -38,3 +38,51 @@ export function useNotificationsSeenAt() {
   }, []);
   return t;
 }
+
+// Single answers the guard has already seen on the request's own screen (they waited for it there, or opened it): the
+// bell leaves these out even if Notifications wasn't opened since.
+const REQ_KEY = "security-notifications-seen-requests";
+let seenRequests: Set<number> | null = null;
+const reqListeners = new Set<(s: Set<number>) => void>();
+
+async function loadRequests() {
+  if (seenRequests) return seenRequests;
+  try {
+    seenRequests = new Set(JSON.parse((await SecureStore.getItemAsync(REQ_KEY)) || "[]") as number[]);
+  } catch {
+    seenRequests = new Set();
+  }
+  return seenRequests;
+}
+
+export async function isRequestSeen(requestId: number) {
+  return (await loadRequests()).has(requestId);
+}
+
+export async function markRequestSeen(requestId: number) {
+  const s = await loadRequests();
+  if (s.has(requestId)) return;
+  s.add(requestId);
+  // Keep the last 200; older answers are long past the "seen at" time anyway.
+  const kept = [...s].slice(-200);
+  seenRequests = new Set(kept);
+  reqListeners.forEach((l) => l(seenRequests!));
+  try {
+    await SecureStore.setItemAsync(REQ_KEY, JSON.stringify(kept));
+  } catch {
+    /* counted again after a restart */
+  }
+}
+
+export function useSeenRequests() {
+  const [s, setS] = useState<Set<number>>(seenRequests ?? new Set());
+  useEffect(() => {
+    const l = (n: Set<number>) => setS(new Set(n));
+    reqListeners.add(l);
+    void loadRequests().then(l);
+    return () => {
+      reqListeners.delete(l);
+    };
+  }, []);
+  return s;
+}

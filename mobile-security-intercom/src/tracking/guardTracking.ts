@@ -110,6 +110,8 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(TRACKING_TASK, 
 });
 
 export async function isTracking() {
+  // Expo Go has no background location; asking it prints "Background location is limited in Expo Go".
+  if (inExpoGo()) return false;
   try {
     return await Location.hasStartedLocationUpdatesAsync(TRACKING_TASK);
   } catch {
@@ -177,6 +179,7 @@ export async function startTracking(): Promise<StartResult> {
 
 /** Stops tracking; sends what is queued first unless the caller is already doing so. */
 export async function stopTracking(flush = true) {
+  if (inExpoGo()) return;
   try {
     if (await isTracking()) await Location.stopLocationUpdatesAsync(TRACKING_TASK);
   } catch {

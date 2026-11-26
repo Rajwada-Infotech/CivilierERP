@@ -43,9 +43,12 @@ export function useAuthImageSource(url: string | null | undefined, localUri?: st
     setSource(null);
     (async () => {
       try {
-        const res = await fetchWithAuth(url, { skipActivityLog: true });
+        // expo/fetch reads the bytes natively; React Native's res.blob() round-trips them through its blob store
+        // (and warns about it on every picture).
+        const res = await fetchWithAuth(url, { skipActivityLog: true, useExpoFetch: true });
         if (!res.ok) throw new Error(String(res.status));
-        const dataUri = await blobToDataUri(await res.blob());
+        const type = (res.headers.get("content-type") || "image/jpeg").split(";")[0].trim();
+        const dataUri = `data:${type};base64,${toBase64(new Uint8Array(await res.arrayBuffer()))}`;
         remember(url, dataUri);
         if (!cancelled) setSource({ uri: dataUri });
       } catch {
@@ -68,13 +71,10 @@ function remember(url: string, dataUri: string) {
   photoCache.set(url, dataUri);
   while (photoCache.size > 20) photoCache.delete(photoCache.keys().next().value as string);
 }
-function blobToDataUri(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(blob);
-  });
+function toBase64(bytes: Uint8Array): string {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
 }
 
 export function AuthImage({
