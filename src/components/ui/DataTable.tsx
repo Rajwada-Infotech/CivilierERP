@@ -84,6 +84,8 @@ interface DataTableProps<TData extends RowData> {
   rowClassName?: (row: Row<TData>) => string;
   /** Called when anywhere on a data row is clicked. Makes rows look interactive (cursor-pointer). */
   onRowClick?: (row: Row<TData>) => void;
+  /** Optional page-specific phone card. Receives the row and its existing action cell. */
+  mobileCardRenderer?: (row: TData, actionContent: React.ReactNode | null) => React.ReactNode;
   /** Stable row id for React/TanStack when data has a database primary key */
   getRowId?: (originalRow: TData, index: number, parent?: Row<TData>) => string;
   /** Show loading skeleton instead of rows */
@@ -139,6 +141,7 @@ export function DataTable<TData extends RowData>({
   fixedLayout = false,
   rowClassName,
   onRowClick,
+  mobileCardRenderer,
   getRowId,
   loading = false,
   skeletonRows = 5,
@@ -470,6 +473,12 @@ export function DataTable<TData extends RowData>({
               const titleCell = cells[0];
               const actionIdx = cells.findIndex((_, i) => i > 0 && isActionCol(i));
               const detailIdx = cells.map((_, i) => i).filter((i) => i > 0 && i !== actionIdx);
+              if (mobileCardRenderer) {
+                const actionContent = actionIdx > 0
+                  ? flexRender(cells[actionIdx].column.columnDef.cell, cells[actionIdx].getContext())
+                  : null;
+                return <React.Fragment key={row.id ? `card-${row.id}` : `card-${row.index}`}>{mobileCardRenderer(row.original, actionContent)}</React.Fragment>;
+              }
               return (
                 <div
                   data-row

@@ -111,6 +111,8 @@ interface CrmDataTableProps<T> {
   sort?: CrmSort;
   onSort?: (sortKey: string) => void;
   onRowClick?: (row: T) => void;
+  /** Optional page-specific phone card; the desktop grid stays unchanged. */
+  mobileCardRenderer?: (row: T) => React.ReactNode;
   activeKey?: string | number | null;
   /** Tailwind border-l colour class for the status stripe, e.g. "border-l-foreground". */
   rowAccent?: (row: T) => string | undefined;
@@ -696,15 +698,28 @@ export function GridSavedViews({ storageKey, current, onApply }: { storageKey: s
 }
 
 /** Underlined tabs with a count each: a list's views, or a record's sections. */
-export function GridTabs<K extends string>({ tabs, active, onChange, label, end }: {
-  tabs: { key: K; label: string; count?: number | null }[]; active: K; onChange: (k: K) => void; label: string; end?: React.ReactNode;
+export function GridTabs<K extends string>({ tabs, active, onChange, label, end, panelId }: {
+  tabs: { key: K; label: string; count?: number | null }[]; active: K; onChange: (k: K) => void; label: string; end?: React.ReactNode; panelId?: string;
 }) {
+  const tabRefs = useRef(new Map<K, HTMLButtonElement>());
+  const moveFocus = (index: number) => {
+    const tab = tabs[index];
+    if (!tab) return;
+    onChange(tab.key);
+    requestAnimationFrame(() => tabRefs.current.get(tab.key)?.focus());
+  };
   return (
     <div className="flex items-end gap-1 px-3 border-b border-border overflow-x-auto overflow-y-hidden" role="tablist" aria-label={label}>
-      {tabs.map((t) => {
+      {tabs.map((t, index) => {
         const on = t.key === active;
         return (
-          <button key={t.key} type="button" role="tab" aria-selected={on} onClick={() => onChange(t.key)}
+          <button key={t.key} id={panelId ? `${panelId}-tab-${t.key}` : undefined} ref={(el) => { if (el) tabRefs.current.set(t.key, el); else tabRefs.current.delete(t.key); }} type="button" role="tab" aria-selected={on} aria-controls={panelId} tabIndex={on ? 0 : -1} onClick={() => onChange(t.key)}
+            onKeyDown={(e) => {
+              if (e.key === "ArrowRight") { e.preventDefault(); moveFocus((index + 1) % tabs.length); }
+              else if (e.key === "ArrowLeft") { e.preventDefault(); moveFocus((index - 1 + tabs.length) % tabs.length); }
+              else if (e.key === "Home") { e.preventDefault(); moveFocus(0); }
+              else if (e.key === "End") { e.preventDefault(); moveFocus(tabs.length - 1); }
+            }}
             className={cn("h-10 px-3 text-[0.8125rem] whitespace-nowrap inline-flex items-center gap-1.5 -mb-px border-b-2 transition-colors",
               on ? "border-primary text-foreground font-semibold" : "border-transparent text-muted-foreground hover:text-foreground hover:border-border")}>
             {t.label}
@@ -827,7 +842,7 @@ interface CrmGridProps<T> {
 /** The grid itself: row numbers, sortable and resizable headers, the viewer's columns, and the footer pager. */
 export function CrmGrid<T>({
   cols: allCols, prefs, onPrefs, rows, rowKey, loading, fetching, error, onRetry, sort, onSort, onRowClick, activeKey, empty,
-  page, pageSize, total, onPage, onPageSize, selected, onSelect, noRowNumbers,
+  page, pageSize, total, onPage, onPageSize, selected, onSelect, noRowNumbers, mobileCardRenderer,
 }: CrmGridProps<T>) {
   const cols = gridVisibleCols(allCols, prefs);
   const selectable = !!selected && !!onSelect;
@@ -846,6 +861,7 @@ export function CrmGrid<T>({
   };
   const extra = (selectable ? 1 : 0) + (noRowNumbers ? 0 : 1);
   const showSkeleton = !!loading && rows.length === 0;
+  const loadingAnnouncement = showSkeleton ? "Loading results…" : fetching ? "Updating results…" : null;
 
   // Same as CrmDataTable: a shrinking total must not strand the page past the last one.
   useEffect(() => {
@@ -873,7 +889,8 @@ export function CrmGrid<T>({
 
   return (
     <>
-      <div className={cn("overflow-auto max-h-[calc(100vh-24rem)] min-h-[16rem] transition-opacity", fetching && !showSkeleton && "opacity-60")}>
+      {loadingAnnouncement && <span role="status" className="sr-only">{loadingAnnouncement}</span>}
+      <div aria-busy={!!loading || !!fetching} className={cn("overflow-auto max-h-[calc(100vh-24rem)] min-h-[16rem] transition-opacity", mobileCardRenderer && "hidden md:block", fetching && !showSkeleton && "opacity-60")}>
         <table className="sheet-grid w-full text-[0.8125rem] border-separate border-spacing-0">
           <thead className="sticky top-0 z-20 bg-muted shadow-[0_1px_0_hsl(var(--border))]">
             <tr>
@@ -915,7 +932,12 @@ export function CrmGrid<T>({
               const key = rowKey(row);
               return (
                 <tr key={key} tabIndex={onRowClick ? 0 : undefined} onClick={onRowClick ? () => onRowClick(row) : undefined}
-                  onKeyDown={onRowClick ? (e) => { if (e.key === "Enter" && e.target === e.currentTarget) onRowClick(row); } : undefined}
+                  onKeyDown={onRowClick ? (e) => {
+                    if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) {
+                      e.preventDefault();
+                      onRowClick(row);
+                    }
+                  } : undefined}
                   className={cn("hover:bg-primary/[0.04]", onRowClick && "cursor-pointer focus:outline-none focus-visible:bg-primary/10",
                     ((activeKey != null && key === activeKey) || (selectable && selected!.has(key))) && "bg-primary/10")}>
                   {selectable && (
@@ -934,6 +956,23 @@ export function CrmGrid<T>({
           </tbody>
         </table>
       </div>
+      {mobileCardRenderer && (
+        <div aria-busy={!!loading || !!fetching} className={cn("md:hidden p-3 space-y-3", fetching && !showSkeleton && "opacity-60")}>
+          {showSkeleton ? Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="rounded-lg border border-border bg-card p-4 space-y-3">
+              <div className="h-4 w-2/3 rounded bg-muted animate-pulse" />
+              <div className="h-3 w-1/2 rounded bg-muted animate-pulse" />
+              <div className="h-3 w-full rounded bg-muted animate-pulse" />
+            </div>
+          )) : error ? (
+            <div role="alert" className="rounded-lg border border-border px-4 py-8 text-center text-sm text-destructive">
+              {error} {onRetry && <button type="button" onClick={onRetry} className="underline ml-1">Retry</button>}
+            </div>
+          ) : rows.length === 0 ? (
+            <div className="rounded-lg border border-border px-4 py-10 text-center text-sm text-muted-foreground">{empty}</div>
+          ) : rows.map((row) => <React.Fragment key={rowKey(row)}>{mobileCardRenderer(row)}</React.Fragment>)}
+        </div>
+      )}
       <GridFooter page={page} pageSize={pageSize} total={total} onPage={onPage} onPageSize={onPageSize} />
     </>
   );

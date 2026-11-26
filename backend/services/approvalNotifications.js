@@ -19,7 +19,8 @@ const { sendToUsers } = require("./pushNotifications");
 // Approval pushes ("Approval needed", "Approved", "Rejected") go to the Admin app only,
 // so someone logged into several Civilier apps isn't pinged on all of them — the
 // Finance & Material app gets none.
-const APPROVAL_APPS = ["admin"];
+// The apps with an Approval Inbox: Admin, and Civilier CRM (staff).
+const APPROVAL_APPS = ["admin", "crm"];
 
 const MODULE_LABELS = {
   "expense-booking": "Expense Booking",

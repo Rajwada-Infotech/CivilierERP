@@ -459,7 +459,7 @@ export default function CustomerPortal() {
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-base font-bold text-foreground">Payment Schedule</h2>
-                <p className="text-xs text-muted-foreground mt-0.5">EMIs, instalments and upcoming dues</p>
+                <p className="text-xs text-muted-foreground mt-0.5">EMIs, payment milestones and upcoming dues</p>
               </div>
               <button onClick={() => refreshReminders(true)} className="p-2 rounded-xl hover:bg-muted transition-colors text-muted-foreground" aria-label="Refresh">
                 <RefreshCw size={14} />

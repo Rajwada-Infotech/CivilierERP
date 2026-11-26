@@ -1,7 +1,7 @@
 // RN port of SupplierLogin.tsx's WelcomeCard (web) — full-screen blur-in
 // overlay with a checkmark badge, "Welcome back" copy, and a filling
 // progress bar, shown for ~1.8s between a successful login and the
-// navigator swapping over to MainStack (see AuthContext.tsx's
+// navigator swapping over to the customer screens (see AuthContext.tsx's
 // onAuthenticated/navHoldMs — the delay this overlay fills is real, not
 // decorative: it's giving the credential-verified-but-not-yet-navigated
 // window something to show).

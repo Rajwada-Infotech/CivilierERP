@@ -70,6 +70,19 @@ function stageMilestones(rows, held, pending, recorded = 0) {
   });
 }
 
+// What one milestone still needs from the customer, from its money stage (stageMilestones) — the one rule the portal,
+// the app and the CRM reminders read. Money is held On Account until the full price is in, so a paid instalment can
+// still say Status = 'Pending': Covered = paid (settled, or covered by verified money held for it); Verifying = paid,
+// being checked; Outstanding = what is genuinely still to pay on it.
+function milestoneDue(m) {
+  const stage = m?.MoneyStage ?? null;
+  return {
+    Covered: ["Adjusted", "Verified", "Waived"].includes(stage),
+    Verifying: ["InVerification", "Recorded"].includes(stage),
+    Outstanding: stage === "Waived" ? 0 : Math.max(0, round2(Number(m?.AmountDue || 0) - Number(m?.AmountPaid || 0) - Number(m?.HeldOnAccount || 0))),
+  };
+}
+
 async function getBookingOnAccountCoverage(pool, bookingId, { withPendingVerification = false } = {}) {
   const milestonesRes = await pool.request().input("bid", sql.Int, bookingId).query(`
     SELECT Id, MilestoneNo, MilestoneName, AmountDue, AmountPaid, Status, ExtraChargeId, ParkingAllotmentId
@@ -340,4 +353,4 @@ async function unapplyBookingAllocations(tx, bookingId, { actorUserId = null, no
   return { allocs, amount: Math.round(amount * 100) / 100 };
 }
 
-module.exports = { unapplyBookingAllocations, getBookingWaivers, waiverReversalBlock, coverMilestones, stageMilestones, getBookingOnAccountCoverage, getMilestoneMoneyStages, getBookingMoneyTrail, pendingVerificationEntries, returnedEntries, isMilestoneOneCoveredByOnAccount, areEarlierMilestonesCoveredByOnAccount };
+module.exports = { unapplyBookingAllocations, getBookingWaivers, waiverReversalBlock, coverMilestones, stageMilestones, milestoneDue, getBookingOnAccountCoverage, getMilestoneMoneyStages, getBookingMoneyTrail, pendingVerificationEntries, returnedEntries, isMilestoneOneCoveredByOnAccount, areEarlierMilestonesCoveredByOnAccount };

@@ -63,6 +63,7 @@ export function BankNamePicker({
   placeholder = "Select bank…",
   otherPlaceholder = "Bank name",
   className,
+  ariaLabel,
   sheet = false,
 }: {
   value: string;
@@ -70,6 +71,7 @@ export function BankNamePicker({
   placeholder?: string;
   otherPlaceholder?: string;
   className?: string;
+  ariaLabel?: string;
   /** Square and inked, for drawing-sheet pages (a dialog renders outside the page, so it can't be detected). */
   sheet?: boolean;
 }) {
@@ -101,7 +103,7 @@ export function BankNamePicker({
           }
         }}
       >
-        <SelectTrigger className={className ?? (sheet ? SHEET : "h-9 text-sm")}>
+        <SelectTrigger className={className ?? (sheet ? SHEET : "h-9 text-sm")} aria-label={ariaLabel}>
           <SelectValue placeholder={placeholder} />
         </SelectTrigger>
         <SelectContent>
@@ -124,6 +126,7 @@ export function BankNamePicker({
         <Input
           className={sheet ? SHEET : "h-9 text-sm"}
           placeholder={otherPlaceholder}
+          aria-label={ariaLabel ? `${ariaLabel} (other)` : undefined}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           autoFocus

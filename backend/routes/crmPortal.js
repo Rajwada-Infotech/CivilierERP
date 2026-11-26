@@ -36,7 +36,10 @@ const TICKET_SLA_HOURS = 96; // customer-raised tickets always start Normal prio
 const rateLimit = require("../middleware/rateLimiter");
 // Per customer (rateLimiter.js counts the signed-in person): one visit to Civilier Home makes 10-15 requests, so 600 per
 // 15 minutes (~40 a minute) leaves room for real use and still stops scripted scraping.
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 600, validate: false, message: { error: "Too many requests, please try again later." } }));
+// Per signed-in customer (rateLimitIdentity.js), not per IP: customers on one office network or one mobile carrier
+// share an address, and keyed by IP they all shared this one allowance.
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 600, validate: false, keyGenerator: require("../middleware/rateLimitIdentity").rateLimitKey,
+  message: { error: "Too many requests, please try again later." } }));
 
 // 15-second in-memory cache for portal user active status.
 // Declared at module scope so both the staff admin endpoint and the portal
@@ -529,7 +532,7 @@ function priceLineText(l, { plot = false, area = null, rate = null, base = null,
 function paymentStatus(x) {
   switch (x.stage) {
     case "settled": return { label: "Counted", sub: null };
-    case "held": return { label: "Received", sub: "Waiting to be matched to your instalments" };
+    case "held": return { label: "Received", sub: "Waiting to be matched to your payment milestones" };
     case "split": return { label: "Received", sub: null };
     case "finance":
     case "recorded": return { label: "Being verified", sub: "Our accounts team is checking it. It counts once confirmed." };
@@ -566,7 +569,7 @@ function customerJourney({ booking, welcomeCall, agreement, milestones = [], sal
       agreement?.CustomerApprovalStatus === CrmStatus.APPROVED, agreement?.CustomerApprovedAt),
     step("agreementRegistered", "Agreement registered", "The agreement is signed and registered with the government.",
       agreement?.Status === CrmStatus.REGISTERED, agreement?.AfsRegistrationDate),
-    step("payments", "Payments", "You pay the instalments as they fall due.",
+    step("payments", "Payments", "You pay each payment milestone as it falls due.",
       instalmentsCovered(milestones), null),
     ...(handoverFirst ? [handoverStep] : []),
     step("saleDeed", "Sale deed", "You read and approve the final sale deed for your home.",
@@ -715,20 +718,13 @@ async function loadTimeline(pool, appId, { lite = false } = {}) {
         WHERE p.id = @pid AND p.business_type = 'P'`),
     ]);
 
-    // Whether each instalment is actually paid. Money is held On Account until the full price is in (crmOnAccountCoverage),
-    // so a paid instalment can still say Status = 'Pending'. Its money stage is the truth — the same one the staff
-    // screens and the money statement use: Covered = paid (settled, or covered by verified money held for it);
-    // Verifying = paid, being checked; Outstanding = what is genuinely still to pay on it.
+    // Whether each instalment is actually paid: its money stage, read by the one rule (crmOnAccountCoverage.milestoneDue)
+    // the staff screens, the money statement and the CRM reminders use.
     const stageOf = new Map((await getMilestoneMoneyStages(pool, bk.Id)).milestones.map((m) => [m.Id, m]));
     const paymentMilestones = milestones.recordset.map((m) => {
       const st = stageOf.get(m.Id) || {};
       const stage = st.MoneyStage ?? null;
-      return {
-        ...m, MoneyStage: stage,
-        Covered: ["Adjusted", "Verified", "Waived"].includes(stage),
-        Verifying: ["InVerification", "Recorded"].includes(stage),
-        Outstanding: stage === "Waived" ? 0 : Math.max(0, Math.round((Number(m.AmountDue || 0) - Number(m.AmountPaid || 0) - Number(st.HeldOnAccount || 0)) * 100) / 100),
-      };
+      return { ...m, MoneyStage: stage, ...milestoneDue({ ...m, MoneyStage: stage, HeldOnAccount: st.HeldOnAccount }) };
     });
     return {
       booking: bk,
@@ -908,7 +904,7 @@ router.get("/receipts", async (req, res) => {
 //   payments — every payment, from when it was entered to where it sits now (getBookingMoneyTrail): counted, waiting to
 //              be matched, being verified, refunded, moved, bounced. Only the customer's own receipt number is shown, and
 //              only an approved receipt can be opened.
-const { getMilestoneMoneyStages, getBookingMoneyTrail } = require("../services/crmOnAccountCoverage");
+const { getMilestoneMoneyStages, getBookingMoneyTrail, milestoneDue } = require("../services/crmOnAccountCoverage");
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 // A payment mode as people read it: stored codes like "CreditNote" / "BankTransfer" become "Credit note" / "Bank
 // transfer"; plain words and abbreviations (NEFT, Cheque) stay as they are.
@@ -2489,9 +2485,11 @@ router.get("/transfer-deeds", async (req, res) => {
 // Each item: kind (what it is), label + sub (the customer's words), target (which page takes the action:
 // documents | payments | construction | transferDeed), urgent (blocks progress), applicationId (whose it is).
 const { inr, day } = require("../services/pushNotifications");
-function needsYou({ applicationId, timeline: t, agreement, documents, deeds }) {
+function needsYou({ applicationId, timeline: t, agreement, documents, deeds, reminders }) {
   const out = [];
   const add = (kind, label, sub, target, urgent = false) => out.push({ applicationId, kind, label, sub, target, urgent });
+  // The company's reminders sent to the portal (Reminder Setup) that are still open: their own wording.
+  for (const r of reminders || []) add("reminder", r.Title || r.Body, r.Title ? r.Body : "", r.target);
   if (agreement?.SentToCustomerAt && agreement.CustomerApprovalStatus === "Pending") {
     add("agreementReview", "Your agreement is waiting for your review", `${agreement.AgreementNo || ""} — approve or request a recheck`, "documents");
   }
@@ -2536,7 +2534,25 @@ async function needsYouFor(pool, app, deeds) {
   ]);
   // A transfer deed belongs to people, not an application: it shows against the booking it transfers.
   const mine = (deeds || []).filter((v) => app.BookingNo && v.deed.BookingNo === app.BookingNo);
-  return needsYou({ applicationId: app.ApplicationId, timeline, agreement, documents, deeds: mine });
+  return needsYou({ applicationId: app.ApplicationId, timeline, agreement, documents, deeds: mine, reminders: await openPortalReminders(pool, app.BookingNo) });
+}
+
+// The portal reminders still open on a booking (CrmReminderLog, cleared when resolved): the latest of each rule and
+// record, and the customer page it points to (its situation's). None before migration 700.
+async function openPortalReminders(pool, bookingNo) {
+  if (!bookingNo) return [];
+  const { loadSituations } = require("../services/crmReminderEngine");
+  const r = await pool.request().input("no", sql.NVarChar(50), bookingNo).query(`
+    IF OBJECT_ID('dbo.CrmReminderLog') IS NOT NULL
+      SELECT l.Title, l.Body, ru.Situation FROM dbo.CrmReminderLog l
+      JOIN dbo.CrmReminderRule ru ON ru.Id = l.RuleId
+      JOIN dbo.CrmBooking b ON b.Id = l.BookingId
+      WHERE b.BookingNo = @no AND l.Channel = N'Portal' AND l.Status = N'Sent' AND l.ClearedAt IS NULL
+        AND l.Id = (SELECT MAX(x.Id) FROM dbo.CrmReminderLog x WHERE x.RuleId = l.RuleId AND x.EntityKey = l.EntityKey
+                    AND x.Channel = N'Portal' AND x.ClearedAt IS NULL)`);
+  if (!r.recordset?.length) return [];
+  const situations = await loadSituations(pool);
+  return r.recordset.map((x) => ({ ...x, target: situations[x.Situation]?.portalTarget || null }));
 }
 
 // GET /needs-you            — everything waiting on the customer, across all their homes (deeds not tied to a home
