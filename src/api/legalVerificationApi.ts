@@ -149,7 +149,9 @@ export interface VerificationDashboard {
   laUlcPending: number; pendingMutation: number; pendingConversion: number; discrepancies: number;
   byActivity: { no: string; name: string; open: number; overdue: number }[]; byEmployee: { name: string; open: number; overdue: number }[];
 }
-export interface LegalReport { key: string; title: string; subtitle?: string; note?: string; columns: { key: string; label: string }[]; rows: Record<string, unknown>[] }
+export interface LegalReport { key: string; title: string; subtitle?: string; note?: string; columns: { key: string; label: string }[]; rows: Record<string, unknown>[];
+  /** Dropdown choices for the filters, from the report's own rows. */
+  options?: Partial<Record<"enquiry" | "mouza" | "dag" | "employee" | "status" | "verify", string[]>> }
 export const getVerificationDashboard = async (project: string) => handle<VerificationDashboard | null>(await fetchWithAuth(`${RBASE}/dashboard?project=${encodeURIComponent(project)}`));
 export const getReportList = async () => handle<{ key: string; title: string; needsVerification: boolean }[]>(await fetchWithAuth(`${RBASE}/list`));
 export const getReport = async (key: string, q: { project: string; from?: string; to?: string; verificationId?: number | null; enquiry?: string; mouza?: string; dag?: string; employee?: string; status?: string; verify?: string }) => {

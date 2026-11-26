@@ -28,7 +28,7 @@ export default function LegalVerificationReportsPage() {
   const [applied, setApplied] = useState(flt);
   const meta = list.data?.find((r) => r.key === key);
   const ws = useQuery({ queryKey: ["legal-verification-list", "all-for-report", project], queryFn: () => getVerifications(`project=${project}`), enabled: !!meta?.needsVerification });
-  const rep = useQuery({ queryKey: ["legal-report", key, project, from, to, vid, applied], queryFn: () => getReport(key, { project, from, to, verificationId: vid ? Number(vid) : null, ...applied }),
+  const rep = useQuery({ placeholderData: (prev) => prev, queryKey: ["legal-report", key, project, from, to, vid, applied], queryFn: () => getReport(key, { project, from, to, verificationId: vid ? Number(vid) : null, ...applied }),
     enabled: !!key && (!meta?.needsVerification || !!vid) });
   const data = rep.data;
   const fmt = (v: unknown) => (v == null || v === "" ? "—" : typeof v === "number" ? v.toLocaleString("en-IN") : String(v));
@@ -40,7 +40,7 @@ export default function LegalVerificationReportsPage() {
           filename={key} disabled={!data.rows.length || !rights.canExport} /> : undefined}>
         <div className="mb-4 flex flex-wrap items-end gap-2 border border-border bg-card p-3">
           <label className="min-w-[16rem] flex-1"><span className={lbl}>Report</span>
-            <select className={`${input} w-full`} value={key} onChange={(e) => setKey(e.target.value)}>
+            <select className={`${input} w-full`} value={key} onChange={(e) => { setKey(e.target.value); const none = { enquiry: "", mouza: "", dag: "", employee: "", status: "", verify: "" }; setFlt(none); setApplied(none); }}>
               {(list.data ?? []).map((r, i) => <option key={r.key} value={r.key}>{i + 1}. {r.title}</option>)}
             </select></label>
           {meta?.needsVerification && (
@@ -54,14 +54,17 @@ export default function LegalVerificationReportsPage() {
           {(from || to) && <button className="h-9 text-xs underline" onClick={() => { setFrom(""); setTo(""); }}>Clear dates</button>}
         </div>
         <div className="mb-4 flex flex-wrap items-end gap-2 border border-border bg-card p-3">
-          {([["enquiry", "Enquiry / verification no."], ["mouza", "Mouza"], ["dag", "Dag"], ["employee", "Employee"], ["status", "Status / result"]] as const).map(([k, l]) => (
-            <label key={k} className="min-w-[9rem] flex-1"><span className={lbl}>{l}</span>
-              <input className={`${input} w-full`} value={flt[k]} onChange={(e) => setFlt({ ...flt, [k]: e.target.value })} onKeyDown={(e) => e.key === "Enter" && setApplied(flt)} /></label>
-          ))}
-          <label className="min-w-[9rem]"><span className={lbl}>Verification status</span>
-            <select className={`${input} w-full`} value={flt.verify} onChange={(e) => setFlt({ ...flt, verify: e.target.value })}>
-              <option value="">Any</option>{["Not Reviewed", "Under Review", "Verified", "Returned", "Rejected", "N/A"].map((s) => <option key={s}>{s}</option>)}</select></label>
-          <button className="h-9 bg-foreground px-4 text-xs font-semibold uppercase text-background" onClick={() => setApplied(flt)}>Apply</button>
+          {([["enquiry", "Enquiry / verification no."], ["mouza", "Mouza"], ["dag", "Dag"], ["employee", "Employee"], ["status", "Status / result"], ["verify", "Verification status"]] as const).map(([k, l]) => {
+            const opts = data?.options?.[k] ?? [];
+            return (
+              <label key={k} className="min-w-[9rem] flex-1"><span className={lbl}>{l}</span>
+                <select className={`${input} w-full`} value={flt[k]} disabled={!opts.length && !flt[k]} onChange={(e) => { const next = { ...flt, [k]: e.target.value }; setFlt(next); setApplied(next); }}>
+                  <option value="">{opts.length || flt[k] ? "Any" : "—"}</option>
+                  {flt[k] && !opts.includes(flt[k]) && <option value={flt[k]}>{flt[k]}</option>}
+                  {opts.map((o) => <option key={o} value={o}>{o}</option>)}
+                </select></label>
+            );
+          })}
           {Object.values(applied).some(Boolean) && <button className="h-9 text-xs underline" onClick={() => { const e = { enquiry: "", mouza: "", dag: "", employee: "", status: "", verify: "" }; setFlt(e); setApplied(e); }}>Clear filters</button>}
         </div>
         {rep.error ? <p className="p-6 text-destructive">{(rep.error as Error).message}</p> : meta?.needsVerification && !vid ? <p className="border border-border p-6 text-sm text-muted-foreground">Choose a verification.</p>

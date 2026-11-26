@@ -29,17 +29,30 @@ function scoped(req, rows) {
     && (project === "all" ? true : project === "none" ? !Number(r.ProjectId) : Number(r.ProjectId) === Number(project)));
 }
 const inRange = (req, d) => (!req.query.from || (d && d10(d) >= req.query.from)) && (!req.query.to || (d && d10(d) <= req.query.to));
-const has = (v, q) => String(v ?? "").toLowerCase().includes(String(q).toLowerCase());
-/** The text filters, applied to the finished rows (each matches the columns that carry that kind of value). */
+const same = (v, q) => v != null && String(v).trim().toLowerCase() === String(q).trim().toLowerCase();
+// Which columns each filter looks at.
+const FILTER_KEYS = {
+  enquiry: ["VerificationNo", "EnquiryNo"],
+  mouza: ["MouzaName", "mouza", "Mouza"],
+  employee: ["AssignedName", "Employee", "searchedBy", "LeadName", "surveyor"],
+  status: ["Status", "status", "result", "match", "continuity", "verification", "ApplicationStatus"],
+  verify: ["VerifyStatus"],
+};
+const dagKeys = (r) => Object.keys(r).filter((k) => /dag/i.test(k));
+/** The filters (picked from dropdowns), applied to the finished rows: exact match, case ignored. */
 function filters(req, rows) {
   const q = req.query;
-  const any = (r, keys, val) => keys.some((k) => has(r[k], val));
-  return rows.filter((r) => (!q.enquiry || any(r, ["VerificationNo", "EnquiryNo"], q.enquiry))
-    && (!q.mouza || any(r, ["MouzaName", "mouza", "Mouza"], q.mouza))
-    && (!q.dag || Object.entries(r).some(([k, v]) => /dag/i.test(k) && has(v, q.dag)))
-    && (!q.employee || any(r, ["AssignedName", "Employee", "searchedBy", "LeadName", "surveyor"], q.employee))
-    && (!q.status || any(r, ["Status", "status", "result", "match", "continuity", "verification", "ApplicationStatus"], q.status))
-    && (!q.verify || has(r.VerifyStatus, q.verify)));
+  const any = (r, keys, val) => keys.some((k) => same(r[k], val));
+  return rows.filter((r) => Object.entries(FILTER_KEYS).every(([f, keys]) => !q[f] || any(r, keys, q[f]))
+    && (!q.dag || dagKeys(r).some((k) => String(r[k] ?? "").split(/[,;]\s*/).some((d) => same(d, q.dag)))));
+}
+/** Dropdown choices: the distinct values of the report's own rows (before filtering). */
+function filterOptions(rows) {
+  const out = {};
+  const sorted = (set) => [...set].filter((v) => v != null && String(v).trim() !== "").map(String).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  for (const [f, keys] of Object.entries(FILTER_KEYS)) out[f] = sorted(new Set(rows.flatMap((r) => keys.map((k) => r[k]))));
+  out.dag = sorted(new Set(rows.flatMap((r) => dagKeys(r).flatMap((k) => String(r[k] ?? "").split(/[,;]\s*/)))));
+  return out;
 }
 
 const ready = async (pool) => !!(await pool.request().query("SELECT OBJECT_ID('dbo.LegalActivityEntry', 'U') AS t")).recordset[0].t
@@ -289,8 +302,9 @@ router.get("/:key", requirePageRight(PAGE, "view"), async (req, res) => {
     const pool = getPool();
     if (!(await ready(pool))) return res.json({ key: req.params.key, title: rep.title, columns: [], rows: [] });
     const out = await rep.run(req, pool);
+    const options = filterOptions(out.rows);
     const rows = filters(req, out.rows).map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, v instanceof Date ? d10(v) : v])));
-    res.json({ key: req.params.key, title: rep.title, ...out, rows });
+    res.json({ key: req.params.key, title: rep.title, ...out, rows, options });
   } catch (err) {
     console.error("[legal-verification-reports]", req.params.key, err.message);
     res.status(500).json({ error: "Could not build the report" });
