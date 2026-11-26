@@ -81,7 +81,9 @@ export interface MovementPending { movementId: number; kind: "Outside" | "Locati
 export interface LocationPoint { lat: number; lng: number; acc: number | null; at: string }
 
 export const api = {
-  sendLocation: (points: LocationPoint[]) => call<{ tracking: boolean; pending: MovementPending[] }>("/attendance/location", post({ points })),
+  // needFix: the server could not decide from this reading (poor accuracy, GPS jump, near the office edge, or an exit
+  // not yet confirmed) — take another reading shortly.
+  sendLocation: (points: LocationPoint[]) => call<{ tracking: boolean; needFix?: boolean; pending: MovementPending[] }>("/attendance/location", post({ points })),
   locationStatus: (enabled: boolean) => call<{ tracking: boolean; pending: MovementPending[] }>("/attendance/location-status", post({ enabled, at: new Date().toISOString() })),
   movementSkip: (id: number) => call<{ pending: MovementPending[] }>(`/attendance/movement/${id}/skip`, post()),
   movementPending: () => call<{ pending: MovementPending[] }>("/attendance/movement/pending"),

@@ -1,0 +1,92 @@
+{
+  "expo": {
+    "name": "Civilier Security",
+    "slug": "civilier-security-intercom",
+    "scheme": "civiliersecurity",
+    "version": "1.2.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.rajwadainfotech.civiliersecurity",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Civilier Security uses the camera to photograph visitors at the gate so the resident can see who is waiting.",
+        "NSPhotoLibraryUsageDescription": "Civilier Security needs access to your photo library to attach an existing photo to a visitor request.",
+        "NSLocationWhenInUseUsageDescription": "Civilier Security shares a guard's location with the security supervisor during their shift.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Civilier Security shares a guard's location with the security supervisor during their shift, also with the screen off. Nothing is shared off shift.",
+        "UIBackgroundModes": [
+          "location",
+          "audio"
+        ],
+        "NSMicrophoneUsageDescription": "Civilier Security uses the microphone for voice calls between residents and the gate."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.rajwadainfotech.civiliersecurity",
+      "permissions": [
+        "REQUEST_INSTALL_PACKAGES",
+        "RECORD_AUDIO",
+        "MODIFY_AUDIO_SETTINGS",
+        "USE_FULL_SCREEN_INTENT",
+        "POST_NOTIFICATIONS"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Civilier Security shares a guard's location with the security supervisor during their shift.",
+          "locationAlwaysAndWhenInUsePermission": "Civilier Security shares a guard's location with the security supervisor during their shift, also with the screen off. Nothing is shared off shift.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ],
+      "expo-secure-store",
+      "expo-font",
+      "expo-notifications",
+      "expo-status-bar",
+      "expo-sharing",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ],
+      "@livekit/react-native-expo-plugin",
+      [
+        "@config-plugins/react-native-webrtc",
+        {
+          "cameraPermission": "Civilier Security doesn't use the camera for calls.",
+          "microphonePermission": "Civilier Security uses the microphone for voice calls between residents and the gate."
+        }
+      ]
+    ],
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "owner": "rajwada-infotech",
+    "extra": {
+      "eas": {
+        "projectId": "bd7dee9b-5c4e-4fae-a9d1-73b4c3a65850"
+      }
+    },
+    "updates": {
+      "url": "https://u.expo.dev/bd7dee9b-5c4e-4fae-a9d1-73b4c3a65850",
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0
+    }
+  }
+}

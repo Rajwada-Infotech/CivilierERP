@@ -1,23 +1,23 @@
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
-import { Trash2, X, Edit3, Printer, FileDown } from "lucide-react";
+import { Trash2, X, Edit3, Printer, FileDown, FilePenLine } from "lucide-react";
 import { SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { loadMRCompany, mrDocFromRecord, printMaterialRequest, downloadMaterialRequestPdf } from "@/utils/materialRequestDocument";
 import { PRIORITY_COLOR, fmtDate, HEAD, LBL, RULE, KEY, KEY_INK, KEY_LINE, ACT, TAG } from "./config";
-import type { MRState } from "./useMaterialRequest";
+import { isEditableStatus, type MRState } from "./useMaterialRequest";
 
 // One request opened for reading: details, items, print / PDF, edit / delete, document chain.
 export function MRViewModal({ m }: { m: MRState }) {
-  const { rights, isAdmin, viewingRecord, setViewingRecord, pendingSummaryByMRId, deleteMutation, handleEdit } = m;
+  const { rights, viewingRecord, setViewingRecord, pendingSummaryByMRId, deleteMutation, handleEdit, handleAmend } = m;
   if (!viewingRecord) return null;
   const items: any[] = viewingRecord.items || [];
   const priority = viewingRecord.Priority || "Normal";
   const status = viewingRecord.Status || "Draft";
   const closeOverlay = () => setViewingRecord(null);
   const pending = pendingSummaryByMRId.get(viewingRecord.MRId);
-  const canEdit =
-    rights.canEdit && status !== "Short Closed" && (status === "Draft" || status === "Approved" || status === "Rejected" || isAdmin);
+  const canEdit = rights.canEdit && isEditableStatus(status);
+  const canAmend = rights.canEdit && status === "Approved";
 
   // Quantities in different UOMs aren't fungible (bags vs. metric tons), so a
   // single blind sum across every row would be meaningless — total per UOM.
@@ -90,6 +90,11 @@ export function MRViewModal({ m }: { m: MRState }) {
               {canEdit && (
                 <button onClick={() => { closeOverlay(); handleEdit(viewingRecord); }} className={`${KEY_INK} h-8 px-2.5`}>
                   <Edit3 size={12} /><span className="hidden sm:inline">Edit</span>
+                </button>
+              )}
+              {canAmend && (
+                <button onClick={() => { closeOverlay(); void handleAmend(viewingRecord); }} className={`${KEY_INK} h-8 px-2.5`}>
+                  <FilePenLine size={12} /><span className="hidden sm:inline">Amend</span>
                 </button>
               )}
               {rights.canDelete && (

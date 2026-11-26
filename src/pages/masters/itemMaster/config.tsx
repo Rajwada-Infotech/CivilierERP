@@ -29,6 +29,7 @@ export interface Item {
   glHeadId: string;
   costCenterId: string;
   daysOfSupply: string;
+  isActive: boolean;
 }
 
 export function dbToItem(row: DbItem): Item {
@@ -51,6 +52,7 @@ export function dbToItem(row: DbItem): Item {
     costCenterId: row.M_CostCenterId ? String(row.M_CostCenterId) : "",
     daysOfSupply:
       row.M_DaysOfSupply != null ? String(row.M_DaysOfSupply) : "",
+    isActive: row.M_IsActive !== false,
   };
 }
 
@@ -75,6 +77,7 @@ export function itemToPayload(form: Omit<Item, "_id">, groupName: string) {
     M_GLHeadId: form.glHeadId ? parseInt(form.glHeadId) : null,
     M_CostCenterId: form.costCenterId ? parseInt(form.costCenterId) : null,
     M_DaysOfSupply: form.daysOfSupply ? parseInt(form.daysOfSupply) : null,
+    M_IsActive: form.isActive,
   };
 }
 
@@ -93,6 +96,7 @@ export const EMPTY_FORM: Omit<Item, "_id"> = {
   glHeadId: "",
   costCenterId: "",
   daysOfSupply: "",
+  isActive: true,
 };
 
 // ── CSV template / import column mapping ─────────────────────────────────────

@@ -117,6 +117,67 @@ export type DataChangeEvent =
     }
   | { action: "delete"; id: string; records: Record<string, unknown>[] };
 
+export interface ServerPaging {
+  total: number;
+  page: number;
+  pageSize: number;
+  counts?: { active: number; inactive: number; all: number };
+  search: string;
+  status: "active" | "inactive" | "all";
+  sortKey: string | null;
+  sortDir: "asc" | "desc";
+  loading?: boolean;
+  onChange: (p: Partial<{ page: number; search: string; status: "active" | "inactive" | "all"; sortKey: string | null; sortDir: "asc" | "desc" }>) => void;
+  suggest?: (q: string) => Promise<{ value: string; field?: string }[]>;
+}
+
+/** Search box with a suggestion list: values that match what is typed (from the server, or from the loaded rows). */
+function SearchSuggest({ value, onChange, suggest, className }: {
+  value: string; onChange: (v: string) => void; suggest: (q: string) => Promise<{ value: string; field?: string }[]>; className: string;
+}) {
+  const [text, setText] = useState(value);
+  const [items, setItems] = useState<{ value: string; field?: string }[]>([]);
+  const [open, setOpen] = useState(false);
+  const [hi, setHi] = useState(-1);
+  useEffect(() => { setText(value); }, [value]);
+  useEffect(() => {
+    const q = text.trim();
+    if (!q) { setItems([]); return; }
+    let alive = true;
+    const t = setTimeout(() => { suggest(q).then((r) => { if (alive) { setItems(r.slice(0, 10)); setHi(-1); } }).catch(() => {}); }, 250);
+    return () => { alive = false; clearTimeout(t); };
+  }, [text, suggest]);
+  useEffect(() => { const t = setTimeout(() => { if (text !== value) onChange(text); }, 350); return () => clearTimeout(t); }, [text]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pick = (v: string) => { setText(v); onChange(v); setOpen(false); };
+  return (
+    <>
+      <input type="text" placeholder="Search..." value={text} className={className} role="combobox" aria-expanded={open && items.length > 0} aria-autocomplete="list"
+        onChange={(e) => { setText(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)}
+        onKeyDown={(e) => {
+          if (!open || !items.length) return;
+          if (e.key === "ArrowDown") { e.preventDefault(); setHi((h) => Math.min(items.length - 1, h + 1)); }
+          else if (e.key === "ArrowUp") { e.preventDefault(); setHi((h) => Math.max(0, h - 1)); }
+          else if (e.key === "Enter" && hi >= 0) { e.preventDefault(); pick(items[hi].value); }
+          else if (e.key === "Escape") setOpen(false);
+        }} />
+      {open && items.length > 0 && (
+        <ul role="listbox" className="absolute right-0 top-full z-30 mt-1 max-h-72 w-72 max-w-[90vw] overflow-y-auto border border-foreground bg-card shadow-lg">
+          {items.map((it, i) => (
+            <li key={`${it.value}-${it.field}-${i}`} role="option" aria-selected={i === hi}>
+              <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => pick(it.value)}
+                className={`flex w-full items-baseline justify-between gap-2 px-3 py-2 text-left text-xs ${i === hi ? "bg-primary/10" : "hover:bg-primary/5"}`}>
+                <span className="truncate font-medium text-foreground">{it.value}</span>
+                {it.field && <span className="shrink-0 text-[0.625rem] uppercase tracking-[0.06em] text-muted-foreground">{it.field}</span>}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
+  );
+}
+
 interface MasterPageProps {
   title: string;
   fields: FieldDef[];
@@ -215,6 +276,11 @@ interface MasterPageProps {
   /** Rows with an Active / Inactive `status` get Active · Inactive · All tabs above the table, showing Active
    *  first, so inactive records never sit among the live ones unnoticed. */
   statusTabs?: boolean;
+  /**
+   * Server paging: `data` is one page, already searched / filtered / sorted by the server. The page owns the state
+   * (search, status, sort, page) and refetches on `onChange`. `suggest` feeds the search box's suggestion list.
+   */
+  server?: ServerPaging;
   /** Permission flags — when omitted everything is visible (default-open) */
   canCreate?: boolean;
   canEdit?: boolean;
@@ -313,6 +379,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   addButtonLabel = "New Entry",
   addWord = "Add",
   statusTabs = false,
+  server,
 }) => {
   const [data, setData] = useState<RecordWithId[]>(() =>
     seedWithIds(initialData),
@@ -370,6 +437,12 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   const toggleSort = (key: string) => {
+    if (server) {
+      if (server.sortKey !== key) server.onChange({ sortKey: key, sortDir: "asc", page: 1 });
+      else if (server.sortDir === "asc") server.onChange({ sortDir: "desc", page: 1 });
+      else server.onChange({ sortKey: null, sortDir: "asc", page: 1 });
+      return;
+    }
     if (sortKey !== key) { setSortKey(key); setSortDir("asc"); }
     else if (sortDir === "asc") setSortDir("desc");
     else { setSortKey(null); setSortDir("asc"); }
@@ -650,13 +723,27 @@ export const MasterPage: React.FC<MasterPageProps> = ({
 
   const canSave = fields.every((f) => !f.required || isFieldFilled(f, form[f.name]));
 
-  const hasStatus = statusTabs && data.some((row) => typeof row.status === "boolean");
-  const statusCount = {
+  const hasStatus = statusTabs && (server ? !!server.counts : data.some((row) => typeof row.status === "boolean"));
+  const statusCount = server?.counts ?? {
     active: data.filter((row) => row.status === true).length,
     inactive: data.filter((row) => row.status === false).length,
     all: data.length,
   };
-  const filtered = data.filter((row) => {
+  // Client mode suggestions: distinct values in the loaded rows that match what is typed.
+  const localSuggest = React.useCallback(async (q: string) => {
+    const t = q.toLowerCase(), seen = new Set<string>(), out: { value: string; field?: string }[] = [];
+    for (const row of data) for (const col of columns) {
+      const v = row[col.key]; if (v == null || typeof v === "object") continue;
+      const sv = String(v); if (!sv.toLowerCase().includes(t) || seen.has(sv)) continue;
+      seen.add(sv); out.push({ value: sv, field: col.label }); if (out.length >= 10) return out;
+    }
+    return out;
+  }, [data, columns]);
+  const statusNow = server ? server.status : statusView;
+  const setStatusNow = (v: "active" | "inactive" | "all") => (server ? server.onChange({ status: v, page: 1 }) : setStatusView(v));
+  const sortKeyNow = server ? server.sortKey : sortKey;
+  const sortDirNow = server ? server.sortDir : sortDir;
+  const filtered = server ? data : data.filter((row) => {
     if (hasStatus && statusView !== "all" && row.status !== (statusView === "active")) return false;
     if (!search) return true;
     return Object.values(row).some((v) =>
@@ -668,7 +755,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   // numbers/dates (sort numerically) or free text (sort alphabetically);
   // trying Number() first and falling back to localeCompare covers both
   // without per-column configuration.
-  const sorted = !sortKey ? filtered : [...filtered].sort((a, b) => {
+  const sorted = server || !sortKey ? filtered : [...filtered].sort((a, b) => {
     const av = a[sortKey], bv = b[sortKey];
     if (av == null && bv == null) return 0;
     if (av == null) return 1;
@@ -1087,7 +1174,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
               <p className="flex items-baseline gap-2.5">
                 <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">{title} records</span>
-                <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">{filtered.length}</span>
+                <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">{server ? server.total : filtered.length}</span>
               </p>
               {hasStatus && (
                 <div className="inline-flex border border-foreground" role="tablist" aria-label="Show records">
@@ -1095,9 +1182,9 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                     <button
                       key={v}
                       role="tab"
-                      aria-selected={statusView === v}
-                      onClick={() => setStatusView(v)}
-                      className={`${i ? "border-l border-foreground " : ""}px-2.5 py-1 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] transition-colors ${statusView === v ? "bg-foreground text-card" : "text-muted-foreground hover:bg-primary/10 hover:text-foreground"}`}
+                      aria-selected={statusNow === v}
+                      onClick={() => setStatusNow(v)}
+                      className={`${i ? "border-l border-foreground " : ""}px-2.5 py-1 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] transition-colors ${statusNow === v ? "bg-foreground text-card" : "text-muted-foreground hover:bg-primary/10 hover:text-foreground"}`}
                     >
                       {v === "active" ? "Active" : v === "inactive" ? "Inactive" : "All"} <span className="tabular-nums">{statusCount[v]}</span>
                     </button>
@@ -1111,7 +1198,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                 {title} Records
               </h3>
               <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
-                {filtered.length} record{filtered.length !== 1 ? "s" : ""}
+                {server ? server.total : filtered.length} record{(server ? server.total : filtered.length) !== 1 ? "s" : ""}
               </p>
             </div>
             )}
@@ -1132,11 +1219,10 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                   size={13}
                   className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
                 />
-                <input
-                  type="text"
-                  placeholder="Search..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
+                <SearchSuggest
+                  value={server ? server.search : search}
+                  onChange={(v) => (server ? server.onChange({ search: v, page: 1 }) : setSearch(v))}
+                  suggest={server?.suggest ?? localSuggest}
                   className={sx("pl-8 pr-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary w-full sm:w-44", "pl-8 pr-3 h-9 text-xs bg-card border border-foreground/40 focus:border-foreground text-foreground focus:outline-none w-full sm:w-48")}
                 />
               </div>
@@ -1149,7 +1235,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                 <tr className="border-b border-border bg-muted/30">
                   {columns.map((col) => {
                     const canSort = col.sortable !== false;
-                    const active = sortKey === col.key;
+                    const active = sortKeyNow === col.key;
                     return (
                       <th
                         key={col.key}
@@ -1160,9 +1246,9 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                           {col.label}
                           {canSort && (
                             <span className="text-muted-foreground/50">
-                              {active && sortDir === "asc" ? (
+                              {active && sortDirNow === "asc" ? (
                                 <ChevronUp size={11} className={sx("text-primary", "text-foreground")} />
-                              ) : active && sortDir === "desc" ? (
+                              ) : active && sortDirNow === "desc" ? (
                                 <ChevronDown size={11} className={sx("text-primary", "text-foreground")} />
                               ) : (
                                 <ChevronsUpDown size={11} />
@@ -1188,7 +1274,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                       {search
                         ? "No records match your search."
                         : hasStatus && data.length > 0
-                          ? `No ${statusView} records. ${statusView === "active" ? "Inactive" : "Active"} ones are under "${statusView === "active" ? "Inactive" : "Active"}".`
+                          ? `No ${statusNow} records. ${statusNow === "active" ? "Inactive" : "Active"} ones are under "${statusNow === "active" ? "Inactive" : "Active"}".`
                           : "No records yet. Add one above."}
                     </td>
                   </tr>
@@ -1346,6 +1432,28 @@ export const MasterPage: React.FC<MasterPageProps> = ({
               </tbody>
             </table>
           </div>
+          {server && server.total > server.pageSize && (() => {
+            const pages = Math.max(1, Math.ceil(server.total / server.pageSize));
+            const p = Math.min(server.page, pages);
+            const from = (p - 1) * server.pageSize + 1, to = Math.min(server.total, p * server.pageSize);
+            const nums = Array.from(new Set([1, p - 1, p, p + 1, pages])).filter((n) => n >= 1 && n <= pages).sort((a, b) => a - b);
+            const pbtn = (on: boolean) => `min-w-8 h-8 px-2 text-xs tabular-nums border ${on ? "border-foreground bg-foreground text-background" : "border-border hover:border-foreground"} disabled:opacity-40`;
+            return (
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-2.5">
+                <span className="text-xs text-muted-foreground">{server.loading ? "Loading… " : ""}Showing <b className="tabular-nums text-foreground">{from}–{to}</b> of <b className="tabular-nums text-foreground">{server.total}</b></span>
+                <div className="flex items-center gap-1">
+                  <button className={pbtn(false)} disabled={p <= 1} onClick={() => server.onChange({ page: p - 1 })}>‹ Prev</button>
+                  {nums.map((n, i) => (
+                    <React.Fragment key={n}>
+                      {i > 0 && n - nums[i - 1] > 1 && <span className="px-1 text-xs text-muted-foreground">…</span>}
+                      <button className={pbtn(n === p)} onClick={() => server.onChange({ page: n })}>{n}</button>
+                    </React.Fragment>
+                  ))}
+                  <button className={pbtn(false)} disabled={p >= pages} onClick={() => server.onChange({ page: p + 1 })}>Next ›</button>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 

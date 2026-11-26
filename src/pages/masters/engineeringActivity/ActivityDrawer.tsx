@@ -35,7 +35,7 @@ export const ActivityDrawer: React.FC<{ record: DbActivity; groupName?: string; 
     enabled: isActivity,
   });
   const { data: allItems = [] } = useQuery<DbItem[]>({ queryKey: ["items-for-activity-link"], queryFn: getItems, enabled: addOpen });
-  const unlinked = allItems.filter((i) => !linked.some((li) => li.itemId === i.M_Id));
+  const unlinked = allItems.filter((i) => i.M_IsActive !== false && !linked.some((li) => li.itemId === i.M_Id));
   const q = search.trim().toLowerCase();
   const offered = q ? unlinked.filter((i) => i.M_Name.toLowerCase().includes(q) || String(i.M_code ?? "").toLowerCase().includes(q)) : unlinked;
 

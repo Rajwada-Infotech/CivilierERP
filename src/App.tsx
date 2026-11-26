@@ -145,7 +145,12 @@ const LandReportsPage = lazy(() => import("./pages/legal/land/LandReportsPage"))
 const LandDetailsPage = lazy(() => import("./pages/legal/land/LandDetailsPage"));
 const LandDeedProcessPage = lazy(() => import("./pages/legal/land/LandDeedProcessPage"));
 const LandPostRegistrationPage = lazy(() => import("./pages/legal/land/LandPostRegistrationPage"));
+const LegalVerificationListPage = lazy(() => import("./pages/legal/land/LegalVerificationListPage"));
+const LegalVerificationWorkspacePage = lazy(() => import("./pages/legal/land/LegalVerificationWorkspacePage"));
+const LegalMyTasksPage = lazy(() => import("./pages/legal/land/LegalMyTasksPage"));
+const LegalVerificationReportsPage = lazy(() => import("./pages/legal/land/LegalVerificationReportsPage"));
 const LandClearancePage = lazy(() => import("./pages/legal/land/LandClearancePage"));
+const LegalFlowChartPage = lazy(() => import("./pages/legal/land/LegalFlowChartPage"));
 const LandProfilePage = lazy(() => import("./pages/legal/land/LandProfilePage"));
 const LandSalesPage = lazy(() => import("./pages/legal/land/LandSalesPage"));
 const LandProjectMapPage = lazy(() => import("./pages/legal/land/LandProjectMapPage"));
@@ -172,6 +177,12 @@ const MaintenanceDirectory = lazy(() => import("./pages/maintenance/MaintenanceD
 const CustomerMaintenanceProfile = lazy(() => import("./pages/maintenance/CustomerMaintenanceProfile"));
 const MaintenanceBills = lazy(() => import("./pages/maintenance/MaintenanceBills"));
 const SecurityAttendance = lazy(() => import("./pages/maintenance/SecurityAttendance"));
+const SecurityGates = lazy(() => import("./pages/maintenance/security/SecurityGates"));
+const SecurityGuards = lazy(() => import("./pages/maintenance/security/SecurityGuards"));
+const SecurityResidents = lazy(() => import("./pages/maintenance/security/SecurityResidents"));
+const SecurityLive = lazy(() => import("./pages/maintenance/security/SecurityLive"));
+const SecurityAds = lazy(() => import("./pages/maintenance/security/SecurityAds"));
+const SecurityGeofences = lazy(() => import("./pages/maintenance/security/SecurityGeofences"));
 const ElectricityMaintenance = lazy(() => import("./pages/maintenance/ElectricityMaintenance"));
 const MaintenanceServiceRequests = lazy(() => import("./pages/maintenance/MaintenanceServiceRequests"));
 const KeyCustodian = lazy(() => import("./pages/maintenance/KeyCustodian"));
@@ -838,7 +849,7 @@ function AppRoutes() {
 
       {/* MAIN */}
       <Route
-        path="/home/:userId?"
+        path="/home/:userName?"
         element={
           currentUser?.role === "supplier"
             ? <Navigate to="/supplier" replace />
@@ -1125,6 +1136,10 @@ function AppRoutes() {
       {/* Company Land Record Management System: Central Land Register and complete Land Details profile */}
       <Route path="/legal/land/enquiries" element={<ProtectedRoute pageKey="legal-land-enquiry"><LandEnquiryPage /></ProtectedRoute>} />
       <Route path="/legal/land/deed-search" element={<ProtectedRoute pageKey="legal-land-enquiry"><LandDeedSearchPage /></ProtectedRoute>} />
+      <Route path="/legal/land/verification" element={<ProtectedRoute pageKey="legal-land-enquiry"><LegalVerificationListPage /></ProtectedRoute>} />
+      <Route path="/legal/land/verification/:id" element={<ProtectedRoute pageKey="legal-land-enquiry"><LegalVerificationWorkspacePage /></ProtectedRoute>} />
+      <Route path="/legal/my-tasks" element={<ProtectedRoute pageKey="legal-land-enquiry"><LegalMyTasksPage /></ProtectedRoute>} />
+      <Route path="/legal/verification/reports" element={<ProtectedRoute pageKey="legal-land-enquiry"><LegalVerificationReportsPage /></ProtectedRoute>} />
       <Route path="/legal/land/properties" element={<ProtectedRoute pageKey="legal-land-master"><LandPropertyListPage /></ProtectedRoute>} />
       <Route path="/legal/land/properties/:id" element={<ProtectedRoute pageKey="legal-land-master"><LandProfilePage /></ProtectedRoute>} />
       <Route path="/legal/land/properties/:id/profile" element={<ProtectedRoute pageKey="legal-land-master"><LandProfilePage /></ProtectedRoute>} />
@@ -1132,6 +1147,8 @@ function AppRoutes() {
       <Route path="/legal/land/properties/:id/final-verify" element={<ProtectedRoute pageKey="legal-land-master"><LandDetailsPage verify /></ProtectedRoute>} />
       <Route path="/legal/land/deed-process" element={<ProtectedRoute pageKey="legal-land-master"><LandDeedProcessPage /></ProtectedRoute>} />
       <Route path="/legal/land/la-ulc" element={<ProtectedRoute pageKey="legal-land-master"><LandClearancePage /></ProtectedRoute>} />
+      <Route path="/legal/flow-chart" element={<ProtectedRoute pageKey="legal-land-master"><LegalFlowChartPage /></ProtectedRoute>} />
+      <Route path="/legal/versions" element={<ProtectedRoute pageKey="legal-land-master"><LegalFlowChartPage /></ProtectedRoute>} />
       <Route path="/legal/land/post-registration" element={<ProtectedRoute pageKey="legal-land-master"><LandPostRegistrationPage /></ProtectedRoute>} />
       <Route path="/legal/land/post-registration/:id" element={<ProtectedRoute pageKey="legal-land-master"><LandDetailsPage from="post-registration" /></ProtectedRoute>} />
       <Route path="/legal/land/deed-process/:id" element={<ProtectedRoute pageKey="legal-land-master"><LandDetailsPage from="deed-process" /></ProtectedRoute>} />
@@ -1351,6 +1368,54 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="maintenance-security-attendance">
             <SecurityAttendance />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/maintenance/security-gates"
+        element={
+          <ProtectedRoute pageKey="security-gates">
+            <SecurityGates />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/maintenance/security-guards"
+        element={
+          <ProtectedRoute pageKey="security-guards">
+            <SecurityGuards />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/maintenance/residents"
+        element={
+          <ProtectedRoute pageKey="security-residents">
+            <SecurityResidents />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/maintenance/ads"
+        element={
+          <SuperAdminRoute>
+            <SecurityAds />
+          </SuperAdminRoute>
+        }
+      />
+      <Route
+        path="/maintenance/security-live"
+        element={
+          <ProtectedRoute pageKey="security-live">
+            <SecurityLive />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/maintenance/geofences"
+        element={
+          <ProtectedRoute pageKey="security-geofences">
+            <SecurityGeofences />
           </ProtectedRoute>
         }
       />

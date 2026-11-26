@@ -5,9 +5,11 @@ import { useReturnAfterView } from "@/hooks/useReturnAfterView";
 import React, { useEffect, useState, useMemo, useRef } from "react";
 import { printGrn, downloadGrnPdf } from "@/utils/grnDocument";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { getMRProjects } from "@/api/materialRequestApi";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { usePageRights } from "@/hooks/usePageRights";
+import { useAmendMode } from "@/components/amendment/useAmendMode";
 import { exportToCsv, parseCsv } from "@/lib/export";
 import { computeRemainingPOItems, hasRemainingItems, countRemainingItems, buildGRNLineItemsFromRemaining, type RemainingPOItem } from "../grnRemainingItems";
 import { createQualityDebitNote } from "@/api/qualityRejectionDebitNoteApi";
@@ -55,6 +57,19 @@ export function useGRN() {
   const importFileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  // Approved GRNs aren't edited: Amend opens the form and saving raises an amendment for approval instead.
+  const amend = useAmendMode("grn", "GRN", {
+    onRaised: () => {
+      setFormData(buildEmptyForm());
+      setEditingId(null);
+      setShowForm(false);
+      setErrors({});
+    },
+  });
+  useEffect(() => {
+    if (editingId == null) amend.stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingId]);
   const [showForm, setShowForm] = useState(false);
   const [viewingGrn, setViewingGrn] = useState<any | null>(null);
   const [viewModalTab, setViewModalTab] = useState<"details" | "posting">(
@@ -224,13 +239,17 @@ export function useGRN() {
   const [formData, setFormData] = useState(buildEmptyForm());
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  // Register project filter + the projects list for it (same list Material Request uses).
+  const [grnProjectFilter, setGrnProjectFilter] = useState("");
+  const { data: registerProjects = [] } = useQuery({ queryKey: ["mr-projects"], queryFn: getMRProjects, staleTime: 5 * 60_000 });
+
   // ── Queries ──────────────────────────────────────────────────────────────────
   const {
     data: grnsPage,
     isLoading: loadingGrns,
     isFetching: fetchingGrns,
   } = useQuery({
-    queryKey: ["grns", page, limit, selectedFinYear, debouncedSearch, grnStatusFilter],
+    queryKey: ["grns", page, limit, selectedFinYear, debouncedSearch, grnStatusFilter, grnProjectFilter],
     queryFn: () =>
       grnApi.getGRNs({
         page,
@@ -239,6 +258,7 @@ export function useGRN() {
         // Searched and filtered on the server, over every GRN (the page only had the rows it loaded).
         ...(debouncedSearch ? { search: debouncedSearch } : {}),
         ...(grnStatusFilter !== "All" ? { status: grnStatusFilter } : {}),
+        ...(grnProjectFilter ? { projectId: grnProjectFilter } : {}),
       }),
     placeholderData: (prev) => prev,
   });
@@ -368,20 +388,11 @@ export function useGRN() {
   // GRNs, older records) fall into one "No PO Linked" bucket. Group order
   // follows first-appearance in the (already recency-sorted) page.
   const groupedGrns = useMemo(() => {
-    const groups = new Map<
-      string,
-      { key: string; poNumber: string | null; supplierName: string | null; rows: any[] }
-    >();
+    // Grouped by project, like the Material Request register; order follows the (newest-first) page.
+    const groups = new Map<string, { key: string; projectName: string | null; rows: any[] }>();
     for (const grn of filteredGrns) {
-      const key = grn.POID ? `po-${grn.POID}` : "no-po";
-      if (!groups.has(key)) {
-        groups.set(key, {
-          key,
-          poNumber: grn.PONumber || null,
-          supplierName: grn.SupplierName || null,
-          rows: [],
-        });
-      }
+      const key = grn.ProjectName || "no-project";
+      if (!groups.has(key)) groups.set(key, { key, projectName: grn.ProjectName || null, rows: [] });
       groups.get(key)!.rows.push(grn);
     }
     return Array.from(groups.values());
@@ -781,7 +792,7 @@ export function useGRN() {
     return Object.keys(errs).length === 0;
   };
 
-  const onSubmit = () => {
+  const onSubmit = async () => {
     if (!validate()) {
       toast.error("Please fix the errors");
       return;
@@ -817,6 +828,7 @@ export function useGRN() {
       projectId: formData.projectId ? Number(formData.projectId) : null,
       godownId: formData.godownId ? Number(formData.godownId) : null,
     };
+    if (editingId && (await amend.intercept(editingId, payload))) return;
     if (editingId) updateMutation.mutate(payload);
     else createMutation.mutate(payload);
   };
@@ -988,7 +1000,13 @@ export function useGRN() {
   // Opened from the Material dashboard: back to that list once the record is closed.
   useReturnAfterView(!!viewingGrn || showForm);
 
+  bridge.onAmend = async (grn: any) => {
+    await bridge.onEdit(grn);
+    amend.start(grn.GRNID);
+  };
+
   return {
+    amend,
     rights,
     today,
     navigate,
@@ -1068,6 +1086,9 @@ export function useGRN() {
     grnApprovalTrails,
     grnApprovalTrailsLoading,
     collapsedGrnGroups,
+    grnProjectFilter,
+    setGrnProjectFilter,
+    registerProjects,
     setCollapsedGrnGroups,
     toggleGrnGroup,
     grandTotal,

@@ -2,9 +2,8 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
-const { transition, guardEditAnyStage, restartApprovalCycle, getRecordStatus } = require("../services/approvalService");
+const { transition, restartApprovalCycle, getRecordStatus } = require("../services/approvalService");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
-const { resolveAllowPostApproval } = require("../middleware/permissions");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { validateBody } = require("../middleware/validateRequest");
@@ -618,7 +617,8 @@ router.get("/", cache("grns", 300), async (req, res) => {
       .input("finYear", sql.NVarChar(20), finYearFilter)
       .input("companyId", sql.Int, companyId)
       .input("search", sql.NVarChar(220), search)
-      .input("status", sql.NVarChar(30), status).query(`
+      .input("status", sql.NVarChar(30), status)
+      .input("projectId", sql.Int, parseInt(req.query.projectId, 10) || null).query(`
       SELECT
         grn.GRNID,
         grn.GRNNo,
@@ -692,6 +692,7 @@ router.get("/", cache("grns", 300), async (req, res) => {
       ))
         AND (@companyId IS NULL OR p.CompanyId = @companyId)${projectPredicate(req.projectScope, "p.ProjectId")}
         AND (@status IS NULL OR grn.Status = @status)
+        AND (@projectId IS NULL OR p.ProjectId = @projectId)
         AND (@search IS NULL OR grn.DocNo LIKE @search OR grn.GRNNo LIKE @search OR p.PurchaseOrderNo LIKE @search
           OR p.DocNo LIKE @search OR s.LHeadName LIKE @search OR grn.SourceTransferDocNo LIKE @search OR p.SourceMRDocNo LIKE @search)
       ORDER BY grn.GRNID DESC
@@ -1082,7 +1083,6 @@ async function createGRNInternal(pool, body, userEmail) {
       // left over from toggling the form back to Gate mode.
       directEntryReason = null,
       grnItems,
-      status,
       remarks,
       docTypeId: clientDocTypeId,
       finYear,
@@ -1237,7 +1237,9 @@ async function createGRNInternal(pool, body, userEmail) {
           sql.NVarChar(sql.MAX),
           JSON.stringify(grnItems || []),
         )
-        .input("Status", sql.NVarChar(50), status || "Draft")
+        // Always Draft: the auto-submit below makes it Pending. A status sent by the client is never trusted —
+        // only the approval engine (transition()) approves a GRN and posts its stock.
+        .input("Status", sql.NVarChar(50), "Draft")
         .input("Remarks", sql.NVarChar(sql.MAX), remarks || null)
         .input("DocTypeId", sql.Int, resolvedDocTypeId || null)
         .input("DocNo", sql.NVarChar(100), finalDocNo)
@@ -1361,8 +1363,10 @@ router.post("/", requirePageRight("grn-master", "create"), validateBody(grnBodyS
   try {
     const userEmail = req.user?.email || req.user?.name || null;
     const pool = getPool();
-    if (req.projectScope && req.body?.POID && !projectAllowed(req.projectScope, await poProjectOf(parseInt(req.body.POID, 10)))) {
-      return res.status(403).json({ error: "You don't have access to this project." });
+    // A GRN's project is its PO's: a project-restricted user must raise it against a PO of their projects
+    // (a GRN without a PO has no project and would be hidden from them once saved).
+    if (req.projectScope && (!req.body?.POID || !projectAllowed(req.projectScope, await poProjectOf(parseInt(req.body.POID, 10))))) {
+      return res.status(403).json({ error: req.body?.POID ? "You don't have access to this project." : "Select a Purchase Order of your project." });
     }
     const { GRNID: grnId, DocNo: docNo } = await createGRNInternal(pool, req.body, userEmail);
     const grnNo = docNo;
@@ -1413,12 +1417,10 @@ router.put(
     let beforeSnapshot = null;
     try {
       const currentStatus = await getRecordStatus("goods-receipt", req.params.id);
-      const allowPostApproval = await resolveAllowPostApproval(
-        req,
-        "grn-master",
-      );
-      // Pending is editable and stays Pending; Approved (with the post-approval right) goes back for approval.
-      await guardEditAnyStage("goods-receipt", req.params.id, { allowPostApproval });
+      // Only a Draft, Pending or Rejected GRN is edited. Once approved it changes only through Amend (an approved
+      // amendment request, services/docAmendment.js, which re-posts its stock and ledger entry), for every role.
+      if (currentStatus && !["Draft", "Pending", "Rejected"].includes(currentStatus))
+        return res.status(409).json({ error: `This GRN is ${currentStatus}, so it can't be edited. Use Amend to change it.` });
 
       // Chain guard: an Expense Booking already raised against this GRN
       // (directly, or as one of a multi-GRN combined invoice) must be
@@ -1464,7 +1466,15 @@ router.put(
     // Status='Approved' GRNs). Mirrors journalVoucher.js's wasApproved
     // handling.
     // The form always sends "Draft", so a Pending GRN is held at Pending too.
-    const effectiveStatus = wasApproved || wasPending ? "Pending" : status || "Draft";
+    // A save can only leave the GRN Draft, Pending or Rejected (Rejected is re-submitted below). Approved is reached
+    // only through transition() — or an approved amendment, which sets it itself — never from a status in the body.
+    const effectiveStatus = wasApproved || wasPending
+      ? "Pending"
+      : wasRejected
+        ? "Rejected"
+        : status === "Pending"
+          ? "Pending"
+          : "Draft";
 
     // Reject future dates
     const todayStr = new Date().toISOString().slice(0, 10);
@@ -1476,6 +1486,11 @@ router.put(
     }
 
     const pool = getPool();
+
+    // Project access: re-linking may not move the GRN to a PO outside the user's projects (or to no PO).
+    if (req.projectScope && (!poId || !projectAllowed(req.projectScope, await poProjectOf(parseInt(poId, 10))))) {
+      return res.status(403).json({ error: poId ? "You don't have access to this project." : "Select a Purchase Order of your project." });
+    }
 
     // ── Guard: a GRN can only be linked to an Approved PO ──────────────────────
     if (poId) {
@@ -2641,7 +2656,7 @@ router.post(
         SELECT
           st.TransferID, st.DocNo, st.TransferDate,
           st.FromGodownID, fg.GodownName AS FromGodownName,
-          st.ToGodownID,   tg.GodownName AS ToGodownName,
+          st.ToGodownID,   tg.GodownName AS ToGodownName, tg.ProjectID AS ToProjectId,
           st.TransferItems, st.Status
         FROM dbo.StockTransfers st
         JOIN dbo.Godowns fg ON fg.GodownID = st.FromGodownID
@@ -2654,6 +2669,11 @@ router.post(
       }
 
       transfer = trResult.recordset[0];
+
+      // Project access: the receiving godown's project must be one of the user's.
+      if (req.projectScope && !projectAllowed(req.projectScope, transfer.ToProjectId)) {
+        return res.status(403).json({ error: "You don't have access to this project." });
+      }
 
       // Parse TransferItems JSON
       if (

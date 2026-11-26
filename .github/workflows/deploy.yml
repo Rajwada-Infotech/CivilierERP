@@ -95,6 +95,12 @@ jobs:
             echo "Restarting stack..."
             docker compose up -d redis backend nginx
 
+            # Every build leaves cache and the replaced image behind; unpruned they reached ~100 GB and filled the
+            # host's C: drive, which turned the WSL disk read-only (21 Nov 2026). Keep 2 days of cache for fast builds.
+            echo "Pruning old build cache and unused images..."
+            docker builder prune -af --filter "until=48h" || true
+            docker image prune -f || true
+
             echo "Waiting for backend health..."
             for attempt in $(seq 1 30); do
               if curl -fsS http://localhost/health/live >/dev/null 2>&1; then

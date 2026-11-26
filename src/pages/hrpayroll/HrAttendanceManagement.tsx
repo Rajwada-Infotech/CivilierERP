@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import {
   getHrFilterOptions, getHrPunchPhoto, getHrRecord, getHrRecords, getHrSummary, getNotMarked,
   hrAddBreak, hrDeleteBreak, hrDeleteRecord, hrUpdateBreak, hrUpdateRecord,
-  type AttendanceMovement, type AttendanceRecord, type HrFilters,
+  type AttendanceMovement, type AttendanceRecord, type HrFilters, type LocationPointAudit,
 } from "@/api/employeeAttendanceApi";
 import { getWorkLocations } from "@/api/workLocationMasterApi";
 import { fmtDateIst, fmtDateTimeIst, fmtDuration, fmtTimeIst, fromIstInput, toIstInput, todayIstDate } from "@/lib/attendanceFormat";
@@ -128,21 +128,24 @@ function PunchEvidence({ rec }: { rec: AttendanceRecord }) {
 
 // Trips outside the employee's own work locations and visits to other offices, from the app's location (every 100 m move).
 function MovementLog({ items }: { items: AttendanceMovement[] }) {
-  if (!items.length) return null;
   return (
     <div className="bg-card p-4" style={{ border: HR_RULE }}>
       <p className={`${HR_HEAD} mb-3`}>Movement while on duty <span className="text-xs text-muted-foreground font-normal normal-case tracking-normal">— from the app's location</span></p>
+      {!items.length && <p className="text-sm text-muted-foreground">No movement recorded yet. Trips outside the office, visits to other offices and location-off times appear here when the employee uses the Employee Portal App 1.1.0 or newer.</p>}
+      {items.length > 0 && (
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead><tr className={`${HR_LBL} text-left`}><th className="py-1.5 pr-3">What</th><th className="py-1.5 pr-3">From</th><th className="py-1.5 pr-3">To</th><th className="py-1.5 pr-3">Time</th><th className="py-1.5">Reason</th></tr></thead>
           <tbody>
             {items.map((m) => (
-              <tr key={m.movementId} className={`border-t border-foreground/10 align-top ${m.alert ? "bg-amber-500/10" : ""}`}>
-                <td className="py-2 pr-3">{m.kind === "LocationOff" ? <span className="text-destructive font-semibold">Location turned off</span> : m.kind === "Visit" ? <span><b>{m.locationName ?? "Other office"}</b> <span className="text-xs text-muted-foreground">visit</span></span> : <span className="text-amber-700 dark:text-amber-400 font-semibold">Outside office</span>}</td>
+              <tr key={m.movementId} className={`border-t border-foreground/10 align-top ${m.alert ? "bg-amber-500/10" : ""} ${m.autoDismissed ? "opacity-60" : ""}`}>
+                <td className="py-2 pr-3">{m.kind === "LocationOff" ? <span className="text-destructive font-semibold">Location turned off</span> : m.kind === "Visit" ? <span><b>{m.locationName ?? "Other office"}</b> <span className="text-xs text-muted-foreground">visit</span></span> : <span className="text-amber-700 dark:text-amber-400 font-semibold">Outside office</span>}
+                  {m.confirmNote && <span className="block max-w-[22rem] text-[0.6875rem] font-normal text-muted-foreground">Confirmed: {m.confirmNote}</span>}</td>
                 <td className="py-2 pr-3 tabular-nums">{fmtTimeIst(m.start)}</td>
                 <td className="py-2 pr-3 tabular-nums">{m.end ? fmtTimeIst(m.end) : <span className="text-muted-foreground">{m.kind === "LocationOff" ? "still off" : "still there"}</span>}</td>
                 <td className="py-2 pr-3 tabular-nums">{m.seconds != null ? fmtDuration(m.seconds) : "—"}</td>
-                <td className="py-2">{m.kind === "Visit" ? <span className="text-muted-foreground">Office visit</span>
+                <td className="py-2">{m.autoDismissed ? <span className="text-muted-foreground">Ignored — {m.dismissNote ?? "GPS drift"}</span>
+                  : m.kind === "Visit" ? <span className="text-muted-foreground">Office visit</span>
                   : m.reason ?? (m.hasVisit ? <span className="text-muted-foreground">Went to another office</span>
                   : m.skipped ? <span className="text-destructive font-semibold">Skipped — no reason given</span>
                   : m.end || m.kind === "LocationOff" ? <span className="text-destructive">Reason not given yet</span> : "—")}</td>
@@ -151,6 +154,41 @@ function MovementLog({ items }: { items: AttendanceMovement[] }) {
           </tbody>
         </table>
       </div>
+      )}
+    </div>
+  );
+}
+
+const POINT_TONE: Record<string, string> = { Inside: "text-emerald-700 dark:text-emerald-400", Outside: "text-amber-700 dark:text-amber-400", Office: "text-sky-700 dark:text-sky-400",
+  Uncertain: "text-muted-foreground", LowAccuracy: "text-destructive", Jump: "text-destructive", Ignored: "text-muted-foreground" };
+/** Every GPS point of the day with its accuracy, distance and how it was judged (why a trip was or was not confirmed). */
+function LocationPointsLog({ points }: { points: LocationPointAudit[] }) {
+  const [open, setOpen] = useState(false);
+  if (!points.length) return null;
+  const counts = points.reduce<Record<string, number>>((m, p) => ({ ...m, [p.result]: (m[p.result] ?? 0) + 1 }), {});
+  return (
+    <div className="mt-4">
+      <button className={`${HR_HEAD} underline underline-offset-2`} onClick={() => setOpen((x) => !x)}>
+        {open ? "Hide" : "Show"} location points ({points.length})
+      </button>
+      <span className="ml-2 text-xs text-muted-foreground">{Object.entries(counts).map(([k, n]) => `${k} ${n}`).join(" · ")}</span>
+      {open && (
+        <div className="mt-2 max-h-80 overflow-auto">
+          <table className="w-full text-xs">
+            <thead><tr className={`${HR_LBL} text-left`}><th className="py-1 pr-3">Time</th><th className="py-1 pr-3">Result</th><th className="py-1 pr-3">Accuracy</th><th className="py-1 pr-3">Distance / radius</th><th className="py-1 pr-3">Note</th><th className="py-1">Map</th></tr></thead>
+            <tbody>{points.map((p) => (
+              <tr key={p.pointId} className="border-t border-foreground/10 align-top">
+                <td className="py-1 pr-3 tabular-nums">{fmtTimeIst(p.at)}</td>
+                <td className={`py-1 pr-3 font-semibold ${POINT_TONE[p.result] ?? ""}`}>{p.result}</td>
+                <td className="py-1 pr-3 tabular-nums">{p.accuracyM != null ? `±${Math.round(p.accuracyM)} m` : "—"}</td>
+                <td className="py-1 pr-3 tabular-nums">{p.distanceM != null ? `${Math.round(p.distanceM)} m` : "—"}{p.radiusM != null ? ` / ${p.radiusM} m` : ""}{p.locationName ? ` · ${p.locationName}` : ""}</td>
+                <td className="py-1 pr-3">{p.note ?? ""}</td>
+                <td className="py-1"><a className="underline" href={`https://www.google.com/maps?q=${p.lat},${p.lng}`} target="_blank" rel="noreferrer">open</a></td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -249,6 +287,7 @@ function RecordDialog({ id, canEdit, onClose }: { id: number; canEdit: boolean; 
             <PunchEvidence rec={rec} />
 
             <MovementLog items={data?.movements ?? []} />
+            <LocationPointsLog points={data?.points ?? []} />
 
             {canEdit && (
               <div className="bg-card p-4 space-y-3" style={{ border: HR_RULE }}>

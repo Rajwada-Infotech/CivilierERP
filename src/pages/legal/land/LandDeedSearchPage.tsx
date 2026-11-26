@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { DueBadge, dueRow, dueLevel, DUE_BG } from "@/components/legal/DueBadge";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Pager } from "@/components/legal/usePaged";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { SearchStatus } from "iconsax-react";
@@ -10,8 +12,8 @@ import { useProjectScope } from "@/components/legal/ProjectPicker";
 import { askLegal } from "@/components/legal/LegalAsk";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
-  getSearchOptions, findEnquiries, getEnquirySearches, setOfficeOf, addYearResult, editYearResult, deleteYearResult, addYearRange,
-  completeOffice, reopenOffice, addOffice, daysCounter,
+  getSearchOptions, findEnquiries, findEnquiriesPage, getEnquirySearches, setOfficeOf, addYearResult, editYearResult, deleteYearResult, addYearRange,
+  completeOffice, reopenOffice, addOffice, daysCounter, setOfficeFromYear, type YearStatus,
   type EnquiryHit, type OfficeSearch, type YearResult, type YearBody, type SearchOptions,
 } from "@/api/legalEnquirySearchApi";
 
@@ -49,23 +51,27 @@ export default function LandDeedSearchPage() {
   const asked = new URLSearchParams(window.location.search).get("view") as View | null;
   const [tab, setTab] = useState<View>(asked && VIEWS.includes(asked) ? asked : start ? "all" : "pending");
 
-  const { data: all = [], isFetching, error } = useQuery({
-    queryKey: ["legal-enq-find", projectId, "", "all"],
-    queryFn: () => findEnquiries(projectId!, "", "all"),
-    enabled: !!projectId,
+  // One page (20) from the server, for the open view and what is typed; the view counts come as page totals.
+  const [term, setTerm] = useState(q.trim());
+  useEffect(() => { const t = setTimeout(() => setTerm(q.trim()), 300); return () => clearTimeout(t); }, [q]);
+  const [page, setPage] = useState(1);
+  useEffect(() => { setPage(1); }, [term, tab, projectId]);
+  const { data: pageData, isFetching, error } = useQuery({
+    queryKey: ["legal-enq-find", projectId, term, tab, page],
+    queryFn: () => findEnquiriesPage(projectId!, term, page, tab === "all" ? undefined : tab),
+    enabled: !!projectId, placeholderData: keepPreviousData,
   });
+  const countOf = (kind?: string) => ({
+    queryKey: ["legal-enq-find", projectId, "", kind ?? "all", "count"], queryFn: () => findEnquiriesPage(projectId!, "", 1, kind, 1), enabled: !!projectId,
+  });
+  const pendingN = useQuery(countOf("pending")).data?.total ?? 0;
+  const overdueN = useQuery(countOf("overdue")).data?.total ?? 0;
+  const doneN = useQuery(countOf("done")).data?.total ?? 0;
+  const allN = useQuery(countOf()).data?.total ?? 0;
   const isDone = (h: EnquiryHit) => !!h.LandId || h.EnquiryStatus === "Rejected" || h.OfficesDone >= h.OfficesTotal;
-  const pendingN = all.filter((h) => !isDone(h)).length;
-  const overdueN = all.filter((h) => !isDone(h) && h.DaysOver > 0).length;
-  // Filter on the client: instant while typing (enquiry no, Land ID, location, RS / LR Dag or Khatian).
-  const term = q.trim().toLowerCase();
-  const list = all
-    .filter((h) => (tab === "pending" ? !isDone(h) : tab === "overdue" ? !isDone(h) && h.DaysOver > 0
-      : tab === "ontime" ? !isDone(h) && !h.DaysOver : tab === "done" ? isDone(h) : true))
-    .filter((h) => !term || [h.EnquiryNo, h.LandCode, h.LandLocation, h.RsDagNo, h.LrDagNo, h.RsKhatianNo, h.LrKhatianNo, h.MouzaName]
-      .some((v) => String(v ?? "").toLowerCase().includes(term)));
-  const current = all.find((h) => h.EnquiryId === pickedId) ?? null;
-  const doneN = all.filter(isDone).length;
+  const list = pageData?.items ?? [];
+  const all = list; // the enquiries on this page
+  const current = list.find((h) => h.EnquiryId === pickedId) ?? null;
 
   // Link values (?project, ?q, ?view, ?office from the dashboard / Land Enquiries) are used once; any choice made here
   // drops them from the address so a refresh or the next pick does not bring them back.
@@ -112,7 +118,7 @@ export default function LandDeedSearchPage() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Legal", "Land Management", "Deed Registry Search"]} />
-      <LegalShell title="Deed Registry Search" subtitle="Each enquiry gets a timeline per registration office when it is saved. Pick an enquiry, then search each office year by year; what you find is stored on the enquiry." icon={SearchStatus}>
+      <LegalShell stage="search" title="Deed Registry Search" subtitle="Each enquiry gets a timeline per registration office when it is saved. Pick an enquiry, then search each office year by year; what you find is stored on the enquiry." icon={SearchStatus}>
         <div className="mb-4 flex flex-wrap items-center gap-3 border border-border bg-card px-4 py-3">
           <form className="flex min-w-[18rem] flex-1 items-center gap-2" onSubmit={(e) => { e.preventDefault(); findEverywhere(); }}>
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Enquiry no, Land ID, RS / LR Dag or Khatian, mouza — filters this list; Search looks in all projects"
@@ -126,9 +132,9 @@ export default function LandDeedSearchPage() {
             {/* ── Queue ── */}
             <aside className="legal-queue border border-border bg-card">
               <div className="space-y-2 border-b border-border p-3">
-                {term && <p className="text-xs text-muted-foreground">Filtered by “{q.trim()}” · {list.length} shown</p>}
+                {term && <p className="text-xs text-muted-foreground">Filtered by “{q.trim()}” · {pageData?.total ?? 0} found</p>}
                 <div className="grid grid-cols-3 border border-border text-[0.6875rem] font-semibold uppercase tracking-wider">
-                  {([["pending", `Pending ${pendingN}`], ["done", `Completed ${doneN}`], ["all", `All ${all.length}`]] as const).map(([k, l]) => (
+                  {([["pending", `Pending ${pendingN}`], ["done", `Completed ${doneN}`], ["all", `All ${allN}`]] as const).map(([k, l]) => (
                     <button key={k} onClick={() => setTab(k)}
                       className={`px-2 py-1.5 ${tab === k ? "bg-foreground text-card" : k === "pending" && pendingN ? "bg-amber-500/15 text-amber-700" : "hover:bg-muted"}`}>{l}</button>
                   ))}
@@ -167,6 +173,7 @@ export default function LandDeedSearchPage() {
                 })}
                 {!list.length && <li className="p-4 text-center text-xs text-muted-foreground">{isFetching ? "Loading…" : tab === "pending" ? "Nothing pending in this project" : tab === "overdue" ? "Nothing overdue in this project" : "No enquiry matches"}</li>}
               </ul>
+              <div className="px-3 pb-3"><Pager page={page} pageSize={pageData?.pageSize ?? 20} total={pageData?.total ?? 0} loading={isFetching} onPage={setPage} /></div>
             </aside>
 
             {/* ── Work area ── */}
@@ -259,7 +266,7 @@ function OfficePanel({ o, years, opts, enquiry, canEdit, onChanged }: {
   const editable = canEdit && !done;
   const [officeName, setOfficeName] = useState(o.OfficeName ?? "");
   const [year, setYear] = useState<number | null>(null);
-  const [range, setRange] = useState<{ from: string; to: string; site: string } | null>(null);
+  const [range, setRange] = useState<{ from: string; to: string; site: string; status: "Not Found" | "Not Applicable" | "Under Review" } | null>(null);
   const byYear = useMemo(() => new Map(years.map((y) => [y.CalendarYear, y])), [years]);
   const first = o.FromYear || 1956;
   const allYears = useMemo(() => Array.from({ length: thisYear - first + 1 }, (_, i) => thisYear - i), [first]);
@@ -286,8 +293,13 @@ function OfficePanel({ o, years, opts, enquiry, canEdit, onChanged }: {
       onChanged();
     } catch (e) { toast.error(e instanceof Error ? e.message : "Could not set the office"); }
   };
+  const inRange = years.filter((y) => y.CalendarYear >= first && y.CalendarYear <= thisYear);
+  const finalN = inRange.filter((y) => ["Found", "Not Found", "Not Applicable"].includes(y.Status)).length;
+  const reviewN = inRange.filter((y) => y.Status === "Under Review" || y.Status === "Requested").length;
+  const pendingN = allYears.length - finalN - reviewN;
   const complete = async () => {
-    const left = allYears.length - years.length;
+    if (pendingN || reviewN) { toast.error(`${pendingN ? `${pendingN} year${pendingN > 1 ? "s" : ""} not searched` : ""}${pendingN && reviewN ? " and " : ""}${reviewN ? `${reviewN} under review` : ""} — every year needs Found, Not Found or Not Applicable first`); return; }
+    const left = 0;
     const remarks = await askLegal({
       title: `Complete the ${o.OfficeType} search?`,
       message: `${years.length} of ${allYears.length} years recorded (${found.length} deed${found.length === 1 ? "" : "s"} found)${left ? `; ${left} not recorded` : ""}. This stops the ${o.OfficeType} timeline.`,
@@ -298,12 +310,21 @@ function OfficePanel({ o, years, opts, enquiry, canEdit, onChanged }: {
     catch (e) { toast.error(e instanceof Error ? e.message : "Could not complete"); }
   };
   const reopen = async () => {
-    try { toast.success((await reopenOffice(o.OfficeSearchId)).message); onChanged(); } catch (e) { toast.error(e instanceof Error ? e.message : "Could not reopen"); }
+    const reason = await askLegal({ title: `Reopen the ${o.OfficeType} search?`, message: "Use this when it was marked complete by mistake or a year must be corrected.", input: { label: "Reason", required: true }, confirmText: "Reopen" });
+    if (!reason) return;
+    try { toast.success((await reopenOffice(o.OfficeSearchId, reason)).message); onChanged(); } catch (e) { toast.error(e instanceof Error ? e.message : "Could not reopen"); }
+  };
+  const earlier = async () => {
+    const y = await askLegal({ title: `Search ${o.OfficeType} before ${first}?`, message: "Records before the usual start year are needed. Those years then have to be searched too before the office can be completed.", input: { label: "Start from year (e.g. 1930)", required: true }, confirmText: "Next" });
+    if (!y) return;
+    const reason = await askLegal({ title: `Why are records from ${y} needed?`, input: { label: "Reason", required: true }, confirmText: "Save" });
+    if (!reason) return;
+    try { toast.success((await setOfficeFromYear(o.OfficeSearchId, Number(y), reason)).message); onChanged(); } catch (e) { toast.error(e instanceof Error ? e.message : "Could not save"); }
   };
   const saveRange = async () => {
     if (!range) return;
     try {
-      toast.success((await addYearRange(o.OfficeSearchId, { from: Number(range.from), to: Number(range.to), siteName: range.site })).message);
+      toast.success((await addYearRange(o.OfficeSearchId, { from: Number(range.from), to: Number(range.to), siteName: range.site, status: range.status })).message);
       setRange(null); onChanged();
     } catch (e) { toast.error(e instanceof Error ? e.message : "Could not save"); }
   };
@@ -315,7 +336,7 @@ function OfficePanel({ o, years, opts, enquiry, canEdit, onChanged }: {
       <div className="legal-g2">
         <div className={`border p-3 ${done ? "border-emerald-600/40 bg-emerald-600/5" : o.DaysOver > 0 ? "border-destructive bg-destructive/10" : "border-amber-500/50 bg-amber-500/5"}`}>
           <p className="text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground">Timeline</p>
-          <p className="mt-1 flex flex-wrap items-center gap-2 text-sm"><b>Due {o.DueDate}</b><Counter due={o.DueDate} done={done} /></p>
+          <p className="mt-1 flex flex-wrap items-center gap-2 text-sm"><b>Due</b> <DueBadge date={o.DueDate} done={done} compact /><Counter due={o.DueDate} done={done} /></p>
           <p className="text-xs text-muted-foreground">{o.SlaDays}-day limit from the enquiry date · years {first}–{thisYear}</p>
           {done && <p className="mt-1 text-xs">Completed{o.CompletedByName ? ` by ${o.CompletedByName}` : ""}{o.CompletedAt ? ` · ${o.CompletedAt.slice(0, 10)}` : ""}{o.Remarks ? ` — ${o.Remarks}` : ""}</p>}
         </div>
@@ -340,11 +361,13 @@ function OfficePanel({ o, years, opts, enquiry, canEdit, onChanged }: {
       {/* Year grid */}
       <div>
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <p className="text-sm font-semibold">Calendar years <span className="font-normal text-muted-foreground">· {years.length}/{allYears.length} recorded · {found.length} found</span></p>
+          <p className="text-sm font-semibold">Calendar years {first}–{thisYear} <span className="font-normal text-muted-foreground">· {finalN}/{allYears.length} final · {found.length} found{reviewN ? ` · ${reviewN} under review` : ""}{pendingN ? ` · ${pendingN} pending` : ""}</span></p>
           <div className="flex flex-wrap items-center gap-3 text-[0.6875rem] text-muted-foreground">
             <span className="inline-flex items-center gap-1"><span className="h-3 w-3 border border-emerald-600 bg-emerald-600/80" />Found</span>
             <span className="inline-flex items-center gap-1"><span className="h-3 w-3 border border-border bg-muted-foreground/30" />Not found</span>
-            <span className="inline-flex items-center gap-1"><span className="h-3 w-3 border border-border bg-background" />Not searched</span>
+            <span className="inline-flex items-center gap-1"><span className="h-3 w-3 border border-sky-500 bg-sky-500/20" />Not applicable</span>
+            <span className="inline-flex items-center gap-1"><span className="h-3 w-3 border border-amber-500 bg-amber-400/60" />Under review</span>
+            <span className="inline-flex items-center gap-1"><span className="h-3 w-3 border border-border bg-background" />Pending (not searched)</span>
           </div>
         </div>
         <div className="grid grid-cols-[repeat(auto-fill,minmax(3.25rem,1fr))] gap-1">
@@ -352,8 +375,8 @@ function OfficePanel({ o, years, opts, enquiry, canEdit, onChanged }: {
             const r = byYear.get(y);
             return (
               <button key={y} onClick={() => setYear(year === y ? null : y)} disabled={!editable && !r}
-                title={r ? `${y}: ${r.Status}${r.DeedNo ? ` · deed ${r.DeedNo}` : ""}` : `${y}: not searched`}
-                className={`h-8 border text-xs tabular-nums ${year === y ? "ring-2 ring-foreground" : ""} ${r?.Status === "Found" ? "border-emerald-700 bg-emerald-600/80 font-semibold text-white" : r ? "border-border bg-muted-foreground/25 text-muted-foreground" : "border-border bg-background hover:bg-muted"} disabled:cursor-default`}>
+                title={r ? `${y}: ${r.Status}${r.DeedNo ? ` · deed ${r.DeedNo}` : ""}` : `${y}: pending — not searched`}
+                className={`h-8 border text-xs tabular-nums ${year === y ? "ring-2 ring-foreground" : ""} ${r?.Status === "Found" ? "border-emerald-700 bg-emerald-600/80 font-semibold text-white" : r?.Status === "Not Applicable" ? "border-sky-500 bg-sky-500/20 text-sky-900 dark:text-sky-200" : r?.Status === "Under Review" || r?.Status === "Requested" ? "border-amber-500 bg-amber-400/60 font-semibold" : r ? "border-border bg-muted-foreground/25 text-muted-foreground" : "border-border bg-background hover:bg-muted"} disabled:cursor-default`}>
                 {y}
               </button>
             );
@@ -361,7 +384,8 @@ function OfficePanel({ o, years, opts, enquiry, canEdit, onChanged }: {
         </div>
         {editable && (
           <div className="mt-2 flex flex-wrap gap-2">
-            {!range && <button className={small} onClick={() => setRange({ from: String(first), to: String(thisYear), site: "" })}>Mark a range not found…</button>}
+            {!range && <button className={small} onClick={() => setRange({ from: String(first), to: String(thisYear), site: "", status: "Not Found" })}>Mark a range of years…</button>}
+            <button className={small} onClick={earlier} title="When records before the usual start year are needed">Search before {first}…</button>
           </div>
         )}
         {range && (
@@ -369,7 +393,9 @@ function OfficePanel({ o, years, opts, enquiry, canEdit, onChanged }: {
             <label>From<select className={`${field} w-24`} value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })}>{[...allYears].reverse().map((y) => <option key={y}>{y}</option>)}</select></label>
             <label>To<select className={`${field} w-24`} value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })}>{allYears.map((y) => <option key={y}>{y}</option>)}</select></label>
             <label className="min-w-[14rem] flex-1">Government site checked<input className={field} value={range.site} placeholder="e.g. WB Registration (igr.wb.gov.in)" onChange={(e) => setRange({ ...range, site: e.target.value })} /></label>
-            <button className="h-9 bg-foreground px-3 font-semibold text-card" onClick={saveRange}>Save as not found</button>
+            <label>As<select className={`${field} w-40`} value={range.status} onChange={(e) => setRange({ ...range, status: e.target.value as "Not Found" | "Not Applicable" | "Under Review" })}>
+              <option>Not Found</option><option>Not Applicable</option><option>Under Review</option></select></label>
+            <button className="h-9 bg-foreground px-3 font-semibold text-card" onClick={saveRange}>Save range as {range.status.toLowerCase()}</button>
             <button className="h-9 underline" onClick={() => setRange(null)}>Cancel</button>
             <p className="w-full text-muted-foreground">Years already recorded in the range are kept as they are.</p>
           </div>
@@ -412,7 +438,8 @@ function OfficePanel({ o, years, opts, enquiry, canEdit, onChanged }: {
 
       {canEdit && (
         <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-3">
-          {!done && <button className="bg-foreground px-4 py-2 text-sm font-semibold text-card" onClick={complete}>Mark {o.OfficeType} search complete</button>}
+          {!done && (pendingN || reviewN) ? <span className="mr-auto self-center text-xs text-amber-700">Complete needs every year final: {pendingN ? `${pendingN} pending` : ""}{pendingN && reviewN ? " · " : ""}{reviewN ? `${reviewN} under review` : ""}</span> : null}
+          {!done && <button className="bg-foreground px-4 py-2 text-sm font-semibold text-card disabled:opacity-40" disabled={!!(pendingN || reviewN)} onClick={complete}>Mark {o.OfficeType} search complete</button>}
           {done && <button className={small} onClick={reopen}>Reopen {o.OfficeType} search</button>}
         </div>
       )}
@@ -423,7 +450,7 @@ function OfficePanel({ o, years, opts, enquiry, canEdit, onChanged }: {
 function YearPanel({ year, r, editable, onSave, onDelete, onClose }: {
   year: number; r: YearResult | null; editable: boolean; onSave: (b: YearBody) => Promise<void>; onDelete?: () => void; onClose: () => void;
 }) {
-  const [result, setResult] = useState<"Found" | "Not Found">(r?.Status === "Not Found" ? "Not Found" : "Found");
+  const [result, setResult] = useState<YearStatus>(r?.Status === "Requested" ? "Under Review" : (r?.Status as YearStatus) ?? "Found");
   const [deedNo, setDeedNo] = useState(r?.DeedNo ?? "");
   const [deedDate, setDeedDate] = useState(r?.DeedDate ?? "");
   const [parties, setParties] = useState(r?.Parties ?? "");
@@ -437,10 +464,10 @@ function YearPanel({ year, r, editable, onSave, onDelete, onClose }: {
         <button className="text-xs underline" onClick={onClose}>Close</button>
       </div>
       <fieldset disabled={!editable} className="legal-g2">
-        <div className="flex gap-2 legal-span">
-          {(["Found", "Not Found"] as const).map((x) => (
+        <div className="grid grid-cols-2 gap-2 legal-span sm:flex sm:flex-wrap">
+          {(["Found", "Not Found", "Not Applicable", "Under Review"] as const).map((x) => (
             <button key={x} type="button" onClick={() => setResult(x)}
-              className={`border px-4 py-1.5 text-sm font-semibold ${result === x ? (x === "Found" ? "border-emerald-700 bg-emerald-600 text-white" : "border-foreground bg-foreground text-card") : "border-border"}`}>{x}</button>
+              className={`border px-3 py-1.5 text-sm font-semibold ${result === x ? (x === "Found" ? "border-emerald-700 bg-emerald-600 text-white" : x === "Not Applicable" ? "border-sky-600 bg-sky-600 text-white" : x === "Under Review" ? "border-amber-500 bg-amber-500 text-white" : "border-foreground bg-foreground text-card") : "border-border"}`}>{x}</button>
           ))}
         </div>
         {result === "Found" && (

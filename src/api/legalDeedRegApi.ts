@@ -33,7 +33,7 @@ export interface RevisionRow { RevisionId: number; RevisionDate: string; OldTota
 export interface ValuationRow { ValuationId: number; ValuationDate: string; GovernmentValuation: number | null; EstimatedMarketValue: number | null; MarketRate: number | null; ValuationSource: string | null }
 export interface TrackRow { TrackId: number; StatusDate: string; IgrStatus: string | null; DeedLocation: string | null; TrackingUrl: string | null; Remarks: string | null; ByName: string | null }
 
-export const getDeedRegList = async (tab: "active" | "registered") => handle<{ lands: DeedRegRow[]; canApply: boolean }>(await fetchWithAuth(`${BASE}/list?tab=${tab}`));
+export const getDeedRegList = async (tab: "active" | "registered", qs = "") => handle<{ lands: DeedRegRow[]; canApply: boolean } & { total?: number; page?: number; pageSize?: number }>(await fetchWithAuth(`${BASE}/list?tab=${tab}${qs ? `&${qs}` : ""}`));
 export const getDeedRegLand = async (id: number) => handle<{ land: DeedRegLand; queries: StampQuery[]; tracking: TrackRow[]; payments: PaymentRow[]; schedule: ScheduleRow[]; revisions: RevisionRow[]; valuation: ValuationRow | null; canApply: boolean }>(await fetchWithAuth(`${BASE}/${id}`));
 export const saveConsideration = async (id: number, b: { total: string; rate: string; rateUnitId: string; consDate: string; paymentModeId: string; remarks: string; reason?: string; valuationId?: number | null }) =>
   handle<Msg>(await fetchWithAuth(`${BASE}/${id}/consideration`, send("PUT", b)));
@@ -49,6 +49,8 @@ export const inr = (n: number | null | undefined) => (n == null ? "—" : `₹${
 export const addPayment = async (id: number, b: { paymentDate: string; txnTypeId: string; amount: string; paymentModeId: string; payee: string; transactionRef: string; receiptNo: string; receiptFileId?: number | null; remarks: string }) =>
   handle<Msg>(await fetchWithAuth(`${BASE}/${id}/payment`, send("POST", b)));
 export const deletePayment = async (pid: number) => handle<Msg>(await fetchWithAuth(`${BASE}/payment/${pid}`, send("DELETE")));
+/** A payment is never edited or deleted: Pending → Cleared / Failed; Cleared → Refunded / Reversed (with the reason). */
+export const setPaymentStatus = async (pid: number, status: string, reason?: string) => handle<Msg>(await fetchWithAuth(`${BASE}/payment/${pid}/status`, send("POST", { status, reason })));
 export const getInstalmentTemplates = async () => handle<InstalmentTemplate[]>(await fetchWithAuth(`${BASE}/instalment-templates`));
 export const applyInstalmentTemplate = async (id: number, template: string, replace = false) => {
   const res = await fetchWithAuth(`${BASE}/${id}/schedule/apply`, send("POST", { template, replace }));

@@ -59,6 +59,7 @@ export default function MaterialRequest() {
         {viewMode === "list" && <MRList m={m} />}
         {viewMode === "form" && <MRForm m={m} />}
         <MRViewModal m={m} />
+        {m.amend.dialog}
         {importPlan && (
           <MRImportDialog fileName={importPlan.fileName} plan={importPlan.plan} onClose={() => setImportPlan(null)} onCreated={invalidate} />
         )}

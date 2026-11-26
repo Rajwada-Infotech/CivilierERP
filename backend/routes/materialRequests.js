@@ -202,7 +202,7 @@ router.get("/item-options", authenticateToken, async (req, res) => {
     if (requestedProjectId && !assertProjectAllowed(req, res, requestedProjectId)) return;
 
     // Detect optional columns (same pattern as inventoryMaster.js)
-    const [hasUOM, hasGodownCol, hasCreatedDate, hasEntryDate, hasDaysOfSupply, hasCC] =
+    const [hasUOM, hasGodownCol, hasCreatedDate, hasEntryDate, hasDaysOfSupply, hasCC, hasActive] =
       await Promise.all([
         pool
           .request()
@@ -246,6 +246,13 @@ router.get("/item-options", authenticateToken, async (req, res) => {
              WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'M_CostCenterId'`,
           )
           .then((r) => r.recordset[0].cnt > 0),
+        pool
+          .request()
+          .query(
+            `SELECT COUNT(1) AS cnt FROM sys.columns
+             WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'M_IsActive'`,
+          )
+          .then((r) => r.recordset[0].cnt > 0),
       ]);
 
     // Resolve godown filter:
@@ -274,7 +281,7 @@ router.get("/item-options", authenticateToken, async (req, res) => {
     // Date expression for the ledger rows (same logic as inventoryMaster.js)
     const ledgerDateExpr =
       hasCreatedDate && hasEntryDate
-        ? "COALESCE(sl.CreatedDate, sl.EntryDate)"
+        ? "COALESCE(sl.EntryDate, sl.CreatedDate)"
         : hasCreatedDate
           ? "sl.CreatedDate"
           : hasEntryDate
@@ -297,6 +304,7 @@ router.get("/item-options", authenticateToken, async (req, res) => {
               ${hasDaysOfSupply ? "img.M_DaysOfSupply" : "NULL"} AS DaysOfSupply,
               ${hasCC ? "img.M_CostCenterId" : "NULL"} AS M_CostCenterId,
               ${hasCC ? "cc.Name" : "NULL"} AS CostCenterName,
+              ${hasActive ? "img.M_IsActive" : "CAST(1 AS BIT)"} AS M_IsActive,
               ISNULL(SUM(CASE WHEN sl.Type = 'IN'  THEN sl.Qty ELSE 0 END), 0)
             - ISNULL(SUM(CASE WHEN sl.Type = 'OUT' THEN sl.Qty ELSE 0 END), 0)
               AS AvailableStock
@@ -313,6 +321,7 @@ router.get("/item-options", authenticateToken, async (req, res) => {
                ${hasUOM ? ", img.M_UOM" : ""},
                ${hasDaysOfSupply ? "img.M_DaysOfSupply," : ""}
                ${hasCC ? "img.M_CostCenterId, cc.Name," : ""}
+               ${hasActive ? "img.M_IsActive," : ""}
                uom.UOMName, uom.Symbol
       ORDER BY img.M_Name
     `);
@@ -1357,7 +1366,9 @@ router.get("/source-options/:kind", authenticateToken, requirePageRight("materia
 });
 
 // ── PUT /:id ───────────────────────────────────────────────────────────────────
-router.put("/:id", authenticateToken, requirePageRight("material-request", "edit"), async (req, res) => {
+// No route-level authenticateToken: /api is already behind it (server.js), and an approved amendment applies its
+// change by running this route in-process (services/docAmendment.js), where there is no bearer token.
+router.put("/:id", requirePageRight("material-request", "edit"), async (req, res) => {
   const user = requireUser(req, res);
   if (!user) return;
 
@@ -1411,9 +1422,12 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
         error: `Cannot edit: this Material Request is ${currentMRStatus.toLowerCase()} — it has already been ordered on a Purchase Order. Delete that Purchase Order first, then edit the request.`,
       });
 
-    if (!["Draft", "Pending", "Approved", "Rejected"].includes(currentMRStatus))
+    // Once approved it changes only through Amend (an approved amendment request), for every role.
+    if (currentMRStatus === "Approved")
+      return res.status(409).json({ error: "This Material Request is approved, so it can't be edited. Use Amend to change it." });
+    if (!["Draft", "Pending", "Rejected"].includes(currentMRStatus))
       return res.status(409).json({
-        error: `Cannot edit a Material Request with status "${currentMRStatus}". Only Draft, Pending, Approved, or Rejected requests can be edited.`,
+        error: `Cannot edit a Material Request with status "${currentMRStatus}". Only Draft, Pending or Rejected requests can be edited.`,
       });
     const wasApproved = currentMRStatus === "Approved";
     const wasRejected = currentMRStatus === "Rejected";

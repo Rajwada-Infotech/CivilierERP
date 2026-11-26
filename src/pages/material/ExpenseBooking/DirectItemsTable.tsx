@@ -221,7 +221,7 @@ export function DirectItemsTable({ items, onChange, onTotalChange, readOnly = fa
   useEffect(() => {
     setItemsLoading(true);
     getItems()
-      .then((rows) => setServiceItems(rows.filter((it) => it.M_Type === "Service")))
+      .then((rows) => setServiceItems(rows.filter((it) => it.M_Type === "Service" && it.M_IsActive !== false)))
       .catch(() => setServiceItems([]))
       .finally(() => setItemsLoading(false));
   }, []);

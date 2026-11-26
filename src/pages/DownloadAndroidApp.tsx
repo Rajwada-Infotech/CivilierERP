@@ -26,6 +26,7 @@ const ABOUT: Record<string, string> = {
   crm: "For staff: CRM — leads, bookings, payments, approvals and after-sales — and the Maintenance module.",
   cwd: "For site engineers, QC and approvers: allocation, reporting, quality check and transfer.",
   employee: "For employees: punch in and out, breaks, attendance, leave and payslips.",
+  "security-intercom": "For gate security and residents: guards raise visitor requests, residents approve them, call the gate and make guest passes; supervisors see guards on shift and alerts.",
 };
 
 const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";

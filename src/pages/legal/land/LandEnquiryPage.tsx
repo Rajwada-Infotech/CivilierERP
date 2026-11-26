@@ -1,4 +1,4 @@
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -9,6 +9,7 @@ import { GovtSiteLinks } from "@/components/legal/GovtSiteLinks";
 import { PortalFetchButtons } from "@/components/legal/PortalFetch";
 import { usePageRights } from "@/hooks/usePageRights";
 import { convertEnquiry, setEnquiryStatus, getMyWhatsApp, setMyWhatsApp } from "@/api/legalLandApi";
+import { getEnquirySearches } from "@/api/legalEnquirySearchApi";
 import { askLegal } from "@/components/legal/LegalAsk";
 import { LegalMasterTable } from "../LegalMasterPage";
 import { getLegalRows, type LegalRow } from "@/api/legalMastersApi";
@@ -20,6 +21,7 @@ import { useProjectScope } from "@/components/legal/ProjectPicker";
 // a converted enquiry stays as it was, linked to its land.
 export default function LandEnquiryPage() {
   const entry = legalMasterByKey("land-enquiry")!;
+  const openEnquiry = useSearchParams()[0].get("edit");
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const landRights = usePageRights("legal-land-master");
@@ -43,16 +45,16 @@ export default function LandEnquiryPage() {
   const inScope = (r: LegalRow) => (scope === "all" ? true : orphans ? r.ProjectId == null || r.ProjectId === "" : Number(r.ProjectId) === projectId);
   const rows = allRows.filter((r) => inScope(r) && isActive(r));
   const FILTERS: [string, string, (r: LegalRow) => boolean, string][] = [
-    ["all", "All", () => true, "border-border"],
+    ["all", "All open", (r) => !r.LandId, "border-border"],
     ["search", "Deed search pending", (r) => !r.LandId && Number(r.OfficesPending) > 0, "border-amber-500"],
     ["overdue", "Search overdue", (r) => !r.LandId && Number(r.OfficesOverdue) > 0, "border-destructive"],
     ["ready", "Ready to convert", (r) => !r.LandId && Number(r.OfficesPending) === 0 && !["Rejected", "On Hold"].includes(String(r.EnquiryStatus)), "border-emerald-600"],
-    ["New", "New", (r) => r.EnquiryStatus === "New", "border-zinc-300"],
-    ["Under Review", "Under review", (r) => r.EnquiryStatus === "Under Review", "border-sky-500"],
-    ["Interested", "Interested", (r) => r.EnquiryStatus === "Interested", "border-emerald-500"],
-    ["On Hold", "On hold", (r) => r.EnquiryStatus === "On Hold", "border-amber-500"],
-    ["Rejected", "Rejected", (r) => r.EnquiryStatus === "Rejected", "border-rose-500"],
-    ["converted", "Converted", (r) => !!r.LandId, "border-[#7c4a2e]"],
+    ["New", "New", (r) => !r.LandId && r.EnquiryStatus === "New", "border-zinc-300"],
+    ["Under Review", "Under review", (r) => !r.LandId && r.EnquiryStatus === "Under Review", "border-sky-500"],
+    ["Interested", "Interested", (r) => !r.LandId && r.EnquiryStatus === "Interested", "border-emerald-500"],
+    ["On Hold", "On hold", (r) => !r.LandId && r.EnquiryStatus === "On Hold", "border-amber-500"],
+    ["Rejected", "Rejected", (r) => !r.LandId && r.EnquiryStatus === "Rejected", "border-rose-500"],
+    // Converted enquiries are lands now: Pipeline · Land conversion.
   ];
   const active = FILTERS.find((f) => f[0] === filter) ?? FILTERS[0];
 
@@ -101,7 +103,7 @@ export default function LandEnquiryPage() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Legal", "Land Management", entry.label]} />
-      <LegalShell title={entry.label} subtitle="New land opportunities. Convert one to create its Land ID and Land Profile." icon={MessageQuestion}>
+      <LegalShell stage="enquiry" title={entry.label} subtitle="New land opportunities. Convert one to create its Land ID and Land Profile." icon={MessageQuestion}>
         {orphanN > 0 && scope !== "none" && (
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border border-amber-500/60 bg-amber-500/10 px-4 py-2 text-sm">
             <span><b>{orphanN} enquir{orphanN > 1 ? "ies have" : "y has"} no project</b> — raised before a project was required, so {orphanN > 1 ? "they don't" : "it doesn't"} show under any project but still count on the dashboard.</span>
@@ -129,8 +131,11 @@ export default function LandEnquiryPage() {
         <LegalMasterTable
           key={scope ?? projectId ?? 0}
           entry={entry}
+          // ?edit=<id> (from Lands → Find a land) opens that enquiry.
+          requestEditId={openEnquiry}
           // Only this project's enquiries; a new enquiry is raised under it.
-          rowFilter={(raw) => inScope(raw) && active[2](raw)}
+          serverFilter={active[0] === "all" ? "open" : active[0]}
+          projectScoped
           // Without a project: no new enquiry here, and editing one asks for its project.
           // One project: a new enquiry is raised under it. All projects: the form asks for the project.
           fixed={scope ? undefined : { ProjectId: String(projectId) }}
@@ -150,7 +155,11 @@ export default function LandEnquiryPage() {
               <button onClick={() => setPlotsId(plotsId === id ? null : id)} className={`${small} ${plotsId === id ? "bg-foreground text-card" : ""}`}
                 title="RS and LR records (Khatian / Dag) of this enquiry">RS / LR{raw.RsDagNo || raw.LrDagNo ? "" : " · add"}</button>
             );
-            const portal = <>{plots}<PortalFetchButtons title={no} values={{
+            // History: every status change (with its reason), edit and search of this enquiry — kept even when rejected.
+            const history = <button onClick={() => navigate(`/legal/versions?enquiry=${id}`)} className={small} title="Everything that happened to this enquiry: status changes with reasons, edits, deed search">History</button>;
+            // An earlier enquiry for the same plot (Mouza + Dag) was rejected — in any project.
+            const seen = raw.RejectedBefore ? <span className={`${small} border-rose-400 bg-rose-500/10 text-rose-700`} title="An earlier enquiry for the same Mouza and Dag was rejected — open its History for the reason">Rejected before: {String(raw.RejectedBefore)}</span> : null;
+            const portal = <>{seen}{history}{plots}<PortalFetchButtons title={no} values={{
               district: String(raw.DistrictId__label ?? ""), mouza: String(raw.MouzaId__label ?? "").replace(/\s*\(J\.L\..*\)$/, ""),
               jlNo: raw.JLNo as string, location: raw.LandLocation as string, lat: raw.GpsLatitude as number, lng: raw.GpsLongitude as number, enquiryNo: no,
             }} /></>;
@@ -172,6 +181,20 @@ export default function LandEnquiryPage() {
             </>;
             // Deed Registry Search comes first: Convert / Hold / Reject open once every office's search is complete.
             // No office type set up for this enquiry's state: nothing to search yet, so it cannot be converted.
+            // Office types exist for its state but the timelines were never created (e.g. loaded data): start them here.
+            if (Number(raw.OfficesTotal ?? 0) === 0 && st !== "Rejected" && Number(raw.OfficeTypesForState ?? 0) > 0) {
+              return (
+                <span className="inline-flex flex-wrap justify-end gap-1.5">
+                  {map}{portal}
+                  <button className={`${small} border-sky-600 bg-sky-500/10 font-semibold text-sky-800`} title="Create this enquiry's deed search timelines (one per registration office type of its state)"
+                    onClick={async () => {
+                      try { await getEnquirySearches(id); toast.success(`${no}: deed search started`); queryClient.invalidateQueries({ queryKey: ["legal-master", "land-enquiry"] }); }
+                      catch (e) { toast.error((e as Error).message); }
+                    }}>Start deed search</button>
+                  {holdReject}
+                </span>
+              );
+            }
             if (Number(raw.OfficesTotal ?? 0) === 0 && st !== "Rejected") {
               return (
                 <span className="inline-flex flex-wrap justify-end gap-1.5">

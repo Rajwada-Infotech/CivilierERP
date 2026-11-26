@@ -217,6 +217,23 @@ export function IMForm({ m }: { m: ItemMasterState }) {
               placeholder="e.g. 30"
             />
           </Field>
+          {/* Disable — only on an existing item. A disabled item stays on its old documents but is not offered
+              when picking items for new Material Requests, POs, Work Orders or Expense Bookings. */}
+          {editingId && (
+            <Field label="Status">
+              <label className="flex items-center gap-2 h-9 px-3 border border-foreground/30 bg-card cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={!form.isActive}
+                  onChange={(e) => set("isActive", !e.target.checked)}
+                  className="h-4 w-4 accent-destructive"
+                />
+                <span className={`text-sm ${form.isActive ? "text-foreground" : "text-destructive font-medium"}`}>
+                  {form.isActive ? "Disable this item" : "Disabled — hidden from new entries"}
+                </span>
+              </label>
+            </Field>
+          )}
         </div>
 
         {/* ── Tax Rates ── */}

@@ -19,30 +19,31 @@ const jwt = require("jsonwebtoken");
  * It also reports the person to nginx in a response header (X-Auth-User, stripped before it reaches the browser) so
  * the access log can say WHO sent the requests - without it, finding the one tab causing a storm took guesswork.
  */
-// Staff tokens are signed with JWT_SECRET; customer-portal tokens with their own PORTAL_JWT_SECRET (crmPortal.js
-// login) — so both are tried, or every customer would fall back to the shared IP bucket.
-function verifyAny(token) {
-  for (const secret of [process.env.JWT_SECRET, process.env.PORTAL_JWT_SECRET]) {
-    if (!secret) continue;
-    try { return jwt.verify(token, secret); } catch { /* try the next */ }
+/** The token's payload if it verifies with this secret, else null. */
+function verifyWith(token, secret) {
+  if (!secret) return null;
+  try {
+    return jwt.verify(token, secret);
+  } catch {
+    return null;
   }
-  throw new Error("invalid token");
 }
 
 function attachRateLimitUser(req, res, next) {
   const header = req.headers.authorization || "";
   if (header.startsWith("Bearer ")) {
-    try {
-      const payload = verifyAny(header.slice(7));
-      if (payload && payload.userId != null) {
-        req.rateLimitUserId = payload.userId;
-        if (res && typeof res.setHeader === "function") res.setHeader("X-Auth-User", `user-${payload.userId}`);
-      } else if (payload && payload.type === "crm_portal" && payload.portalUserId != null) {
-        req.rateLimitPortalId = payload.portalUserId;
-        if (res && typeof res.setHeader === "function") res.setHeader("X-Auth-User", `portal-${payload.portalUserId}`);
-      }
-    } catch {
-      /* not a valid token: counted by IP */
+    const token = header.slice(7);
+    // Staff tokens are signed with JWT_SECRET; customer-portal tokens with PORTAL_JWT_SECRET when it is set (else the
+    // same JWT_SECRET). Checking only JWT_SECRET put every resident and portal customer in the IP bucket — behind
+    // Docker one shared bucket for all of them — which answered 429 to everyone once the Security app's residents
+    // came on.
+    const payload = verifyWith(token, process.env.JWT_SECRET) || verifyWith(token, process.env.PORTAL_JWT_SECRET);
+    if (payload && payload.userId != null) {
+      req.rateLimitUserId = payload.userId;
+      if (res && typeof res.setHeader === "function") res.setHeader("X-Auth-User", `user-${payload.userId}`);
+    } else if (payload && payload.type === "crm_portal" && payload.portalUserId != null) {
+      req.rateLimitPortalId = payload.portalUserId;
+      if (res && typeof res.setHeader === "function") res.setHeader("X-Auth-User", `portal-${payload.portalUserId}`);
     }
   }
   next();

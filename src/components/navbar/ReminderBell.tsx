@@ -38,6 +38,12 @@ const TYPE_META: Record<string, ReminderMeta> = {
   pdc: { icon: Landmark, label: "PDC" },
   followup: { icon: CalendarClock, label: "Follow-Up" },
   loan_emi: { icon: Banknote, label: "Loan EMI" },
+  legal_verify: { icon: ClipboardList, label: "Verify" },
+  legal_approval: { icon: FileWarning, label: "Approve" },
+  legal_deed: { icon: Landmark, label: "Deed" },
+  legal_search: { icon: CalendarClock, label: "Deed Search" },
+  legal_postreg: { icon: Package, label: "Post-Reg" },
+  legal_activity: { icon: ClipboardList, label: "My Tasks" },
 };
 
 const ALL_TABS = [
@@ -51,6 +57,12 @@ const ALL_TABS = [
   "tds",
   "followup",
   "loan_emi",
+  "legal_verify",
+  "legal_approval",
+  "legal_deed",
+  "legal_search",
+  "legal_postreg",
+  "legal_activity",
 ];
 
 // The reminders panel drawn on the sheet: a square card with an ink border and a hard shadow on the faint grid, a

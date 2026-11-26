@@ -1,18 +1,21 @@
 import { askLegal } from "@/components/legal/LegalAsk";
+import { DueBadge, dueRow, dueLevel, DUE_BG } from "@/components/legal/DueBadge";
 import { setUserWhatsApp } from "@/api/legalLandApi";
-import React, { useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApprovalControlPanel } from "@/components/legal/ApprovalControlPanel";
 import { FileText, Upload, X } from "lucide-react";
-import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useProjectScope } from "@/components/legal/ProjectPicker";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLegalLock, LockedNote, OPEN_AFTER_REGISTRATION } from "@/components/legal/LegalLock";
 import { usePageRights } from "@/hooks/usePageRights";
 import { LegalShell } from "@/components/legal/LegalShell";
 import { MasterPage, type DataChangeEvent, type RecordWithId, type FieldDef, type ColumnDef } from "@/components/MasterPage";
 import type { ExportColumn } from "@/lib/export";
 import {
-  getLegalMeta, getLegalRows, getLegalLookup, addLegalRow, updateLegalRow, deleteLegalRow, uploadLegalFile,
+  getLegalMeta, getLegalRows, getLegalPage, suggestLegal, getLegalLookup, addLegalRow, updateLegalRow, deleteLegalRow, uploadLegalFile,
   type LegalFieldMeta, type LegalOption, type LegalRow,
 } from "@/api/legalMastersApi";
 import type { LegalMasterEntry } from "./legalMasters";
@@ -310,6 +313,13 @@ function mapRow(row: LegalRow, pk: string, fields: LegalFieldMeta[]): RecordWith
   return out;
 }
 
+/** Date fields that look ahead (deadlines, expiries, next hearings). */
+const DUE_FIELD = /(due|target|expiry|expires|nexthearing|nextdate|expected|appointmentdate|validtill|loanenddate)/i;
+const FINAL = new Set(["approved", "completed", "closed", "disposed", "rejected", "paid", "received", "cleared", "registered", "withdrawn", "loan closed", "release verified", "successfully registered", "resolved"]);
+/** A finished row (completed / approved / closed…) shows its dates without a warning. */
+const rowFinished = (row: Record<string, unknown>) => Object.entries(row).some(([k, v]) =>
+  (/status|result|decision/i.test(k) && typeof v === "string" && FINAL.has(v.toLowerCase())) || (/^(completiondate|completedon|clearancedate|receiveddate)$/i.test(k) && !!v));
+
 function toPayload(record: Record<string, unknown>, fields: LegalFieldMeta[]): LegalRow {
   const out: LegalRow = {};
   for (const f of fields) {
@@ -346,9 +356,14 @@ interface TableProps {
   rowLock?: (raw: LegalRow) => string | null;
   /** Values a new row always gets; these fields are left out of the form (still shown in the table). */
   fixed?: Record<string, string>;
+  /** A server-side named filter (e.g. the Lands stage chips) — used with server paging. */
+  serverFilter?: string;
+  /** Limit to the project picked at the top of the Legal module (server side). */
+  projectScoped?: boolean;
 }
 
-export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, onSaved, requestEditId, noAdd, addButton, rowClassName, rowFilter, onCreated, fixed, rowLock }: TableProps) {
+export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, onSaved, requestEditId, noAdd, addButton, rowClassName, rowFilter, onCreated, fixed, rowLock, serverFilter, projectScoped }: TableProps) {
+  const landLockReason = useLegalLock();
   const rights = usePageRights(entry.pageKey);
   const { currentUser } = useAuth();
   const isAdminTier = isPrivilegedRole(currentUser?.role);
@@ -362,11 +377,39 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
   // Server-kept fields (a matched party's id) stay in the payload but never show in the form or the table.
   const shownFields = useMemo(() => fields.filter((f) => !f.hidden), [fields]);
 
-  const { data: rows, isLoading, error } = useQuery({
+  // Lists come one page (20 rows) at a time from the server — searched, filtered and sorted there. A list filtered in the
+  // browser (rowFilter) or opened to edit one row (?edit=) still loads whole.
+  const paged = !rowFilter && !requestEditId;
+  const { scope } = useProjectScope();
+  const [pg, setPg] = useState<{ page: number; search: string; status: "active" | "inactive" | "all"; sortKey: string | null; sortDir: "asc" | "desc" }>(
+    { page: 1, search: "", status: "active", sortKey: null, sortDir: "asc" });
+  const project = projectScoped ? String(scope) : undefined;
+  useEffect(() => { setPg((p) => ({ ...p, page: 1 })); }, [serverFilter, project]);
+  const sortCol = (key: string | null) => {
+    if (!key) return null;
+    if (key === "status") return "IsActive";
+    const f = fields.find((x) => displayKey(x) === key);
+    if (f) return f.type === "ref" ? `${f.name}__label` : f.name;
+    const x = (master?.extras ?? []).find((e) => `${e.name}__display` === key);
+    return x ? x.name : null;
+  };
+  const whole = useQuery({
     queryKey: ["legal-master", entry.key, parentId ?? null],
     queryFn: () => getLegalRows(entry.key, parentId),
     staleTime: 60 * 1000,
+    enabled: !paged,
   });
+  const onePage = useQuery({
+    queryKey: ["legal-master", entry.key, parentId ?? null, "page", pg, serverFilter ?? null, project ?? null],
+    queryFn: () => getLegalPage(entry.key, { parent: parentId, page: pg.page, q: pg.search, status: pg.status, sort: sortCol(pg.sortKey), dir: pg.sortDir, filter: serverFilter, project }),
+    staleTime: 30 * 1000,
+    placeholderData: keepPreviousData,
+    enabled: paged && !!master,
+  });
+  const rows = paged ? onePage.data?.rows : whole.data;
+  const isLoading = paged ? onePage.isLoading && !onePage.data : whole.isLoading;
+  const error = paged ? onePage.error : whole.error;
+  const suggest = useCallback((q: string) => suggestLegal(entry.key, q, { parent: parentId, filter: serverFilter, project }), [entry.key, parentId, serverFilter, project]);
 
   const refs = useMemo(() => [...new Set([
     ...shownFields.filter((f) => f.type === "ref").map((f) => f.ref!),
@@ -405,10 +448,12 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
   // Every field as a column (the table scrolls sideways): documents as a preview chip, long notes cut to one
   // line with the full text on hover, then Status.
   const columns: ColumnDef[] = useMemo(() => {
-    const shown = shownFields.filter((f) => !isStatus(f));
+    // Workflow statuses kept by the system (verification / approval) are shown on the land's own page, not as list columns.
+    const shown = shownFields.filter((f) => !isStatus(f) && !f.system);
     const cols: ColumnDef[] = shown.map((f, i) => ({ key: displayKey(f), label: f.label, hideOnMobile: i >= 2 }));
     // Extras go last, unless one names a field to sit right after (e.g. "Enquiry by" next to the enquiry date).
-    for (const x of extras) {
+    // Extras marked hidden feed buttons / locks only (e.g. "Amendment open") — never a column.
+    for (const x of extras.filter((e) => !(e as { hidden?: boolean }).hidden)) {
       const col = { key: `${x.name}__display`, label: x.label, hideOnMobile: true };
       const at = x.after ? cols.findIndex((c) => c.key === displayKey(shown.find((f) => f.name === x.after) ?? ({ name: "" } as never))) : -1;
       if (at >= 0) cols.splice(at + 1, 0, col); else cols.push(col);
@@ -421,6 +466,9 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
       ...fields.filter((f) => f.type === "file").map((f) => [displayKey(f), (v: unknown, row: RecordWithId) => <LegalFileLink id={row[f.name]} name={String(v || "")} />]),
       ...fields.filter((f) => f.type === "url").map((f) => [displayKey(f), (v: unknown, row: RecordWithId) => <LegalLinkChip url={v} name={String(row[fields[0]?.name ? displayKey(fields[0]) : ""] ?? "")} />]),
       ...extras.filter((x) => x.whatsapp).map((x) => [`${x.name}__display`, (v: unknown, row: RecordWithId) => <WhatsAppName name={v} phone={row[`${x.name}__wa`]} userId={Number(row[`${x.name}__uid`]) || null} canSet={isAdminTier || String(row[`${x.name}__uid`]) === String(currentUser?.id ?? "")} onSaved={refresh} />]),
+      // Due / target / expiry / next-hearing dates: overdue red, today amber, within 7 days blue — unless the row is finished.
+      ...fields.filter((f) => f.type === "date" && DUE_FIELD.test(f.name)).map((f) => [displayKey(f), (_v: unknown, row: RecordWithId) =>
+        <DueBadge date={(row[f.name] as string) || null} done={rowFinished(row)} kind={/expir/i.test(f.name) ? "expires" : /hearing/i.test(f.name) ? "hearing" : "due"} />]),
       ...fields.filter((f) => f.type === "textarea").map((f) => [displayKey(f), (v: unknown) => (v
         ? <span className="block max-w-[260px] truncate" title={String(v)}>{String(v)}</span>
         : <span className="text-muted-foreground">—</span>)]),
@@ -464,7 +512,7 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
         toast.success(added.message);
         if (onCreated && added.id) onCreated(Number(added.id));
       }
-      if (event.action === "update") toast.success((await updateLegalRow(entry.key, Number(event.id), { ...payload(event.record), ...fixed })).message);
+      if (event.action === "update") toast.success((await updateLegalRow(entry.key, Number(event.id), { ...payload(event.record), ...fixed, __updatedAt: rawById.get(String(event.id))?.UpdatedAt ?? undefined })).message);
       if (event.action === "delete") toast.success((await deleteLegalRow(entry.key, Number(event.id))).message);
       onSaved?.();
     } catch (err) {
@@ -478,35 +526,46 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
   if (error) return <div className="p-6 text-destructive">Could not load {entry.label}: {(error as Error).message}</div>;
   if (!master || isLoading) return <div className="p-6 text-muted-foreground">Loading {entry.label}…</div>;
   // The approval setup is changed only by an administrator; everyone else sees it read-only.
-  const locked = !!master.adminOnly && !isAdminTier;
+  const adminLock = !!master.adminOnly && !isAdminTier;
+  // ?edit=… opens the form only for a row that may be edited (not a locked / registered one).
+  const editable = (id?: string | null): id is string => !!id && rawById.has(id) && !(rowLock && rowLock(rawById.get(id)!));
+  // Inside a registered land's profile: read-only, except records that keep running after registration.
+  const landLock = landLockReason && !OPEN_AFTER_REGISTRATION.has(entry.key) ? landLockReason : null;
+  const locked = adminLock || !!landLock;
   return (
     <>
-    {locked && (
+    {landLock && <LockedNote text={landLock} />}
+    {adminLock && (
       <p className="mb-3 border border-border px-3 py-2 text-xs text-muted-foreground">
         Only an administrator can change {master.title}. You can view it.
       </p>
     )}
     <MasterPage
       title={master.title}
-      canCreate={rights.canCreate && !noAdd && !locked}
+      canCreate={(rights.canCreate || !!master.legalAdminEdit) && !noAdd && !locked}
       collapsibleAddForm
       addButtonLabel={addButton ?? `New ${master.title}`}
       addWord="New"
       statusTabs
-      canEdit={rights.canEdit && !locked}
-      canDelete={!locked && ((rights.canDelete && !master.noDelete) || (!!master.superAdminDelete && isSuperAdminRole(currentUser?.role)))}
+      canEdit={(rights.canEdit || !!master.legalAdminEdit) && !locked}
+      canDelete={!locked && (((rights.canDelete || !!master.legalAdminEdit) && !master.noDelete) || (!!master.superAdminDelete && isSuperAdminRole(currentUser?.role)))}
       fields={formFields}
       columns={columns}
       columnRenderers={columnRenderers}
       initialData={data}
+      server={paged && onePage.data ? {
+        total: onePage.data.total, page: onePage.data.page, pageSize: onePage.data.pageSize, counts: onePage.data.counts,
+        search: pg.search, status: pg.status, sortKey: pg.sortKey, sortDir: pg.sortDir, loading: onePage.isFetching,
+        onChange: (c) => setPg((p) => ({ ...p, ...c })), suggest,
+      } : undefined}
       onDataEvent={handleDataEvent}
       onFieldChange={(form, name) => linkFields(form, name, fields, lookups)}
       gridCols={fields.length > 8 ? 3 : 2}
       fluid
       exportConfig={{ title: entry.label, filename: `legal-${entry.key}`, columns: exportColumns }}
       // Ask for the edit only once that row is loaded, or the form falls back to "Add".
-      requestEditId={requestEditId && rawById.has(requestEditId) ? requestEditId : null}
-      requestEditKey={requestEditId && rawById.has(requestEditId) ? requestEditId : null}
+      requestEditId={editable(requestEditId) ? requestEditId : null}
+      requestEditKey={editable(requestEditId) ? requestEditId : null}
       rowActions={rowActions ? (row) => { const raw = rawById.get(row._id); return raw ? rowActions(raw) : null; } : undefined}
       onRowClick={showDetails}
       isRowLocked={rowLock ? (row) => { const raw = rawById.get(row._id); return raw ? rowLock(raw) : null; } : undefined}

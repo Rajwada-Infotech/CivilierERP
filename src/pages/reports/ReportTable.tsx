@@ -42,7 +42,7 @@ export const ReportTable: React.FC<{
     if (!onRowOpen) return null;
     try {
       return JSON.parse(sessionStorage.getItem(`query-ctx:${report.id}`) || "null") as
-        { projectIds?: string[]; userIds?: string[]; userDate?: string; page?: number } | null;
+        { projectIds?: string[]; userIds?: string[]; userDate?: string; userFrom?: string; userTo?: string; page?: number } | null;
     } catch {
       return null;
     }
@@ -141,8 +141,10 @@ export const ReportTable: React.FC<{
     const t = setTimeout(() => setAutoSearchTerm(autoSearch.trim().length >= 2 ? autoSearch.trim() : ""), 400);
     return () => clearTimeout(t);
   }, [autoSearch]);
-  // Its own Date field, right in the report's toolbar (starts on today): one day's records only.
-  const [userDate, setUserDate] = useState<string>(() => savedCtx?.userDate ?? (startWithoutDate ? "" : todayIstDate()));
+  // Its own From -> To dates, right in the report's toolbar (any range, one day when both are the same). Starts on today
+  // (or empty on the Query page, where the last thirty days show until a range is picked).
+  const [userFrom, setUserFrom] = useState<string>(() => savedCtx?.userFrom ?? savedCtx?.userDate ?? (startWithoutDate ? "" : todayIstDate()));
+  const [userTo, setUserTo] = useState<string>(() => savedCtx?.userTo ?? savedCtx?.userDate ?? (startWithoutDate ? "" : todayIstDate()));
   const [userOptions, setUserOptions] = useState<MultiSelectOption[]>([]);
   useEffect(() => {
     if (!isUserWise) return;
@@ -170,9 +172,9 @@ export const ReportTable: React.FC<{
   useEffect(() => {
     if (!onRowOpen) return;
     try {
-      sessionStorage.setItem(`query-ctx:${report.id}`, JSON.stringify({ projectIds, userIds, userDate, page }));
+      sessionStorage.setItem(`query-ctx:${report.id}`, JSON.stringify({ projectIds, userIds, userFrom, userTo, page }));
     } catch { /* storage unavailable — just don't remember */ }
-  }, [onRowOpen, report.id, projectIds, userIds, userDate, page]);
+  }, [onRowOpen, report.id, projectIds, userIds, userFrom, userTo, page]);
   useEffect(() => {
     if (!isExpenseRegister) return;
     fetchWithAuth("/api/general-ledger/options")
@@ -281,11 +283,13 @@ export const ReportTable: React.FC<{
     if (isUserWise && userIds.length) f["userId"] = userIds.join(",");
     if (isTagWise && tagIds.length) f["tagId"] = tagIds.join(",");
     if (isUserWise && autoSearchTerm) f["search"] = autoSearchTerm;
-    // The inline Date supersedes the section bar's Day / Range, the way the Expense Register's does.
-    if (isUserWise && userDate) {
+    // The inline From / To supersedes the section bar's Day / Range, the way the Expense Register's does. Either end may be
+    // left open; the same date at both ends is one day.
+    if (isUserWise && (userFrom || userTo)) {
       delete f["dateFrom"];
       delete f["dateTo"];
-      f["date"] = userDate;
+      if (userFrom) f["dateFrom"] = userFrom;
+      if (userTo) f["dateTo"] = userTo;
     }
 
     // Expense Register: inline Date Range — supersedes the shared section
@@ -355,7 +359,7 @@ export const ReportTable: React.FC<{
     }
     return all;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [report.id, filters.companyId, filters.projectId, filters.finYearId, filters.singleDate, filters.rangeFrom, filters.rangeTo, godownId, reasonFilter, landCode, expenseHeadIds, companyIds, projectIds, userIds, tagIds, autoSearchTerm, userDate, dateFrom, dateTo, projects]);
+  }, [report.id, filters.companyId, filters.projectId, filters.finYearId, filters.singleDate, filters.rangeFrom, filters.rangeTo, godownId, reasonFilter, landCode, expenseHeadIds, companyIds, projectIds, userIds, tagIds, autoSearchTerm, userFrom, userTo, dateFrom, dateTo, projects]);
 
   // ── Server-paged reports: fetch just the page on screen ──────────────────
   // Fetching every page up front (fetchAllRows) meant hundreds of sequential
@@ -634,16 +638,25 @@ export const ReportTable: React.FC<{
           {isUserWise && (
             <div className="flex items-center gap-1.5">
               <DateInput
-                value={userDate}
-                onChange={(e) => setUserDate(e.target.value)}
-                title="Date — only this day's work is shown"
+                value={userFrom}
+                onChange={(e) => { setUserFrom(e.target.value); if (userTo && e.target.value > userTo) setUserTo(e.target.value); }}
+                max={userTo || undefined}
+                title="From date"
                 className="h-[30px] px-2 rounded-lg border border-border bg-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
               />
-              {userDate && (
+              <span className="text-[0.625rem] text-muted-foreground">→</span>
+              <DateInput
+                value={userTo}
+                onChange={(e) => setUserTo(e.target.value)}
+                min={userFrom || undefined}
+                title="To date"
+                className="h-[30px] px-2 rounded-lg border border-border bg-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
+              />
+              {(userFrom || userTo) && (
                 <button
                   type="button"
-                  onClick={() => setUserDate("")}
-                  title="Clear the date (then the section bar's Day / Range applies, or today if none)"
+                  onClick={() => { setUserFrom(""); setUserTo(""); }}
+                  title="Clear the dates (then the section bar's Day / Range applies, or today if none)"
                   className="h-[30px] flex items-center px-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground transition-all"
                 >
                   <X size={11} />
@@ -910,7 +923,7 @@ export const ReportTable: React.FC<{
 
     {/* ── Row detail card ── */}
     <Dialog open={!!selectedRow} onOpenChange={(o) => { if (!o) setSelectedRow(null); }}>
-      <DialogContent className={onSheet ? "sheet-frame max-w-lg" : "max-w-lg"} style={onSheet ? { margin: 0 } : undefined}>
+      <DialogContent className={onSheet ? "sheet-frame max-w-5xl max-h-[90vh] overflow-y-auto" : "max-w-5xl max-h-[90vh] overflow-y-auto"} style={onSheet ? { margin: 0 } : undefined}>
         <DialogHeader>
           <DialogTitle className={onSheet ? "font-heading text-lg font-bold tracking-tight pb-3 border-b border-foreground" : "flex items-center gap-2.5"}>
             {!onSheet && (
@@ -942,18 +955,15 @@ export const ReportTable: React.FC<{
           </div>
         )}
         {selectedRow && (
-          <div className="divide-y divide-border">
+          // Landscape: fields flow across three columns (two on tablets, one on phones), label above value.
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6">
             {effectiveColumns.map((col) => {
               const val = cell(selectedRow, col);
               if (!val || val === "—") return null;
               return (
-                <div key={col.header} className="flex items-start justify-between gap-6 py-2.5">
-                  <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide shrink-0 w-28 pt-0.5">
-                    {col.header}
-                  </span>
-                  <span className="text-sm text-foreground text-right break-all">
-                    {val}
-                  </span>
+                <div key={col.header} className="min-w-0 py-2.5 border-b border-border">
+                  <p className="text-[0.625rem] font-medium text-muted-foreground uppercase tracking-wide">{col.header}</p>
+                  <p className="mt-0.5 text-sm text-foreground break-words tabular-nums">{val}</p>
                 </div>
               );
             })}

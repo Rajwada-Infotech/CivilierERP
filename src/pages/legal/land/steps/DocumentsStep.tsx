@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ChevronDown, ChevronRight, Plus, Upload } from "lucide-react";
 import { usePageRights } from "@/hooks/usePageRights";
+import { useLegalLock } from "@/components/legal/LegalLock";
 import { uploadLegalFile, getLegalLookup } from "@/api/legalMastersApi";
 import {
   getLandDocuments, getDocumentVersions, addLandDocument, addDocumentVersion, reviewDocumentVersion, markDocumentNA, undoDocumentNA,
@@ -81,6 +82,8 @@ const AddDocument: React.FC<{
     title: preset?.docTypeName ?? "", documentNo: "", documentDate: "", issuingAuthority: "", remarks: "",
     registrationDate: "", relatedOwner: "", relatedLegalRecordId: link?.kind === "legal" ? String(link.id) : "", relatedMortgageId: link?.kind === "loan" ? String(link.id) : "", description: "" });
   const [file, setFile] = useState<{ id: number; fileName: string } | null>(null);
+  // A document can belong to more sections than its main one (e.g. a sale deed: Ownership and Registration).
+  const [also, setAlso] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const up = useUpload();
   const save = async () => {
@@ -88,7 +91,7 @@ const AddDocument: React.FC<{
     setSaving(true);
     try {
       toast.success((await addLandDocument(landId, {
-        ...f, docTypeId: Number(f.docTypeId), fileId: file.id,
+        ...f, docTypeId: Number(f.docTypeId), fileId: file.id, alsoSections: also.filter((x) => x !== f.relatedSection),
         relatedLegalRecordId: f.relatedLegalRecordId ? Number(f.relatedLegalRecordId) : null,
         relatedMortgageId: f.relatedMortgageId ? Number(f.relatedMortgageId) : null,
       })).message);
@@ -114,6 +117,15 @@ const AddDocument: React.FC<{
         <label className="text-xs text-muted-foreground">Related section *
           <select className={`${input} mt-1`} value={f.relatedSection} onChange={set("relatedSection")}>{sections.map((s) => <option key={s}>{s}</option>)}</select>
         </label>
+        <div className="text-xs text-muted-foreground sm:col-span-3">Also belongs to
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+            {sections.filter((s) => s !== f.relatedSection).map((s) => (
+              <label key={s} className="flex items-center gap-1 text-foreground">
+                <input type="checkbox" checked={also.includes(s)} onChange={(e) => setAlso(e.target.checked ? [...also, s] : also.filter((x) => x !== s))} /> {s}
+              </label>
+            ))}
+          </div>
+        </div>
         <label className="text-xs text-muted-foreground">Title *<input className={`${input} mt-1`} value={f.title} onChange={set("title")} /></label>
         <label className="text-xs text-muted-foreground">Document number<input className={`${input} mt-1`} value={f.documentNo} onChange={set("documentNo")} /></label>
         <label className="text-xs text-muted-foreground">Document date<input type="date" className={`${input} mt-1`} value={f.documentDate} onChange={set("documentDate")} /></label>
@@ -140,7 +152,9 @@ const AddDocument: React.FC<{
 };
 
 export const DocumentsStep: React.FC<{ landId: number; onSaved: () => void }> = ({ landId, onSaved }) => {
-  const rights = usePageRights("legal-land-master");
+  const pageRights = usePageRights("legal-land-master");
+  const lock = useLegalLock(); // registered land: changes go through an amendment
+  const rights = lock ? { ...pageRights, canCreate: false, canEdit: false, canDelete: false } : pageRights;
   const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({ queryKey: ["legal-land-docs", landId], queryFn: () => getLandDocuments(landId) });
   const [adding, setAdding] = useState<RequiredDocument | null | false>(false);
@@ -251,7 +265,7 @@ export const DocumentsStep: React.FC<{ landId: number; onSaved: () => void }> = 
                         <div className="font-medium text-foreground">{d.Title}</div>
                         <div className="text-xs text-muted-foreground">{d.DocumentCode}{d.DocumentNo ? ` · No. ${d.DocumentNo}` : ""}{d.DocumentDate ? ` · ${fmt(d.DocumentDate)}` : ""}</div>
                       </td>
-                      <td className="py-2 pr-3">{d.DocTypeName}<div className="text-xs text-muted-foreground">{d.RelatedSection}{d.RelatedOwner ? ` · ${d.RelatedOwner}` : ""}{d.RelatedLegalRecord ? ` · ${d.RelatedLegalRecord}` : ""}{d.RelatedMortgage ? ` · ${d.RelatedMortgage}` : ""}</div></td>
+                      <td className="py-2 pr-3">{d.DocTypeName}<div className="text-xs text-muted-foreground">{(d as { Sections?: string }).Sections || d.RelatedSection}{d.RelatedOwner ? ` · ${d.RelatedOwner}` : ""}{d.RelatedLegalRecord ? ` · ${d.RelatedLegalRecord}` : ""}{d.RelatedMortgage ? ` · ${d.RelatedMortgage}` : ""}</div></td>
                       <td className="py-2 pr-3"><div className="flex items-center gap-1.5"><span className="font-mono text-xs text-muted-foreground">v{d.CurrentVersionNo}</span><LegalFileLink id={d.FileId} name={d.FileName} /></div></td>
                       <td className="py-2 pr-3 whitespace-nowrap text-xs text-muted-foreground">{fmt(d.UploadedAt)}<div>{d.UploadedByName ?? ""}</div>
                         {d.ExpiresOn && <div className={d.ExpiresOn < new Date().toISOString().slice(0, 10) ? "font-semibold text-destructive" : ""}>{d.ExpiresOn < new Date().toISOString().slice(0, 10) ? "Expired" : "Valid till"} {fmt(d.ExpiresOn)}</div>}</td>
@@ -275,7 +289,9 @@ export const DocumentsStep: React.FC<{ landId: number; onSaved: () => void }> = 
 
 /** The documents filed under one legal record or loan, with "Attach document" (opened from that record's row). */
 export const RecordDocuments: React.FC<{ landId: number; link: DocLink; onSaved?: () => void }> = ({ landId, link, onSaved }) => {
-  const rights = usePageRights("legal-land-master");
+  const pageRights = usePageRights("legal-land-master");
+  const lock = useLegalLock(); // registered land: changes go through an amendment
+  const rights = lock ? { ...pageRights, canCreate: false, canEdit: false, canDelete: false } : pageRights;
   const queryClient = useQueryClient();
   const { data } = useQuery({ queryKey: ["legal-land-docs", landId], queryFn: () => getLandDocuments(landId) });
   const [adding, setAdding] = useState(false);

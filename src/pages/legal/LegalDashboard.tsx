@@ -1,8 +1,12 @@
+import { WaitingForMe } from "@/components/legal/WaitingForMe";
+import { LegalGuideButton } from "@/components/legal/LegalGuide";
+import { VerificationDashboardSection } from "@/components/legal/VerificationDashboardSection";
 import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getOverdueSearches } from "@/api/legalEnquirySearchApi";
 import { DeedSearchReport } from "@/components/legal/DeedSearchReport";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useProjectScope } from "@/components/legal/ProjectPicker";
 import { Global, MessageQuestion, Timer1, PauseCircle, ShieldTick, Judge, Map1, Grid5, DocumentText, Building4, Profile2User, Link21, Note1, Chart, MoneySend } from "iconsax-react";
 import { ArrowRight, ChevronRight, CheckCircle2, CircleAlert, ExternalLink, Search, Trash2, AlertTriangle, Eye } from "lucide-react";
 import { toast } from "sonner";
@@ -23,7 +27,7 @@ const READINESS: { key: string; label: string; hint: string }[] = [
   { key: "document-type", label: "Document types", hint: "Deed, porcha, tax receipt …" },
   { key: "deed-type", label: "Deed types", hint: "Sale, gift, partition …" },
   { key: "registration-office", label: "Registration offices", hint: "The ADSR / DSR offices where deeds were registered" },
-  { key: "approval-authority", label: "L1 / L2 approvers", hint: "Who reviews (L1) and approves (L2) land records" },
+  { key: "approval-authority", label: "Approval Control", hint: "Who verifies, approves, reviews and approves amendments" },
   { key: "portal-link", label: "Government site links", hint: "Banglarbhumi, WB registration … for checking plots" },
 ];
 
@@ -38,9 +42,11 @@ export default function LegalDashboard() {
   const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({ queryKey: ["legal-summary"], queryFn: getLegalSummary, staleTime: 60 * 1000 });
   const landRights = usePageRights("legal-land-master");
-  const { data: land } = useQuery({ queryKey: ["legal-land-stats"], queryFn: getLandStats, staleTime: 60 * 1000, enabled: landRights.canView });
+  // Follows the project picked at the top.
+  const { scope: dashProject } = useProjectScope();
+  const { data: land } = useQuery({ queryKey: ["legal-land-stats", String(dashProject)], queryFn: () => getLandStats(String(dashProject)), staleTime: 60 * 1000, enabled: landRights.canView });
   const enquiryRights = usePageRights("legal-land-enquiry");
-  const { data: searchOverdue = [] } = useQuery({ queryKey: ["legal-enq-search-overdue"], queryFn: getOverdueSearches, staleTime: 60 * 1000, enabled: enquiryRights.canView, retry: false });
+  const { data: searchOverdue = [] } = useQuery({ queryKey: ["legal-enq-search-overdue", String(dashProject)], queryFn: () => getOverdueSearches(String(dashProject)), staleTime: 60 * 1000, enabled: enquiryRights.canView, retry: false });
 
   const [landSearch, setLandSearch] = useState("");
   const [landToDelete, setLandToDelete] = useState<LandSummaryItem | null>(null);
@@ -86,8 +92,10 @@ export default function LegalDashboard() {
   return (
     <>
       <Breadcrumbs items={[{ label: "Dashboard", path: "/home" }, { label: "Legal" }]} />
-      <LegalShell title="Company Land Records" subtitle="Centralized property registers, ownership history, and document archive" icon={Judge}>
+      <LegalShell title="Company Land Records" subtitle="Centralized property registers, ownership history, and document archive" icon={Judge} action={<LegalGuideButton />}>
         <div className="space-y-5">
+          <WaitingForMe />
+          {enquiryRights.canView && <VerificationDashboardSection project={String(dashProject)} />}
           {error && <div className={`${card} p-4 text-sm text-destructive`}>Could not load the Legal summary: {(error as Error).message}</div>}
 
           {/* ── Hero ── */}
@@ -128,8 +136,7 @@ export default function LegalDashboard() {
                   ["High-risk properties", "highRisk", "/legal/approvals", true],
                   ["Restricted properties", "restricted", "/legal/approvals", true],
                   ["Pending final verification", "pendingFinal", "/legal/approvals", true],
-                  ["Pending L1 approval", "pendingL1", "/legal/land/deed-process", true],
-                  ["Pending L2 approval", "pendingL2", "/legal/land/deed-process", true],
+                  ["Pending deed approval", "pendingL1", "/legal/approvals?tab=approve", true],
                   ["Pending deed registration", "pendingRegistration", "/legal/deed-registration", true],
                   ["Deed payment overdue", "paymentOverdue", "/legal/deed-registration", true],
                   ["Overdue deed timeline", "deedOverdue", "/legal/land/deed-process", true],

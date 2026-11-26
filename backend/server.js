@@ -14,6 +14,9 @@ const { startFollowupReminderEngine } = require("./services/fixedAssetFollowupRe
 const { startSiteVisitReminderEngine } = require("./services/saSiteVisitReminders");
 const { startAutoDepreciationEngine } = require("./services/fixedAssetAutoDepreciation");
 const { startPoPaymentReminderEngine } = require("./services/poPaymentReminders");
+const { startSecurityResidentSyncEngine } = require("./services/securityResidentSync");
+const { startVisitorSweepEngine } = require("./services/securityVisitors");
+const { startTrackingSweepEngine } = require("./services/securityTracking");
 const { startDueDemandEngine } = require("./services/crmDemandScheduler");
 const { startCrmReminderEngine, stopCrmReminderEngine } = require("./services/crmReminderEngine");
 const authMiddleware = require("./middleware/auth");
@@ -188,6 +191,11 @@ const ALL_ROUTES = [
   { path: "/api/legal/diligence", file: "./routes/legal/dueDiligence" },
   { path: "/api/legal/enquiry-search", file: "./routes/legal/enquirySearch" },
   { path: "/api/legal/deed-reg", file: "./routes/legal/deedRegistration" },
+  { path: "/api/legal/flow", file: "./routes/legal/landFlow" },
+  { path: "/api/legal/reminders", file: "./routes/legal/legalReminders" },
+  { path: "/api/legal/verification-reports", file: "./routes/legal/verificationReports" },
+  { path: "/api/legal/verification", file: "./routes/legal/verification" },
+  { path: "/api/legal/amendments", file: "./routes/legal/landAmendment" },
   { path: "/api/legal", file: "./routes/legal/legalOperations" },
   { path: "/api/grace-time-master", file: "./routes/graceTimeMaster" },
   { path: "/api/work-location-master", file: "./routes/workLocationMaster" },
@@ -219,6 +227,10 @@ const ALL_ROUTES = [
   { path: "/api/maintenance-bills", file: "./routes/maintenanceBill" },
   { path: "/api/maintenance-key-custodian", file: "./routes/maintenanceKeyCustodian" },
   { path: "/api/security-attendance", file: "./routes/securityAttendance" },
+  // Civilier Security app (mobile-security-intercom): guard / security admin / resident, by role name.
+  { path: "/api/security", file: "./routes/securityIntercom" },
+  // Maintenance → Ads (super admins only): video ads for the Civilier Security app's residents.
+  { path: "/api/security-ads", file: "./routes/securityAds" },
   { path: "/api/electricity-maintenance", file: "./routes/electricityMaintenance" },
   { path: "/api/item-groups", file: "./routes/itemGroup" },
   { path: "/api/item-master", file: "./routes/itemMaster" },
@@ -519,7 +531,8 @@ async function createApp() {
     // Per account: 20 attempts / 15 min at one email address (see loginRateLimitKey for why not per IP).
     const loginLimiter = rateLimit({
       windowMs: 15 * 60 * 1000,
-      max: 20,
+      // The Security app's guards sign in on shared gate phones at every shift change: more room per address there.
+      max: (req) => (req.get("X-Client") === "mobile-security-intercom" ? 100 : 20),
       message: { error: "Too many login attempts. Try again later." },
       store: makeStore("rl:login:"),
       keyGenerator: loginRateLimitKey,
@@ -545,27 +558,28 @@ async function createApp() {
     // request. Without this, page load fires ~15 concurrent requests and each
     // one awaits redisZScore + getSystemMetrics + getPredictedRPM, causing
     // 2-3 s queuing before the route handler even starts.
-    let _cachedLimit = 500;
-    let _limitCachedAt = 0;
+    // Per person: the limit depends on that person's engagement score, so it is cached per user (a single shared value
+    // gave everyone the limit of whoever was looked up last). The system load part is shared and cached on its own.
+    const _limitCache = new Map(); // userId -> { limit, at }
+    let _load = { rpm: 0, memoryUsage: 0, at: 0 };
     async function getDynamicLimitCached(userId) {
       const now = Date.now();
-      if (now - _limitCachedAt < 10_000) return _cachedLimit;
+      const hit = _limitCache.get(userId);
+      if (hit && now - hit.at < 10_000) return hit.limit;
       try {
-        const score = Number(
-          (await redisZScore("engagement:score", userId)) || 0,
-        );
-        const metrics = await getSystemMetrics();
-        const predictedRPM = await getPredictedRPM();
-        _cachedLimit = getDynamicLimit(
-          score,
-          predictedRPM || metrics.rpm,
-          metrics.memoryUsage,
-        );
-        _limitCachedAt = now;
+        if (now - _load.at >= 10_000) {
+          const metrics = await getSystemMetrics();
+          const predictedRPM = await getPredictedRPM();
+          _load = { rpm: predictedRPM || metrics.rpm, memoryUsage: metrics.memoryUsage, at: now };
+        }
+        const score = Number((await redisZScore("engagement:score", userId)) || 0);
+        const limit = getDynamicLimit(score, _load.rpm, _load.memoryUsage);
+        _limitCache.set(userId, { limit, at: now });
+        if (_limitCache.size > 5000) _limitCache.delete(_limitCache.keys().next().value);
+        return limit;
       } catch {
-        // keep last cached value
+        return hit?.limit ?? 500;
       }
-      return _cachedLimit;
     }
 
     // The limiter runs before authentication, so req.user does not exist yet: the person is identified from a
@@ -573,6 +587,9 @@ async function createApp() {
     const apiLimiter = rateLimit({
       windowMs: 60 * 1000,
       max: async (req) => {
+        // The Civilier Security app (guards on shift, residents waiting at the gate) keeps live screens open all day:
+        // a much higher ceiling per person, and for its sign-in screen at the shared address.
+        if (req.get("X-Client") === "mobile-security-intercom") return req.rateLimitUserId == null && req.rateLimitPortalId == null ? 5000 : 3000;
         if (req.rateLimitUserId == null) return 1000;
         try {
           return await getDynamicLimitCached(req.rateLimitUserId);
@@ -628,6 +645,8 @@ async function createApp() {
   // including login itself — was rejected with "No token provided" before
   // crmPortal.js's own router ever ran.
   app.use("/api/crm-portal", require("./routes/crmPortal"));
+  // Civilier Security app for residents: the customer-portal sign-in (its own auth), so it sits before the staff wall too.
+  app.use("/api/security-portal", require("./routes/securityPortal"));
   // Channel partners' systems push leads with an API key (Admin → Integrations),
   // never a staff login — so it sits before the staff auth wall like the portal.
   app.use("/api/public/partner-leads", require("./routes/publicPartnerLeads"));
@@ -787,6 +806,9 @@ async function startServer() {
       startSiteVisitReminderEngine();
       startAutoDepreciationEngine();
       startPoPaymentReminderEngine();
+      startSecurityResidentSyncEngine();
+      startVisitorSweepEngine();
+      startTrackingSweepEngine();
       startDueDemandEngine();
       startCrmReminderEngine();
     });

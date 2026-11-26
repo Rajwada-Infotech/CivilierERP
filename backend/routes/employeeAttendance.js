@@ -84,7 +84,8 @@ router.get("/hr/records/:id", requirePageRight(HR, "view"), async (req, res) => 
     const record = await svc.getRecord(pool, id);
     if (!record) return res.status(404).json({ error: "Not found" });
     const movements = await movementSvc.list(pool, id).catch(() => []); // [] until migration 696 has run
-    res.json({ record, audit: await svc.getAudit(pool, id), movements });
+    const points = await movementSvc.points(pool, id).catch(() => []); // raw GPS points with accuracy / result (migration 721)
+    res.json({ record, audit: await svc.getAudit(pool, id), movements, points });
   } catch (e) { fail(res, e, "GET /hr/records/:id"); }
 });
 

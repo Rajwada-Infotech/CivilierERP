@@ -13,7 +13,9 @@ import { SHEET_CSS, Detail, Dimension, Skel } from "@/components/sheet/Sheet";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface FinanceDashboardData {
-  paymentsMade: { totalCount: number; todayCount: number; totalAmount: number; todayAmount: number };
+  paymentsMade: { totalCount: number; todayCount: number; totalAmount: number; todayAmount: number; pendingApprovalCount?: number };
+  invoices: { totalCount: number; paidCount: number; pendingApprovalCount: number };
+  overdue: { invoiceCount: number; invoiceAmount: number; paymentCount: number; paymentAmount: number };
   receivedPayments: { totalCount: number; todayCount: number; totalAmount: number; todayAmount: number; approvedCount: number; draftCount: number };
   cheques: { totalCount: number; activeCount: number; inactiveCount: number };
   cards: { totalCount: number; activeCount: number; inactiveCount: number };
@@ -56,6 +58,8 @@ interface MonthlyIncomePoint {
 
 const EMPTY_DATA: FinanceDashboardData = {
   paymentsMade: { totalCount: 0, todayCount: 0, totalAmount: 0, todayAmount: 0 },
+  invoices: { totalCount: 0, paidCount: 0, pendingApprovalCount: 0 },
+  overdue: { invoiceCount: 0, invoiceAmount: 0, paymentCount: 0, paymentAmount: 0 },
   receivedPayments: { totalCount: 0, todayCount: 0, totalAmount: 0, todayAmount: 0, approvedCount: 0, draftCount: 0 },
   cheques: { totalCount: 0, activeCount: 0, inactiveCount: 0 },
   cards: { totalCount: 0, activeCount: 0, inactiveCount: 0 },
@@ -77,6 +81,8 @@ function normalise(raw: any): FinanceDashboardData {
   };
   return {
     paymentsMade,
+    invoices: raw.invoices ?? EMPTY_DATA.invoices,
+    overdue: raw.overdue ?? EMPTY_DATA.overdue,
     receivedPayments: raw.receivedPayments ?? EMPTY_DATA.receivedPayments,
     cheques: raw.cheques ?? EMPTY_DATA.cheques,
     cards: raw.cards ?? EMPTY_DATA.cards,
@@ -274,7 +280,6 @@ const FinanceDashboard = () => {
   const net = received - paid;
   const receivedPct = share(received, received + paid);
   const readAt = dataUpdatedAt ? new Date(dataUpdatedAt) : new Date();
-  const todayNet = n0(data.receivedPayments.todayAmount) - n0(data.paymentsMade.todayAmount);
 
   return (
     <div>
@@ -355,22 +360,40 @@ const FinanceDashboard = () => {
             )}
           </Detail>
 
-          <Detail tag="B" title="Today">
-            {isLoading ? (<><Skel h={40} /><Skel h={40} /><Skel h={40} /></>) : (
+          <Detail tag="B" title="Invoices and approvals">
+            {isLoading ? <Skel h={90} /> : (
               <div>
-                {[
-                  { label: "Received today", value: money(data.receivedPayments.todayAmount), sub: `${fmtInt(data.receivedPayments.todayCount)} receipt${n0(data.receivedPayments.todayCount) === 1 ? "" : "s"}`, path: "/received-payments", color: undefined as string | undefined },
-                  { label: "Paid out today", value: money(data.paymentsMade.todayAmount), sub: `${fmtInt(data.paymentsMade.todayCount)} payment${n0(data.paymentsMade.todayCount) === 1 ? "" : "s"}`, path: "/payments", color: undefined },
-                  { label: "Net for today", value: money(todayNet), sub: todayNet < 0 ? "more went out than came in" : "in hand after today's payments", path: "/reports", color: todayNet < 0 ? "var(--red)" : undefined },
-                ].map((s, i) => (
-                  <button key={s.label} onClick={() => navigate(s.path)} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, padding: "13px 0", borderTop: i ? "1px solid var(--rule-soft)" : 0, width: "100%" }}>
-                    <span style={{ minWidth: 0 }}>
-                      <span className="label link" style={{ color: "var(--ink)" }}>{s.label}</span>
-                      <span style={{ display: "block", fontSize: 12, color: "var(--graphite)", marginTop: 4 }}>{s.sub}</span>
-                    </span>
-                    <span className="figure" style={{ fontSize: 28, whiteSpace: "nowrap", color: s.color }}>{s.value}</span>
-                  </button>
-                ))}
+                {/* Invoices and approvals waiting (all time). */}
+                <div style={{ border: "1px solid var(--ink)", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))" }}>
+                  {[
+                    { label: "Invoices", value: data.invoices.totalCount, sub: "booked", path: "/finance/invoice", red: false },
+                    { label: "Invoices paid", value: data.invoices.paidCount, sub: `of ${fmtInt(data.invoices.totalCount)}`, path: "/finance/invoice", red: false },
+                    { label: "Invoices to approve", value: data.invoices.pendingApprovalCount, sub: "waiting for approval", path: "/finance/invoice", red: n0(data.invoices.pendingApprovalCount) > 0 },
+                    { label: "Payments to approve", value: n0(data.paymentsMade.pendingApprovalCount), sub: "waiting for approval", path: "/payments", red: n0(data.paymentsMade.pendingApprovalCount) > 0 },
+                  ].map((b, i) => (
+                    <button key={b.label} onClick={() => navigate(b.path)} style={{ textAlign: "left", padding: "12px 14px", borderLeft: i ? "1px solid var(--rule-soft)" : 0 }}>
+                      <span className="label link" style={{ color: "var(--ink)" }}>{b.label}</span>
+                      <span className="figure" style={{ display: "block", fontSize: 24, marginTop: 6, color: b.red ? "var(--red)" : undefined }}>{fmtInt(b.value)}</span>
+                      <span style={{ display: "block", fontSize: 12, color: "var(--graphite)", marginTop: 2 }}>{b.sub}</span>
+                    </button>
+                  ))}
+                </div>
+                {/* Overdue: approved invoices with nothing paid yet, and payments past their date that aren't approved yet. */}
+                <div style={{ border: "1px solid var(--ink)", borderTop: 0, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
+                  {[
+                    { label: "Invoices overdue", count: n0(data.overdue.invoiceCount), amount: n0(data.overdue.invoiceAmount), sub: "approved, nothing paid yet", path: "/finance/invoice" },
+                    { label: "Payments overdue", count: n0(data.overdue.paymentCount), amount: n0(data.overdue.paymentAmount), sub: "past the payment date, not approved yet", path: "/payments" },
+                  ].map((b, i) => (
+                    <button key={b.label} onClick={() => navigate(b.path)} style={{ textAlign: "left", padding: "12px 14px", borderLeft: i ? "1px solid var(--rule-soft)" : 0 }}>
+                      <span className="label link" style={{ color: b.count ? "var(--red)" : "var(--ink)" }}>{b.label}</span>
+                      <span style={{ display: "flex", alignItems: "baseline", gap: 10, marginTop: 6 }}>
+                        <span className="figure" style={{ fontSize: 24, color: b.count ? "var(--red)" : undefined }}>{fmtInt(b.count)}</span>
+                        {b.count > 0 && <span className="figure" style={{ fontSize: 14, color: "var(--red)" }}>{money(b.amount)}</span>}
+                      </span>
+                      <span style={{ display: "block", fontSize: 12, color: "var(--graphite)", marginTop: 2 }}>{b.sub}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </Detail>

@@ -1,4 +1,5 @@
 import React from "react";
+import { DueBadge, dueRow, dueLevel, DUE_BG } from "@/components/legal/DueBadge";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Clock, AlertTriangle, FileWarning, ExternalLink } from "lucide-react";
@@ -87,7 +88,7 @@ export default function LegalPendingQueuePage() {
               <h3 className="text-sm font-heading font-semibold text-foreground uppercase tracking-wider flex items-center gap-2">
                 <AlertTriangle size={16} className="text-red-600" /> Missing Mandatory Checklist Items ({missingDocs.length})
               </h3>
-              <p className="text-xs text-muted-foreground">Documents that block L1 and L2 approvals until uploaded, verified, or waived.</p>
+              <p className="text-xs text-muted-foreground">Documents that block approval until uploaded, verified, or waived.</p>
             </div>
 
             <div className="rounded-xl border border-border/80 bg-card overflow-hidden shadow-sm">
@@ -131,7 +132,7 @@ export default function LegalPendingQueuePage() {
                             </span>
                           </td>
                           <td className="px-4 py-3 text-foreground">{doc.ResponsibleUserName || "Unassigned"}</td>
-                          <td className="px-4 py-3 text-muted-foreground">{doc.DueDate || "Immediate"}</td>
+                          <td className="px-4 py-3"><DueBadge date={doc.DueDate || null} empty="Immediate" /></td>
                         </tr>
                       ))}
                     </tbody>

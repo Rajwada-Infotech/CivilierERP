@@ -95,7 +95,7 @@ const ShareSuggestions: React.FC<{ landId: number; onSaved: () => void }> = ({ l
               <p className="mt-1 rounded bg-amber-500/10 px-2 py-1 text-[0.6875rem] text-amber-800 dark:text-amber-300">
                 Suggestion for legal review — not a legal determination.{!result.allValidated && " Some rules used are NOT yet validated by a lawyer."}
               </p>
-              <table className="mt-2 w-full text-left text-xs">
+              <div className="overflow-x-auto"><table className="mt-2 w-full text-left text-xs">
                 <thead className="text-muted-foreground"><tr><th className="py-1 pr-2">Heir</th><th className="py-1 pr-2">Role</th><th className="py-1 pr-2 text-right">Recorded %</th><th className="py-1 pr-2 text-right">Suggested %</th><th className="py-1">Rule</th></tr></thead>
                 <tbody>{result.lines.map((l) => {
                   const off = l.suggestedPct != null && Math.abs(Number(l.recordedPct ?? 0) - l.suggestedPct) > 0.01;
@@ -108,7 +108,7 @@ const ShareSuggestions: React.FC<{ landId: number; onSaved: () => void }> = ({ l
                     </tr>
                   );
                 })}</tbody>
-              </table>
+              </table></div>
               {result.notes.length > 0 && <ul className="mt-1 list-disc pl-5 text-[0.6875rem] text-muted-foreground">{result.notes.map((n) => <li key={n}>{n}</li>)}</ul>}
             </>
           )}

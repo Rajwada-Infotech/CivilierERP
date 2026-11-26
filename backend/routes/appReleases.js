@@ -35,6 +35,8 @@ const APP_CATALOG = {
   employee: { label: "Civilier Employee Portal", packageName: "com.rajwadainfotech.civilieremployee", fileName: "CivilierERPEmployeePortal.apk" },
   // The staff app (mobile-crm): CRM + the Maintenance module; Civilier Home above is the customers' app.
   crm: { label: "Civilier CRM", packageName: "com.rajwadainfotech.civiliercrm", fileName: "CivilierCRM.apk" },
+  // The Security Intercom app (mobile-security-intercom): guards, security admins and residents. Listed before its first build.
+  "security-intercom": { label: "Civilier Security", packageName: "com.rajwadainfotech.civiliersecurity", fileName: "CivilierSecurity.apk" },
 };
 
 const upload = multer({

@@ -1,3 +1,5 @@
+import { usePaged } from "@/components/legal/usePaged";
+import { DueBadge, dueRow, dueLevel, DUE_BG } from "@/components/legal/DueBadge";
 import { useEffect, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
@@ -15,7 +17,7 @@ import { getLegalLookup, uploadLegalFile } from "@/api/legalMastersApi";
 import { deedRegistrationAction } from "@/api/legalLandApi";
 import {
   getDeedRegList, getDeedRegLand, saveConsideration, addStampQuery, deleteStampQuery, saveFinalRegistration, addDeedTracking, inr,
-  addPayment, deletePayment, addInstalment, deleteInstalment, getInstalmentTemplates, applyInstalmentTemplate,
+  addPayment, deletePayment, setPaymentStatus, addInstalment, deleteInstalment, getInstalmentTemplates, applyInstalmentTemplate,
   type DeedRegRow, type DeedRegLand, type StampQuery, type TrackRow, type PaymentRow, type ScheduleRow, type RevisionRow, type ValuationRow,
 } from "@/api/legalDeedRegApi";
 
@@ -55,21 +57,21 @@ const stepsOf = (l: DeedRegRow | DeedRegLand, queries: number) => [
  */
 export default function LandDeedRegistrationPage() {
   const [tab, setTab] = useState<"active" | "registered">("active");
-  const [q, setQ] = useState("");
   const [pickedId, setPickedId] = useState<number | null>(null);
-  const { data, isFetching, error } = useQuery({ queryKey: ["legal-deed-reg", tab], queryFn: () => getDeedRegList(tab) });
-  const { inScope } = useProjectScope();
-  const lands = (data?.lands ?? []).filter((l) => inScope(l.ProjectId));
-  const { data: other } = useQuery({ queryKey: ["legal-deed-reg", tab === "active" ? "registered" : "active"], queryFn: () => getDeedRegList(tab === "active" ? "registered" : "active") });
-  const counts = { active: tab === "active" ? lands.length : other?.lands.filter((l) => inScope(l.ProjectId)).length ?? 0, registered: tab === "registered" ? lands.length : other?.lands.filter((l) => inScope(l.ProjectId)).length ?? 0 };
-  const term = q.trim().toLowerCase();
-  const list = lands.filter((l) => !term || [l.LandCode, l.LandName, l.MouzaName, l.RsDagNo, l.LrDagNo, l.RegDeedNo].some((v) => String(v ?? "").toLowerCase().includes(term)));
+  // One page (20) of the open tab from the server; the other tab's count is its page total.
+  const paged = usePaged(["legal-deed-reg", tab], (qs) => getDeedRegList(tab, qs));
+  const { data, isFetching, error, q, setQ } = paged;
+  const lands = data?.lands ?? [];
+  const otherTab = tab === "active" ? "registered" : "active";
+  const other = usePaged(["legal-deed-reg", otherTab, "count"], (qs) => getDeedRegList(otherTab, qs), { pageSize: 1 });
+  const counts = { [tab]: paged.total, [otherTab]: other.total } as Record<"active" | "registered", number>;
+  const list = lands;
   useEffect(() => { if (pickedId && !lands.some((l) => l.LandId === pickedId)) setPickedId(null); }, [lands, pickedId]);
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Legal", "Deed Registration"]} />
-      <LegalShell title="Deed Registration" subtitle="Lands approved in Deed Process. Work each land through consideration, stamp duty, application, final registration and the physical deed." icon={DocumentText}>
+      <LegalShell stage="registration" title="Deed Registration" subtitle="Lands approved in Deed Process. Work each land through consideration, stamp duty, application, final registration and the physical deed." icon={DocumentText}>
         <div className="legal-cq"><div className="legal-split">
           <aside className="legal-queue border border-border bg-card">
             <div className="space-y-2 border-b border-border p-3">
@@ -107,6 +109,7 @@ export default function LandDeedRegistrationPage() {
               })}
               {!list.length && <li className="p-4 text-center text-xs text-muted-foreground">{isFetching ? "Loading…" : tab === "active" ? "No land waiting for registration" : "No registered land yet"}</li>}
             </ul>
+            <div className="px-3 pb-3">{paged.pager}</div>
           </aside>
           <section className="legal-cq min-w-0">
             {pickedId ? <LandWork key={pickedId} id={pickedId} /> : <div className="flex h-48 items-center justify-center border border-dashed border-border text-sm text-muted-foreground">Pick a land from the list</div>}
@@ -181,7 +184,7 @@ function LandWork({ id }: { id: number }) {
           <div><dt className="text-muted-foreground">LR Dag / Khatian</dt><dd className="font-semibold">{l.LrDagNo ?? "—"} / {l.LrKhatianNo ?? "—"}</dd></div>
           <div><dt className="text-muted-foreground">Sellers (current owners)</dt><dd className="font-semibold">{l.Owners ?? "—"}</dd></div>
           <div><dt className="text-muted-foreground">Govt. valuation</dt><dd className="font-semibold">{inr(l.GovtValue)}</dd></div>
-          <div><dt className="text-muted-foreground">Approved</dt><dd className="font-semibold">L1 {l.L1By ?? "—"} · L2 {l.L2By ?? "—"}</dd></div>
+          <div><dt className="text-muted-foreground">Approved</dt><dd className="font-semibold">{l.L2By ?? l.L1By ?? "—"}</dd></div>
           <div><dt className="text-muted-foreground">Deed copy (Deed Process)</dt><dd>{l.DeedFileId ? <LegalFileLink id={l.DeedFileId} name={l.DeedFileName ?? "Deed copy"} /> : "—"}</dd></div>
         </dl>
       </div>
@@ -255,7 +258,7 @@ function Consideration({ l, revisions, valuation, editable, onSaved }: { l: Deed
       {revisions.length > 0 && (
         <div className="border border-border">
           <p className="border-b border-border bg-muted/40 px-3 py-1.5 text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground">Consideration history</p>
-          <table className="w-full text-left text-xs"><tbody>
+          <div className="overflow-x-auto"><table className="w-full text-left text-xs"><tbody>
             {revisions.map((r) => (
               <tr key={r.RevisionId} className="border-t border-border first:border-t-0">
                 <td className="px-3 py-1.5 tabular-nums">{r.RevisionDate}</td>
@@ -263,7 +266,7 @@ function Consideration({ l, revisions, valuation, editable, onSaved }: { l: Deed
                 <td className="px-3 py-1.5 text-muted-foreground">{r.Reason ?? ""}{r.ValuationDate ? ` · valuation ${r.ValuationDate}` : ""}{r.ByName ? ` — ${r.ByName}` : ""}</td>
               </tr>
             ))}
-          </tbody></table>
+          </tbody></table></div>
         </div>
       )}
     </div>
@@ -365,7 +368,7 @@ function Payments({ l, payments, schedule, editable, onSaved }: { l: DeedRegLand
         <div className={`flex flex-wrap items-center justify-between gap-3 border-l-4 px-3 py-2 ${next?.status === "Overdue" ? "border-destructive bg-destructive/10" : "border-sky-600 bg-sky-600/5"}`}>
           <div className="text-sm">
             {next ? (
-              <><b>{next.status === "Overdue" ? "Overdue" : "Next"}: {next.Label ?? next.Purpose ?? "Instalment"}</b> — {inr(next.short)} due {next.DueDate}
+              <><b>{next.status === "Overdue" ? "Overdue" : "Next"}: {next.Label ?? next.Purpose ?? "Instalment"}</b> — {inr(next.short)} <DueBadge date={next.DueDate} />
                 {overdue.length > 1 && <span className="text-destructive"> · {overdue.length} instalments overdue</span>}</>
             ) : <><b>{inr(due)} still to pay</b> — no instalment planned for it yet</>}
             <span className="block text-xs text-muted-foreground">Final Registration opens when the full consideration is paid.</span>
@@ -405,7 +408,7 @@ function Payments({ l, payments, schedule, editable, onSaved }: { l: DeedRegLand
                 </select>
               </label>
               {chosenTpl && (
-                <table className="w-full text-left text-xs"><tbody>
+                <div className="overflow-x-auto"><table className="w-full text-left text-xs"><tbody>
                   {chosenTpl.lines.map((x) => {
                     const d = new Date(`${l.ConsDate ?? today()}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + Number(x.DueDays));
                     return (
@@ -416,7 +419,7 @@ function Payments({ l, payments, schedule, editable, onSaved }: { l: DeedRegLand
                       </tr>
                     );
                   })}
-                </tbody></table>
+                </tbody></table></div>
               )}
               <div className="flex gap-2">
                 <button className={primary} disabled={busy || !tpl} onClick={applyTpl}>{schedule.length ? "Replace schedule with this" : "Make schedule"}</button>
@@ -473,7 +476,7 @@ function Payments({ l, payments, schedule, editable, onSaved }: { l: DeedRegLand
                   <span className="w-5 shrink-0 text-xs text-muted-foreground">{k + 1}</span>
                   <span className="min-w-[10rem] flex-1">
                     <span className="block text-sm font-semibold">{r.Label ?? r.Purpose ?? "Instalment"}</span>
-                    <span className="block text-xs text-muted-foreground">Due {r.DueDate}{r.Label && r.Purpose ? ` · ${r.Purpose}` : ""}</span>
+                    <span className="block text-xs text-muted-foreground"><DueBadge date={r.DueDate} done={r.status === "Paid"} label="Due" />{r.Label && r.Purpose ? ` · ${r.Purpose}` : ""}</span>
                   </span>
                   <span className="text-right">
                     <span className="block text-sm font-bold tabular-nums">{inr(r.Amount)}</span>
@@ -543,13 +546,26 @@ function Payments({ l, payments, schedule, editable, onSaved }: { l: DeedRegLand
                     </span>
                   </span>
                   <span className={`text-sm font-bold tabular-nums ${r.Purpose === "Refund" ? "text-rose-600" : ""}`}>{r.Purpose === "Refund" ? "−" : ""}{inr(r.Amount)}</span>
-                  {editable && <button className={`${small} text-rose-600`} onClick={() => remove("Remove this payment?", () => deletePayment(r.PaymentId))}>Delete</button>}
+                  {(() => {
+                    const ps = (r as { PaymentStatus?: string }).PaymentStatus ?? "Cleared";
+                    const tone = ps === "Cleared" ? "border-emerald-600 text-emerald-700" : ps === "Pending" ? "border-amber-500 text-amber-700" : "border-destructive text-destructive";
+                    const mark = async (to: string) => {
+                      const reason = to === "Cleared" ? "" : await askLegal({ title: `Mark this payment ${to.toLowerCase()}?`, message: "The payment stays in the history; only cleared payments count as paid.", input: { label: "Reason", required: true }, confirmText: to });
+                      if (reason === null) return;
+                      run(() => setPaymentStatus(r.PaymentId, to, reason || undefined));
+                    };
+                    return <>
+                      <span className={`border px-1.5 py-0.5 text-[0.625rem] font-semibold uppercase ${tone}`}>{ps}</span>
+                      {editable && ps === "Pending" && <><button className={small} onClick={() => mark("Cleared")}>Cleared</button><button className={`${small} text-rose-600`} onClick={() => mark("Failed")}>Failed</button></>}
+                      {editable && ps === "Cleared" && <><button className={small} onClick={() => mark("Refunded")}>Refunded</button><button className={`${small} text-rose-600`} onClick={() => mark("Reversed")} title="A wrong entry — reversed, kept in the history">Reverse</button></>}
+                    </>;
+                  })()}
                 </li>
               ))}
               <li className="flex justify-between px-3 py-2.5 text-sm font-bold"><span>Total paid</span><span className="tabular-nums">{inr(paid)}</span></li>
             </ol>
           ) : <p className="text-sm text-muted-foreground">No payment recorded yet.</p>}
-          <p className="text-[0.6875rem] text-muted-foreground">This is the only place this purchase is paid. A payment cannot be dated in the future or be more than what is still to pay.</p>
+          <p className="text-[0.6875rem] text-muted-foreground">This is the only place this purchase is paid. A payment cannot be dated in the future or be more than what is still to pay, and the same transaction cannot be entered twice. Payments are never deleted: a wrong one is reversed, a bounced one marked failed — only cleared payments count.</p>
         </div>
       )}
     </div>
@@ -572,7 +588,7 @@ function StampDuty({ id, rows, editable, onSaved }: { id: number; rows: StampQue
   };
   return (
     <div className="space-y-3">
-      <table className="w-full text-left text-sm">
+      <div className="overflow-x-auto"><table className="w-full text-left text-sm">
         <thead className="text-[0.6875rem] uppercase tracking-wider text-muted-foreground"><tr><th className="py-1">Query date</th><th className="py-1">Fee type</th><th className="py-1 text-right">Amount</th><th className="py-1">Remarks</th>{editable && <th />}</tr></thead>
         <tbody>
           {rows.map((r) => (
@@ -586,7 +602,7 @@ function StampDuty({ id, rows, editable, onSaved }: { id: number; rows: StampQue
           {!rows.length && <tr><td colSpan={5} className="py-2 text-xs text-muted-foreground">No query yet</td></tr>}
           {rows.length > 0 && <tr className="border-t-2 border-border"><td colSpan={2} className="py-1.5 text-xs font-semibold uppercase">Total</td><td className="py-1.5 text-right font-bold tabular-nums">{inr(total)}</td><td colSpan={2} /></tr>}
         </tbody>
-      </table>
+      </table></div>
       {editable && (
         <div className="legal-g4 border border-border bg-muted/30 p-3">
           <label className="text-xs">Query date<input type="date" className={field} value={f.queryDate} onChange={(e) => setF({ ...f, queryDate: e.target.value })} /></label>
@@ -613,7 +629,7 @@ function Apply({ l, canApply, onSaved }: { l: DeedRegLand; canApply: boolean; on
         <p className="text-sm">Applied by <b>{l.RegAppliedByName ?? "—"}</b> on <b>{String(l.RegAppliedAt).slice(0, 10)}</b> · <span className="font-semibold text-sky-700">{l.RegDaysOpen} day{l.RegDaysOpen === 1 ? "" : "s"} open</span></p>
       ) : canApply ? (
         <button className={primary} disabled={busy} onClick={apply}>Apply to deed register</button>
-      ) : <p className="text-xs text-amber-700">Only an L1 or L2 Approver (Setup → Approval Control) can apply.</p>}
+      ) : <p className="text-xs text-amber-700">Only an Approver (Setup → Approval Control) can apply.</p>}
       <details className="border border-border">
         <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">Registry search records for this land (add, edit, delete)</summary>
         <div className="border-t border-border"><RegistrySearchPanel landCode={l.LandCode} /></div>
@@ -671,7 +687,7 @@ function FinalRegistration({ l, editable, canSubmit, onSaved }: { l: DeedRegLand
         ) : !l.RegAppliedAt ? <p className="text-xs text-muted-foreground">Apply to the deed register (step 3) first.</p>
           : !finalSaved ? <p className="text-xs text-muted-foreground">Save the date, office and mode, then upload the registered deed.</p>
           : canSubmit ? <button className={primary} disabled={busy} onClick={submit}>Upload registered deed & submit</button>
-          : <p className="text-xs text-amber-700">Only an L1 or L2 Approver can submit the registered deed.</p>}
+          : <p className="text-xs text-amber-700">Only an Approver can submit the registered deed.</p>}
       </div>
     </div>
   );

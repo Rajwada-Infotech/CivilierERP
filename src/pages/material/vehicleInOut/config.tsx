@@ -9,7 +9,7 @@ import { type ExportColumn } from "@/lib/export";
 import { ApprovalStatusChain, type TrailData } from "@/components/ApprovalStatusChain";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
-import { Truck, X, Eye, Trash2, FileText, Paperclip, Edit3, FileDown } from "lucide-react";
+import { Truck, X, Eye, Trash2, FileText, Paperclip, Edit3, FileDown, FilePenLine } from "lucide-react";
 import { DateInput, DateTimeInput } from "@/components/ui/date-input";
 
 export const VIO_EXPORT_COLUMNS: ExportColumn[] = [
@@ -403,13 +403,22 @@ export function VehicleCard({
         >
           <FileDown size={15} />
         </button>
-        {canEdit && (
+        {canEdit && isEditableStatus(rec.Status) && (
           <button
             onClick={() => onEdit(rec)}
             className="text-muted-foreground hover:bg-primary/5 p-2 transition-colors"
             title="Edit"
           >
             <Edit3 size={15} />
+          </button>
+        )}
+        {canEdit && rec.Status === "Approved" && (
+          <button
+            onClick={() => bridge.onAmend(rec)}
+            className="text-muted-foreground hover:bg-primary/5 p-2 transition-colors"
+            title="Amend — any change, with a reason; applied once the amendment is approved"
+          >
+            <FilePenLine size={15} />
           </button>
         )}
         {canDelete && (
@@ -482,9 +491,13 @@ export const buildEmpty = (activeFinYear?: string) => ({
 // Reassigned each render by VehicleInOut() below — see
 // useApprovalTrailsBulk's own comment for why the Status column reads from
 // this instead of firing its own per-row GET /trail.
+// Only a Draft, Pending or Rejected entry is edited; an approved one changes through Amend.
+export const isEditableStatus = (s: string | null | undefined) => ["Draft", "Pending", "Rejected"].includes(s || "Draft");
+
 export const bridge = {
   onView: (() => {}) as (r: any) => void,
   onEdit: (() => {}) as (r: any) => void,
+  onAmend: (() => {}) as (r: any) => void,
   onDelete: (() => {}) as (id: number) => void,
   onGeneratePdf: (() => {}) as (r: any) => void,
   canEdit: true,
@@ -623,13 +636,23 @@ export const COLUMNS: ColumnDef<any, unknown>[] = [
             >
               <FileDown size={15} />
             </button>
-            {bridge.canEdit && (
+            {bridge.canEdit && isEditableStatus(rec.Status) && (
               <button
                 onClick={() => bridge.onEdit(rec)}
                 className="p-1 text-foreground hover:bg-primary/5 transition-colors"
                 title="Edit this entry"
               >
                 <Edit3 size={15} />
+              </button>
+            )}
+            {bridge.canEdit && rec.Status === "Approved" && (
+              <button
+                onClick={() => bridge.onAmend(rec)}
+                className="p-1 text-foreground hover:bg-primary/5 transition-colors"
+                title="Amend — any change, with a reason; applied once the amendment is approved"
+                aria-label="Amend this entry"
+              >
+                <FilePenLine size={15} />
               </button>
             )}
             {bridge.canDelete && (

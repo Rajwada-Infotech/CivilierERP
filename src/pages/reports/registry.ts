@@ -46,6 +46,7 @@ export const MODULE_SECTIONS: ModuleSection[] = [
     icon: Boxes,
     reportIds: [
       "po-register",
+      "po-item-register",
       "grn-register",
       "pending-mr-report",
       "issue-register",

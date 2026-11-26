@@ -2,10 +2,10 @@ import * as vehApi from "@/api/vehicleInOutApi";
 import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
 import { parseJsonArray } from "@/utils/parseJsonArray";
 import { OrderChat } from "@/components/orders/OrderChat";
-import { X, Paperclip, FileWarning, Edit3, MessageCircle, Printer, FileDown } from "lucide-react";
+import { X, Paperclip, FileWarning, Edit3, MessageCircle, Printer, FileDown, FilePenLine } from "lucide-react";
 import { BodyPortal } from "@/components/ui/body-portal";
 import { AttachmentThumb, LinePhotoThumb, fmtServerDateTime } from "./config";
-import { bridge } from "./config";
+import { bridge, isEditableStatus } from "./config";
 import type { VIOState } from "./useVehicleInOut";
 
 // One entry opened: details, lines, attachments, print / PDF, edit / delete.
@@ -341,7 +341,7 @@ export function VIOViewModal({ m }: { m: VIOState }) {
                 >
                   <FileDown size={13} /> Generate PDF
                 </button>
-                {rights.canEdit && (
+                {rights.canEdit && isEditableStatus(viewingRec.Status) && (
                   <button
                     onClick={() => {
                       setViewingRec(null);
@@ -350,6 +350,17 @@ export function VIOViewModal({ m }: { m: VIOState }) {
                     className="inline-flex items-center gap-2 px-4 py-2 bg-card border border-foreground/30 text-sm font-medium hover:bg-primary/5 transition-colors"
                   >
                     <Edit3 size={13} /> Edit
+                  </button>
+                )}
+                {rights.canEdit && viewingRec.Status === "Approved" && (
+                  <button
+                    onClick={() => {
+                      setViewingRec(null);
+                      bridge.onAmend(viewingRec);
+                    }}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-card border border-foreground/30 text-sm font-medium hover:bg-primary/5 transition-colors"
+                  >
+                    <FilePenLine size={13} /> Amend
                   </button>
                 )}
               </div>

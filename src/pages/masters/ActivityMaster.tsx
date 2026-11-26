@@ -303,7 +303,7 @@ const ActivityMaster: React.FC = () => {
     enabled: addItemOpen,
   });
   const unlinkedItems = allItems.filter(
-    (i) => !linkedItems.some((li) => li.itemId === i.M_Id),
+    (i) => i.M_IsActive !== false && !linkedItems.some((li) => li.itemId === i.M_Id),
   );
 
   // Checkpoints tagged onto the activity currently open in the detail

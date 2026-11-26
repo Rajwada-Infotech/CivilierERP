@@ -6,8 +6,7 @@ const { getPool, sql } = require("../db");
 const { projectPredicate, projectAllowed, assertProjectAllowed } = require("../services/projectScope");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
-const { transition, guardEditAnyStage, restartApprovalCycle, getRecordStatus } = require("../services/approvalService");
-const { resolveAllowPostApproval } = require("../middleware/permissions");
+const { transition, restartApprovalCycle, getRecordStatus } = require("../services/approvalService");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
@@ -1097,6 +1096,96 @@ router.get("/l1-check", async (req, res) => {
   }
 });
 
+// ── GET /item-register — Reports > Material > PO Item Register ───────────────
+// One row per PO line (dbo.PurchaseOrderItems) with its PO's company, project, supplier, date, status and remarks.
+// Filters (optional): companyId, projectId, dateFrom / dateTo (PO date), search (item, PO no, supplier).
+// Declared before /:id so the literal path wins.
+router.get("/item-register", cache("purchase-orders", 300, { shared: true }), async (req, res) => {
+  try {
+    const pool = getPool();
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 500, 1), 1000);
+    const offset = (page - 1) * limit;
+    const ymd = (v) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
+    const companyId = parseInt(req.query.companyId, 10) || null;
+    const projectId = parseInt(req.query.projectId, 10) || null;
+    const dateFrom = ymd(req.query.dateFrom);
+    const dateTo = ymd(req.query.dateTo);
+    const search = String(req.query.search || "").trim() || null;
+
+    const result = await pool.request()
+      .input("offset", sql.Int, offset)
+      .input("limit", sql.Int, limit)
+      .input("companyId", sql.Int, companyId)
+      .input("projectId", sql.Int, projectId)
+      .input("dateFrom", sql.Date, dateFrom)
+      .input("dateTo", sql.Date, dateTo)
+      .input("search", sql.NVarChar(200), search)
+      .query(`
+        SELECT
+          po.PurchaseOrderID,
+          COALESCE(po.DocNo, po.PurchaseOrderNo) AS PONo,
+          po.PODate,
+          po.Status                              AS POStatus,
+          po.POType,
+          co.name                                AS CompanyName,
+          pr.name                                AS ProjectName,
+          fy.FName                               AS FinYearName,
+          ah.LHeadName                           AS SupplierName,
+          COALESCE(po.SourceMRDocNo, qt.SourceMRDocNo) AS MRDocNo,
+          po.SourceQTDocNo                       AS QuotationDocNo,
+          poi.SortOrder + 1                      AS LineNumber,
+          poi.ItemCode,
+          poi.ItemName,
+          poi.Description                        AS ItemRemarks,
+          poi.Quantity,
+          poi.UomName,
+          poi.Rate,
+          poi.TaxPct,
+          -- The stored line amount already includes the line's tax (the PO form saves qty × rate + tax),
+          -- so the amount before tax is qty × rate and the tax is the difference.
+          ROUND(poi.Quantity * poi.Rate, 2)                     AS AmountBeforeTax,
+          ROUND(poi.LineAmount - poi.Quantity * poi.Rate, 2)    AS TaxAmount,
+          poi.LineAmount                                        AS AmountWithTax,
+          cc.Name                                AS CostCenterName,
+          po.Remarks                             AS PORemarks,
+          COALESCE(cu.name, po.CreatedBy)        AS CreatedBy,
+          po.CreatedAt,
+          COUNT(*) OVER()                        AS _total
+        FROM dbo.PurchaseOrderItems poi
+        JOIN dbo.PurchaseOrders po            ON po.PurchaseOrderID = poi.PurchaseOrderID
+        LEFT JOIN dbo.enterprise co           ON co.id = po.CompanyId
+        LEFT JOIN dbo.enterprise pr           ON pr.id = po.ProjectId
+        LEFT JOIN dbo.FinYear fy              ON fy.FId = po.fy_id
+        LEFT JOIN dbo.AccountHeadMaster ah    ON ah.LHeadId = po.SupplierID
+        LEFT JOIN dbo.Quotations qt           ON qt.QuotationId = po.SourceQTId
+        LEFT JOIN dbo.CostCenter cc           ON cc.CostCenterId = poi.CostCenterId
+        LEFT JOIN dbo.users cu                ON cu.email = po.CreatedBy
+        WHERE (@companyId IS NULL OR po.CompanyId = @companyId)
+          AND (@projectId IS NULL OR po.ProjectId = @projectId)${projectPredicate(req.projectScope, "po.ProjectId")}
+          AND (@dateFrom  IS NULL OR CAST(po.PODate AS DATE) >= @dateFrom)
+          AND (@dateTo    IS NULL OR CAST(po.PODate AS DATE) <= @dateTo)
+          AND (@search IS NULL
+               OR poi.ItemName LIKE '%' + @search + '%' OR poi.ItemCode LIKE '%' + @search + '%'
+               OR po.DocNo LIKE '%' + @search + '%' OR po.PurchaseOrderNo LIKE '%' + @search + '%'
+               OR ah.LHeadName LIKE '%' + @search + '%')
+        ORDER BY po.PODate DESC, po.PurchaseOrderID DESC, poi.SortOrder
+        OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+      `);
+
+    const total = result.recordset[0]?._total ?? 0;
+    if (res.headersSent) return;
+    res.json({
+      data: result.recordset.map(({ _total, ...r }) => r),
+      page, limit, total, totalPages: Math.ceil(total / limit),
+    });
+  } catch (err) {
+    console.error("GET /purchase-orders/item-register error:", err);
+    if (res.headersSent) return;
+    res.status(500).json({ error: "Failed to fetch PO Item Register", message: err.message });
+  }
+});
+
 router.get("/:id", getPurchaseOrderDetail);
 
 // ── GET /:id/document-chain — PO -> Vehicle In/Out -> GRN tree ───────────────
@@ -1277,9 +1366,10 @@ router.put(
       }
 
       const currentStatus = await getRecordStatus("purchase-orders", id);
-      const allowPostApproval = await resolveAllowPostApproval(req, "purchase-orders");
-      // Pending is editable and stays Pending; Approved (with the post-approval right) goes back for approval.
-      await guardEditAnyStage("purchase-orders", id, { allowPostApproval });
+      // Only a Draft, Pending or Rejected PO is edited. Once approved it changes only through Amend (an approved
+      // amendment request, services/docAmendment.js), for every role.
+      if (currentStatus && !["Draft", "Pending", "Rejected"].includes(currentStatus))
+        return res.status(409).json({ error: `This Purchase Order is ${currentStatus}, so it can't be edited. Use Amend to change it.` });
       const wasApproved = currentStatus === "Approved";
       const wasRejected = currentStatus === "Rejected";
       const wasPending = currentStatus === "Pending";
