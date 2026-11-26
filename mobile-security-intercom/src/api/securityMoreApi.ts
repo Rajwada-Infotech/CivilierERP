@@ -140,9 +140,16 @@ export const allComplaints = async (status?: ComplaintStatus) => read<Complaint[
 export const reviewComplaint = async (id: number, status: ComplaintStatus, adminNote: string) =>
   read<{ success: true }>(await fetchWithAuth(`/api/security/complaints/${id}`, { method: "PUT", body: JSON.stringify({ status, adminNote }) }));
 
-// ── Patrol (residents): the guards posted at their project(s) and one guard's route, for the replay.
-export interface PatrolGuards {
-  guards: { id: number; name: string; gateName: string | null }[];
+// ── Patrol (residents): the patrol rounds walked at their project(s), and one round's route, for the replay.
+export interface PatrolRound {
+  id: number;
+  guardName: string | null;
+  gateName: string;
+  startedAt: string;
+  endedAt: string | null; // null: still going
+}
+export interface PatrolList {
+  patrols: PatrolRound[];
   zones: { id: number; name: string; shapes: [number, number][][] }[];
 }
 export interface PatrolTrail {
@@ -152,8 +159,6 @@ export interface PatrolTrail {
   outside: number;
   judged: number;
 }
-export const patrolGuards = async () => read<PatrolGuards>(await fetchWithAuth("/api/security-portal/patrol"));
-export const patrolTrail = async (guardId: number, from: Date, to: Date) =>
-  read<PatrolTrail>(
-    await fetchWithAuth(`/api/security-portal/patrol/${guardId}?from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}`),
-  );
+export const patrolList = async (from: Date, to: Date) =>
+  read<PatrolList>(await fetchWithAuth(`/api/security-portal/patrol?from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}`));
+export const patrolTrail = async (patrolId: number) => read<PatrolTrail>(await fetchWithAuth(`/api/security-portal/patrol/${patrolId}`));

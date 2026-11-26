@@ -1,13 +1,14 @@
-// Menu → Patrol (residents): replay a guard's rounds for today or yesterday, on the same Leaflet / OpenStreetMap map as
-// the web's Security Live → Replay (inside a WebView). Only guards posted at a gate of the resident's own project(s)
-// are listed; the server checks that again for each route. Play walks the route; the slider picks any moment.
+// Menu → Patrol (residents): the patrol rounds guards walked at the resident's project today or yesterday (a guard
+// starts and ends a round from their home page). Pick a round to replay it on the same Leaflet / OpenStreetMap map as
+// the web's Security Live → Replay (inside a WebView). Only rounds at the resident's own project(s) are listed; the
+// server checks that again for each route. Play walks the route; the slider picks any moment.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ScrollView, View } from "react-native";
 import { WebView as RNWebView } from "react-native-webview";
 import { useQuery } from "@tanstack/react-query";
 import { colors, sheet as S } from "@/theme/colors";
-import { Body, Label, Notice, Seg, Skel } from "@/components/sheet/Sheet";
-import { patrolGuards, patrolTrail } from "@/api/securityMoreApi";
+import { Body, Label, Notice, Press, Seg, Skel } from "@/components/sheet/Sheet";
+import { patrolList, patrolTrail } from "@/api/securityMoreApi";
 
 // react-native-webview's class typings don't match React 19's JSX types; the component itself is fine.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -78,24 +79,33 @@ function dayRange(day: Day): [Date, Date] {
   if (day === "today") return [start, new Date()];
   return [new Date(start.getTime() - 86400000), new Date(start.getTime() - 1)];
 }
+const time = (s: string) => new Date(s).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
 
 export default function PatrolScreen() {
   const web = useRef<WebViewHandle>(null);
   const [ready, setReady] = useState(false);
-  const [guardId, setGuardId] = useState("");
   const [day, setDay] = useState<Day>("today");
-  const { data: list, error: listError, isLoading } = useQuery({ queryKey: ["security-patrol-guards"], queryFn: patrolGuards });
-  const guards = useMemo(() => list?.guards ?? [], [list]);
-  useEffect(() => {
-    if (!guardId && guards.length) setGuardId(String(guards[0].id));
-  }, [guards, guardId]);
-  const { data: trail, error, isFetching } = useQuery({
-    queryKey: ["security-patrol-trail", guardId, day],
+  const [patrolId, setPatrolId] = useState<number | null>(null);
+  const { data: list, error: listError, isLoading } = useQuery({
+    queryKey: ["security-patrols", day],
     queryFn: () => {
       const [from, to] = dayRange(day);
-      return patrolTrail(Number(guardId), from, to);
+      return patrolList(from, to);
     },
-    enabled: !!guardId,
+    refetchInterval: 60000,
+  });
+  const rounds = useMemo(() => list?.patrols ?? [], [list]);
+  // The newest round is shown first; a round chosen on another day is dropped.
+  useEffect(() => {
+    if (!rounds.some((r) => r.id === patrolId)) setPatrolId(rounds[0]?.id ?? null);
+  }, [rounds, patrolId]);
+  const chosen = rounds.find((r) => r.id === patrolId) ?? null;
+  const { data: trail, error, isFetching } = useQuery({
+    queryKey: ["security-patrol-trail", patrolId],
+    queryFn: () => patrolTrail(patrolId!),
+    enabled: patrolId != null,
+    // A round still going grows: read it again every 30 s.
+    refetchInterval: chosen && !chosen.endedAt ? 30000 : false,
   });
   const html = useMemo(() => HTML(S.blue, S.red, S.ink, colors.background), []);
 
@@ -103,8 +113,8 @@ export default function PatrolScreen() {
     if (ready && list) web.current?.injectJavaScript(`window.zones(${JSON.stringify(list.zones)}); true;`);
   }, [ready, list]);
   useEffect(() => {
-    if (ready && trail) web.current?.injectJavaScript(`window.route(${JSON.stringify(trail.points)}); true;`);
-  }, [ready, trail]);
+    if (ready) web.current?.injectJavaScript(`window.route(${JSON.stringify(patrolId != null ? trail?.points ?? [] : [])}); true;`);
+  }, [ready, trail, patrolId]);
 
   const km = trail ? (trail.distanceM >= 1000 ? `${(trail.distanceM / 1000).toFixed(1)} km` : `${trail.distanceM} m`) : "";
   const out = trail?.judged ? `${Math.round((trail.outside / trail.judged) * 100)}% outside the zone` : null;
@@ -112,22 +122,49 @@ export default function PatrolScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <View style={{ paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: S.ink, gap: 8 }}>
-        <Label>Patrol · replay the guards' rounds</Label>
+      <View style={{ paddingHorizontal: 16, paddingTop: 10, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: S.ink, gap: 8 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+          <Label>Patrol rounds · {rounds.length}</Label>
+          <Seg options={[{ value: "today", label: "Today" }, { value: "yesterday", label: "Yesterday" }]} value={day} onChange={(v) => setDay(v as Day)} />
+        </View>
         {isLoading ? (
-          <Skel h={32} />
-        ) : guards.length ? (
-          <>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <Seg options={guards.map((g) => ({ value: String(g.id), label: g.name }))} value={guardId} onChange={setGuardId} />
-            </ScrollView>
-            <Seg options={[{ value: "today", label: "Today" }, { value: "yesterday", label: "Yesterday" }]} value={day} onChange={(v) => setDay(v as Day)} />
-            <Body size={11.5} color={S.graphite}>
-              {isFetching ? "Reading the route…" : trail ? (trail.count ? [km, out].filter(Boolean).join(" · ") : "No location was recorded in that time.") : " "}
-            </Body>
-          </>
+          <Skel h={40} />
+        ) : rounds.length ? (
+          <ScrollView style={{ maxHeight: 150 }} nestedScrollEnabled>
+            {rounds.map((r, i) => {
+              const on = r.id === patrolId;
+              return (
+                <Press
+                  key={r.id}
+                  onPress={() => setPatrolId(r.id)}
+                  style={(p) => ({
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 10,
+                    paddingHorizontal: 10,
+                    paddingVertical: 8,
+                    borderTopWidth: i ? 1 : 0,
+                    borderTopColor: S.ruleSoft,
+                    backgroundColor: on ? S.ink : p ? S.blueWash : "transparent",
+                  })}
+                >
+                  <Body size={13} weight="semibold" color={on ? S.paper : S.ink} style={{ flex: 1 }}>
+                    {r.guardName ?? "Guard"} · {r.gateName}
+                  </Body>
+                  <Body size={12} color={on ? S.paper : r.endedAt ? S.graphite : S.blue}>
+                    {time(r.startedAt)} – {r.endedAt ? time(r.endedAt) : "now"}
+                  </Body>
+                </Press>
+              );
+            })}
+          </ScrollView>
         ) : (
-          <Body size={12.5} color={S.ink2}>No guard is posted at your project yet.</Body>
+          <Body size={12.5} color={S.ink2}>No patrol round {day === "today" ? "yet today" : "yesterday"}.</Body>
+        )}
+        {chosen && (
+          <Body size={11.5} color={S.graphite}>
+            {isFetching && !trail ? "Reading the route…" : trail ? (trail.count ? [km, out, chosen.endedAt ? null : "still going"].filter(Boolean).join(" · ") : "No location was recorded on this round.") : " "}
+          </Body>
         )}
       </View>
       {shownError && (
