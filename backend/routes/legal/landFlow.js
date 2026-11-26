@@ -170,7 +170,7 @@ async function landState(pool, landId) {
                         LEFT JOIN dbo.LegalMasterFile f ON f.FileId = v.FileId
                         WHERE d.LandId = @L AND d.IsActive = 1 ORDER BY d.CreatedAt`),
     clearances: await q("SELECT Kind, Status, AppliedOn, ApplicationNo, ObtainedOn, CertificateNo FROM dbo.LegalLandClearance WHERE LandId = @L ORDER BY Kind"),
-    mutations: await q("SELECT MutationId, ApplicationNo, ApplicationDate, ApplicationStatus, PreviousKhatian, OrderNo, OrderDate FROM dbo.LegalMutation WHERE LandId = @L AND IsActive = 1 ORDER BY ApplicationDate"),
+    mutations: await q("SELECT MutationId, ApplicationNo, ApplicationDate, ApplicationStatus, PreviousKhatian, OrderNo, OrderDate FROM dbo.LegalMutation WHERE LandId = @L AND IsActive = 1 AND Kind = N'Mutation' ORDER BY ApplicationDate"),
   };
   const enquiryId = land.EnquiryId || (await safe(async () => (await pool.request().input("L", sql.Int, landId).query("SELECT TOP 1 EnquiryId FROM dbo.LegalLandEnquiry WHERE LandId = @L")).recordset[0]?.EnquiryId, null));
   const enquiry = await loadEnquiry(pool, enquiryId);
@@ -232,6 +232,22 @@ async function snapshotVersion(pool, landId, userId, action, amendment = null) {
 }
 
 /** Every approval decision is its own row (migration 712), never edited or deleted. */
+/**
+ * The Final Legal Review gate before Land Approval (V2.1). Off when the rule final_review_gate is inactive or not
+ * blocking. Blocked unless the land's enquiry has a verification whose Final Legal Review is approved ("Verified").
+ */
+async function finalReviewGate(pool, landId) {
+  const rule = (await pool.request().query("IF OBJECT_ID('dbo.LegalRuleConfig', 'U') IS NOT NULL SELECT IsBlocking, IsActive FROM dbo.LegalRuleConfig WHERE RuleKey = N'final_review_gate' ELSE SELECT TOP 0 1 AS x")).recordset[0];
+  if (!rule || !rule.IsActive || !rule.IsBlocking) return { blocked: false };
+  if (!(await pool.request().query("SELECT OBJECT_ID('dbo.LegalVerification', 'U') AS t")).recordset[0].t) return { blocked: false };
+  const v = (await pool.request().input("L", sql.Int, landId).query(`
+    SELECT TOP 1 v.VerificationId, v.VerificationNo, v.Status FROM dbo.LegalVerification v JOIN dbo.LegalLandEnquiry e ON e.EnquiryId = v.EnquiryId
+    WHERE e.LandId = @L ORDER BY v.VerificationId DESC`)).recordset[0];
+  if (!v) return { blocked: true, message: "No legal verification exists for this land's enquiry — the Final Legal Review has not been approved" };
+  if (v.Status !== "Verified") return { blocked: true, verificationId: v.VerificationId, message: `Final Legal Review of ${v.VerificationNo} is not approved (${v.Status})` };
+  return { blocked: false, verificationId: v.VerificationId };
+}
+
 async function logDecision(conn, landId, stage, action, { versionNo = null, reason = null, userId = null } = {}) {
   await conn.request().input("L", sql.Int, landId).input("S", sql.NVarChar(30), stage).input("A", sql.NVarChar(30), action).input("V", sql.Int, versionNo)
     .input("R", sql.NVarChar(1000), reason ? String(reason).slice(0, 1000) : null).input("U", sql.Int, userId)
@@ -500,7 +516,7 @@ router.get("/enquiry/:id", requirePageRight(PAGE, "view"), async (req, res) => {
 // since the last approved version. A tick holds for the step as it was when ticked — if the step changes again, the tick
 // drops off. Table LegalLandReview (migration 701); one open review per land.
 const crypto = require("crypto");
-const { canAct, isSuperAdmin, userOf } = require("./approvalAuthority");
+const { canAct, isAdmin, isSuperAdmin, userOf } = require("./approvalAuthority");
 const { writeAudit } = require("./legalAudit");
 // The steps: the land's entry sections as on the land workspace, each with every field of every entry (filled or not)
 // and the documents attached to them.
@@ -1010,11 +1026,27 @@ router.post("/land/:id/review/decide", requirePageRight(PAGE, "view"), async (re
     if (!st.awaitingApproval) return res.status(409).json({ error: st.status === "Draft" ? "Changed after it was verified — it must be verified again first" : "Not waiting for approval" });
     if (action === "Approve" && !isSuperAdmin(req) && Number(st.lastVerifiedBy) === Number(userOf(req)))
       return res.status(409).json({ error: "You verified this land — another user must approve it" });
+    // V2.1 gate: Land Approval waits for an approved Final Legal Review of the land's enquiry, unless an authorised
+    // exception (reason + approver) is recorded. Configurable: Setup → Legal Rules → final_review_gate.
+    let gateException = null;
     if (action === "Approve") {
+      const gate = await finalReviewGate(pool, id);
+      if (gate.blocked) {
+        const reason = String(req.body?.exceptionReason || "").trim().slice(0, 1000);
+        if (!reason) return res.status(409).json({ error: gate.message, needsException: true });
+        if (!(isAdmin(req) || (await canAct(req, "Legal Reviewer", null)) || (await canAct(req, "Legal Admin", null))))
+          return res.status(403).json({ error: `${gate.message}. Only a Legal Reviewer, Legal Admin or admin may approve with an exception` });
+        gateException = { reason, detail: gate.message, verificationId: gate.verificationId };
+      }
+    }
+    if (action === "Approve") {
+      if (gateException) await pool.request().input("L", sql.Int, id).input("V", sql.Int, gateException.verificationId ?? null).input("R", sql.NVarChar(1000), gateException.reason)
+        .input("D", sql.NVarChar(1000), gateException.detail).input("U", sql.Int, userOf(req))
+        .query("IF OBJECT_ID('dbo.LegalVerificationException', 'U') IS NOT NULL INSERT INTO dbo.LegalVerificationException (Kind, VerificationId, LandId, Reason, Detail, ApprovedBy, CreatedBy) VALUES (N'Land approval exception', @V, @L, @R, @D, @U, @U)");
       await pool.request().input("L", sql.Int, id).input("U", sql.Int, userOf(req)).input("R", sql.NVarChar(1000), remarks || null).query(`
         UPDATE dbo.LegalLand SET WorkflowStatus = N'Deed Process', L1Status = N'Pending', L1ReviewerId = NULL, L1ReviewedAt = NULL, L1Remarks = NULL,
                L2Status = N'Pending', L2ApproverId = NULL, L2ApprovedAt = NULL, L2Remarks = NULL, UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @L`);
-      await logDecision(pool, id, "Land approval", "Approve", { versionNo: st.versionNo - 1, reason: remarks || null, userId: userOf(req) });
+      await logDecision(pool, id, "Land approval", "Approve", { versionNo: st.versionNo - 1, reason: [remarks, gateException ? `Final legal review exception: ${gateException.reason}` : null].filter(Boolean).join(" · ") || null, userId: userOf(req) });
       await writeAudit(pool, req, { action: "Land verified — sent to Deed Process", entityType: "Land Property", entityId: id, landId: id, remarks: remarks || `Version ${st.versionNo - 1} approved` });
       return res.json({ message: `${st.land.LandCode}: approved — moved to Deed Process` });
     }
@@ -1070,3 +1102,4 @@ module.exports.APPROVAL_ACTIONS = APPROVAL_ACTIONS;
 module.exports.reviewState = reviewState;
 module.exports.loadLand = loadLand;
 module.exports.logDecision = logDecision;
+module.exports.finalReviewGate = finalReviewGate;

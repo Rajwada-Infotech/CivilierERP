@@ -305,7 +305,12 @@ export interface PostRegTask { TaskId: number; LandId: number; TaskNo: number; T
   FileId: number | null; FileName: string | null; UpdatedAt: string | null; UpdatedByName: string | null;
   AssignedUserId?: number | null; AssignedName?: string | null; CompletedAt?: string | null; CompletedByName?: string | null }
 export interface PostRegLand { LandId: number; ProjectId?: number | null; LandCode: string; LandName: string; DistrictName: string | null; MouzaName: string | null; RegCompletedAt: string | null;
-  RegDeedFileId: number | null; RegDeedFileName: string | null; tasks: PostRegTask[]; clearances?: LandClearance[] }
+  RegDeedFileId: number | null; RegDeedFileName: string | null; tasks: PostRegTask[]; clearances?: LandClearance[]; applications?: PostRegApplication[] }
+/** V2.1: post-registration mutation / conversion application (LegalMutation, Kind). */
+export interface PostRegApplication {
+  MutationId: number; LandId: number; Kind: "Mutation" | "Conversion"; ApplicationNo: string | null; ApplicationDate: string | null; OfficeName: string | null; ApplicationStatus: string;
+  AssignedUserId: number | null; AssignedName: string | null; DueDate: string | null; HearingDate: string | null; CompletionDate: string | null; RequestedClass: string | null; OpenQueries: number;
+}
 export const getPostRegistration = async (qs = "") => handle<{ lands: PostRegLand[]; statuses: string[] } & { total?: number; page?: number; pageSize?: number }>(await fetchWithAuth(`${BASE}/post-registration/list${qs ? `?${qs}` : ""}`));
 /** Another post-registration task (repeat work: yearly tax, a new survey, the next mutation step). */
 export const addPostRegTask = async (landId: number, body: { task: string; dueDate?: string; assignedUserId?: number | null }) =>

@@ -15,6 +15,8 @@ import { useQuery as useQ } from "@tanstack/react-query";
 import { uploadLegalFile } from "@/api/legalMastersApi";
 import { LandClearancePanel } from "@/components/legal/LandClearancePanel";
 import { askLegal } from "@/components/legal/LegalAsk";
+import { InlineRecordEditor } from "@/components/legal/InlineRecordEditor";
+import type { PostRegApplication } from "@/api/legalLandApi";
 
 const fmt = (d: string | null) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—");
 const today = new Date().toISOString().slice(0, 10);
@@ -75,6 +77,58 @@ function TaskRow({ t, statuses, canEdit, onSaved }: { t: PostRegTask; statuses: 
   );
 }
 
+
+const APP_TONE: Record<string, string> = { Approved: "text-emerald-600", Rejected: "text-destructive", "Objection Raised": "text-amber-600", "Correction Required": "text-amber-600" };
+/**
+ * Mutation and conversion after registration (V2.1): two separate applications, each with its own employee, target
+ * date, documents, queries and status. Target dates are internal; government processing times are not guaranteed.
+ */
+function ApplicationsPanel({ landId, apps, canEdit, onSaved }: { landId: number; apps: PostRegApplication[]; canEdit: boolean; onSaved: () => void }) {
+  const [edit, setEdit] = useState<{ master: "mutation" | "conversion" | "application-query"; id: number | null } | null>(null);
+  const done = () => { setEdit(null); onSaved(); };
+  return (
+    <div className="border-t border-border p-3">
+      <div className="mb-1.5 flex flex-wrap items-center gap-2">
+        <p className="text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground">Mutation &amp; conversion</p>
+        {canEdit && !edit && <span className="ml-auto flex gap-2 text-xs">
+          <button className="border border-foreground px-2 py-0.5 font-semibold" onClick={() => setEdit({ master: "mutation", id: null })}>+ Mutation</button>
+          <button className="border border-foreground px-2 py-0.5 font-semibold" onClick={() => setEdit({ master: "conversion", id: null })}>+ Conversion</button>
+          {apps.length > 0 && <button className="border border-foreground/40 px-2 py-0.5 font-semibold" onClick={() => setEdit({ master: "application-query", id: null })}>+ Query</button>}
+        </span>}
+      </div>
+      {edit && <div className="mb-2"><InlineRecordEditor master={edit.master} id={edit.id} landId={landId} onDone={done} /></div>}
+      {!apps.length ? <p className="text-xs text-muted-foreground">No mutation or conversion application yet.</p> : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-left text-xs">
+            <thead className="text-[0.625rem] uppercase tracking-wider text-muted-foreground">
+              <tr><th className="px-2 py-1">Type</th><th className="px-2 py-1">Application</th><th className="px-2 py-1">Office</th><th className="px-2 py-1">Employee</th>
+                <th className="px-2 py-1">Target</th><th className="px-2 py-1">Hearing</th><th className="px-2 py-1">Status</th><th className="px-2 py-1">Queries</th><th /></tr>
+            </thead>
+            <tbody>
+              {apps.map((a) => {
+                const late = !a.CompletionDate && a.DueDate && a.DueDate < today && !["Approved", "Rejected"].includes(a.ApplicationStatus);
+                return (
+                  <tr key={a.MutationId} className={`border-t border-border/60 ${late ? "bg-destructive/5" : ""}`}>
+                    <td className="px-2 py-1 font-semibold">{a.Kind}{a.RequestedClass ? <span className="block font-normal text-muted-foreground">to {a.RequestedClass}</span> : null}</td>
+                    <td className="px-2 py-1">{a.ApplicationNo ?? "—"}<span className="block text-muted-foreground">{fmt(a.ApplicationDate)}</span></td>
+                    <td className="px-2 py-1">{a.OfficeName ?? "—"}</td>
+                    <td className="px-2 py-1">{a.AssignedName ?? "—"}</td>
+                    <td className="px-2 py-1">{fmt(a.DueDate)}{late && <span className="block font-semibold text-destructive">Overdue</span>}</td>
+                    <td className="px-2 py-1">{fmt(a.HearingDate)}</td>
+                    <td className={`px-2 py-1 font-semibold ${APP_TONE[a.ApplicationStatus] ?? ""}`}>{a.ApplicationStatus}{a.CompletionDate && <span className="block font-normal text-emerald-700">Completed {fmt(a.CompletionDate)}</span>}</td>
+                    <td className="px-2 py-1">{a.OpenQueries ? <span className="font-semibold text-amber-600">{a.OpenQueries} open</span> : "—"}</td>
+                    <td className="px-2 py-1 text-right">{canEdit && <button className="underline" onClick={() => setEdit({ master: a.Kind === "Mutation" ? "mutation" : "conversion", id: a.MutationId })}>Edit</button>}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Post-registration compliance: after the deed is registered — mutation, new Khatian / RoR, records, tax, ownership update. */
 export default function LandPostRegistrationPage() {
   const navigate = useNavigate();
@@ -123,6 +177,7 @@ export default function LandPostRegistrationPage() {
                       <tbody>{l.tasks.map((t) => <TaskRow key={`${t.TaskId}-${t.UpdatedAt ?? ""}`} t={t} statuses={data!.statuses} canEdit={canEdit} onSaved={refresh} />)}</tbody>
                     </table>
                   </div>
+                  <ApplicationsPanel landId={l.LandId} apps={l.applications ?? []} canEdit={canEdit} onSaved={refresh} />
                   {l.clearances?.length ? (
                     <div className="border-t border-border p-3">
                       <p className="mb-1.5 text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground">LA &amp; ULC clearance certificate</p>

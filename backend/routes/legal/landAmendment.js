@@ -84,7 +84,7 @@ async function currentRows(pool, landId) {
     rs: await q("SELECT RsRecordId AS id, * FROM dbo.LegalLandRsRecord WHERE LandId = @L AND IsActive = 1 ORDER BY RsRecordId"),
     lr: await q("SELECT LrRecordId AS id, * FROM dbo.LegalLandLrRecord WHERE LandId = @L AND IsActive = 1 ORDER BY LrRecordId"),
     owner: await q("SELECT RecordId AS id, * FROM dbo.LegalOwnershipRecord WHERE LandId = @L AND IsActive = 1 AND ValidTo IS NULL ORDER BY ValidFrom, RecordId"),
-    mutation: await q("SELECT MutationId AS id, * FROM dbo.LegalMutation WHERE LandId = @L AND IsActive = 1 ORDER BY MutationId"),
+    mutation: await q("SELECT MutationId AS id, * FROM dbo.LegalMutation WHERE LandId = @L AND IsActive = 1 AND Kind = N'Mutation' ORDER BY MutationId"),
     clearance: (await q("SELECT Kind AS id, * FROM dbo.LegalLandClearance WHERE LandId = @L"))
       .concat(["LA", "ULC"].map((k) => ({ id: k, Kind: k, Status: "Not Applied" }))).filter((r, i, a) => a.findIndex((x) => x.Kind === r.Kind) === i),
     document: await q(`SELECT d.DocumentId AS id, d.DocumentCode, d.DocTypeId, t.DocTypeName, d.RelatedSection, d.Title, d.DocumentNo, d.DocumentDate, d.CurrentVersionNo

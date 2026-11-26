@@ -14,10 +14,12 @@ import {
 const input = "h-9 w-full border border-foreground/30 bg-background px-2 text-sm focus:border-foreground focus:outline-none";
 const lbl = "mb-1 block text-[0.625rem] uppercase tracking-[0.08em] text-muted-foreground";
 const fmtDate = (d: unknown) => (d ? new Date(String(d)).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "");
-const BAD = ["Not Found", "Unable to Search", "Unmatched", "Partly matched", "Mismatch", "Missing Owner", "Additional Owner", "Unable to Verify", "Partial Match",
-  "Discrepancy Found", "Additional Document Required", "No", "Damaged", "Case Found", "Further Investigation Required", "Missing Document"];
-const GOOD = ["Found", "Matched", "Exact Match", "Verified", "Report Received", "Received", "Yes", "No Record Found"];
-const SUMMARY_KEYS = ["verification", "result", "status", "match", "available"];
+const BAD = ["Unmatched", "Partly matched", "Disputed", "Mismatch", "Missing Owner", "Additional Owner", "Unable to Verify", "Partial Match", "Missing Link",
+  "Discrepancy Found", "Additional Document Required", "No", "Damaged", "Case Found", "Further Investigation Required", "Missing Document", "Gap", "Not Cleared",
+  "Incomplete", "Records Not Available", "Search Incomplete", "Not Available", "Issue Found"];
+// "Not found in sources searched" is neutral: a negative search never proves that nothing exists.
+const GOOD = ["Found", "Matched", "Exact Match", "Verified", "Report Received", "Received", "Yes", "Cleared", "Continuous", "Identified"];
+const SUMMARY_KEYS = ["verification", "result", "status", "match", "continuity", "available"];
 
 export const useEntryConfig = () => useQuery({ queryKey: ["legal-entry-config"], queryFn: getEntryConfig, staleTime: 3600_000 });
 
@@ -35,8 +37,14 @@ function Cell({ f, e, cfg, all }: { f: EntryField; e: ActivityEntry; cfg: EntryC
 }
 
 /** Form for one entry (new or existing). */
-function EntryForm({ cfg, entry, all, onCancel, onSave }: { cfg: EntryConfig; entry: ActivityEntry | null; all: ActivityEntry[]; onCancel: () => void; onSave: (d: Record<string, unknown>) => Promise<void> }) {
-  const [v, setV] = useState<Record<string, string>>(() => Object.fromEntries(cfg.fields.map((f) => [f.key, entry?.data[f.key] == null ? "" : String(entry.data[f.key])])));
+type Period = { from?: number | null; to?: number | null; years?: number | null };
+function EntryForm({ cfg, entry, all, period, onCancel, onSave }: { cfg: EntryConfig; entry: ActivityEntry | null; all: ActivityEntry[]; period?: Period; onCancel: () => void; onSave: (d: Record<string, unknown>) => Promise<void> }) {
+  // A new search starts with the activity's configured period (e.g. 2009–2026, or the last 30 years for courts).
+  const thisYear = new Date().getFullYear();
+  const defFrom = period?.from ?? (period?.years ? thisYear - period.years : null);
+  const defTo = period?.to ?? (period?.years ? thisYear : null);
+  const [v, setV] = useState<Record<string, string>>(() => Object.fromEntries(cfg.fields.map((f) => [f.key, entry?.data[f.key] != null ? String(entry.data[f.key])
+    : !entry && f.key === "fromYear" && defFrom ? String(defFrom) : !entry && f.key === "toYear" && defTo ? String(defTo) : ""])));
   const [names, setNames] = useState<Record<string, string | null>>(entry?.files ?? {});
   const [busy, setBusy] = useState(false);
   const need = (f: EntryField) => !!f.required || (!!f.requireWhen && f.requireWhen.values.includes(v[f.requireWhen.field]));
@@ -52,10 +60,10 @@ function EntryForm({ cfg, entry, all, onCancel, onSave }: { cfg: EntryConfig; en
     el.click();
   };
   const submit = async () => {
-    const missing = cfg.fields.filter((f) => need(f) && !v[f.key]?.trim());
+    const missing = cfg.fields.filter((f) => !f.derived && need(f) && !v[f.key]?.trim());
     if (missing.length) { toast.error(`Fill: ${missing.map((f) => f.label).join(", ")}`); return; }
     setBusy(true);
-    try { await onSave(Object.fromEntries(cfg.fields.map((f) => [f.key, v[f.key] === "" ? null : v[f.key]]))); } finally { setBusy(false); }
+    try { await onSave(Object.fromEntries(cfg.fields.filter((f) => !f.derived).map((f) => [f.key, v[f.key] === "" ? null : v[f.key]]))); } finally { setBusy(false); }
   };
   const others = all.filter((x) => x.EntryId !== entry?.EntryId);
   return (
@@ -69,6 +77,9 @@ function EntryForm({ cfg, entry, all, onCancel, onSave }: { cfg: EntryConfig; en
               <select className={input} value={v[f.key]} onChange={(e) => setV({ ...v, [f.key]: e.target.value })}><option value="">Select…</option>{f.options!.map((o) => <option key={o}>{o}</option>)}</select>
             ) : f.type === "entry" ? (
               <select className={input} value={v[f.key]} onChange={(e) => setV({ ...v, [f.key]: e.target.value })}><option value="">None (oldest / unknown)</option>{others.map((o) => <option key={o.EntryId} value={o.EntryId}>{entryName(cfg, o)}</option>)}</select>
+            ) : f.derived ? (
+              <span className="flex h-9 items-center border border-dashed border-foreground/30 px-2 text-sm text-muted-foreground">
+                {v.areaBefore && v.area ? (Number(v.areaBefore) - Number(v.area)).toFixed(4).replace(/\.?0+$/, "") : "calculated on save"}</span>
             ) : f.type === "textarea" ? (
               <textarea rows={2} maxLength={f.max} className="w-full border border-foreground/30 bg-background p-2 text-sm" value={v[f.key]} onChange={(e) => setV({ ...v, [f.key]: e.target.value })} />
             ) : f.type === "file" ? (
@@ -125,7 +136,7 @@ function Summary({ code, cfg, rows }: { code: string; cfg: EntryConfig; rows: Ac
 }
 
 /** The detail entries of one verification activity (searches, applications, mappings, deeds, maps, receipts, surveys). */
-export function ActivityEntriesPanel({ activityId, code, canEdit, onChanged, title = "" }: { activityId: number; code: string; canEdit: boolean; onChanged: () => void; title?: string }) {
+export function ActivityEntriesPanel({ activityId, code, canEdit, onChanged, title = "", period }: { activityId: number; code: string; canEdit: boolean; onChanged: () => void; title?: string; period?: Period }) {
   const qc = useQueryClient();
   const conf = useEntryConfig();
   const list = useQuery({ queryKey: ["legal-activity-entries", activityId], queryFn: () => getActivityEntries(activityId) });
@@ -175,7 +186,7 @@ export function ActivityEntriesPanel({ activityId, code, canEdit, onChanged, tit
           </table>
         </div>
       ) : <p className="mb-2 text-xs text-muted-foreground">No {cfg.plural.toLowerCase()} yet.</p>}
-      {editing ? <EntryForm key={editing === "new" ? "new" : editing.EntryId} cfg={cfg} entry={editing === "new" ? null : editing} all={rows} onCancel={() => setEditing(null)} onSave={canEdit ? save : async () => setEditing(null)} />
+      {editing ? <EntryForm key={editing === "new" ? "new" : editing.EntryId} cfg={cfg} entry={editing === "new" ? null : editing} all={rows} period={period} onCancel={() => setEditing(null)} onSave={canEdit ? save : async () => setEditing(null)} />
         : canEdit && <button onClick={() => setEditing("new")} className="h-8 border border-foreground px-3 text-xs font-semibold uppercase">+ {cfg.entry}</button>}
     </div>
   );

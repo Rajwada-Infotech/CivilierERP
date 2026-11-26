@@ -21,9 +21,11 @@ export default function LegalVerificationReportsPage() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [vid, setVid] = useState("");
+  const [flt, setFlt] = useState({ enquiry: "", mouza: "", dag: "", employee: "", status: "", verify: "" });
+  const [applied, setApplied] = useState(flt);
   const meta = list.data?.find((r) => r.key === key);
   const ws = useQuery({ queryKey: ["legal-verification-list", "all-for-report", project], queryFn: () => getVerifications(`project=${project}`), enabled: !!meta?.needsVerification });
-  const rep = useQuery({ queryKey: ["legal-report", key, project, from, to, vid], queryFn: () => getReport(key, { project, from, to, verificationId: vid ? Number(vid) : null }),
+  const rep = useQuery({ queryKey: ["legal-report", key, project, from, to, vid, applied], queryFn: () => getReport(key, { project, from, to, verificationId: vid ? Number(vid) : null, ...applied }),
     enabled: !meta?.needsVerification || !!vid });
   const data = rep.data;
   const fmt = (v: unknown) => (v == null || v === "" ? "—" : typeof v === "number" ? v.toLocaleString("en-IN") : String(v));
@@ -47,6 +49,17 @@ export default function LegalVerificationReportsPage() {
           <label><span className={lbl}>From</span><input type="date" className={input} value={from} onChange={(e) => setFrom(e.target.value)} /></label>
           <label><span className={lbl}>To</span><input type="date" className={input} value={to} onChange={(e) => setTo(e.target.value)} /></label>
           {(from || to) && <button className="h-9 text-xs underline" onClick={() => { setFrom(""); setTo(""); }}>Clear dates</button>}
+        </div>
+        <div className="mb-4 flex flex-wrap items-end gap-2 border border-border bg-card p-3">
+          {([["enquiry", "Enquiry / verification no."], ["mouza", "Mouza"], ["dag", "Dag"], ["employee", "Employee"], ["status", "Status / result"]] as const).map(([k, l]) => (
+            <label key={k} className="min-w-[9rem] flex-1"><span className={lbl}>{l}</span>
+              <input className={`${input} w-full`} value={flt[k]} onChange={(e) => setFlt({ ...flt, [k]: e.target.value })} onKeyDown={(e) => e.key === "Enter" && setApplied(flt)} /></label>
+          ))}
+          <label className="min-w-[9rem]"><span className={lbl}>Verification status</span>
+            <select className={`${input} w-full`} value={flt.verify} onChange={(e) => setFlt({ ...flt, verify: e.target.value })}>
+              <option value="">Any</option>{["Not Reviewed", "Under Review", "Verified", "Returned", "Rejected", "N/A"].map((s) => <option key={s}>{s}</option>)}</select></label>
+          <button className="h-9 bg-foreground px-4 text-xs font-semibold uppercase text-background" onClick={() => setApplied(flt)}>Apply</button>
+          {Object.values(applied).some(Boolean) && <button className="h-9 text-xs underline" onClick={() => { const e = { enquiry: "", mouza: "", dag: "", employee: "", status: "", verify: "" }; setFlt(e); setApplied(e); }}>Clear filters</button>}
         </div>
         {rep.error ? <p className="p-6 text-destructive">{(rep.error as Error).message}</p> : meta?.needsVerification && !vid ? <p className="border border-border p-6 text-sm text-muted-foreground">Choose a verification.</p>
           : rep.isLoading || !data ? <p className="p-6 text-muted-foreground">Loading…</p> : (

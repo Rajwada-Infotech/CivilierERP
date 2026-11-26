@@ -4,7 +4,7 @@
 const express = require("express");
 const { getPool, sql } = require("../../db");
 const projectGuard = require("./projectGuard");
-const { userOf } = require("./approvalAuthority");
+const { isAdmin, userOf } = require("./approvalAuthority");
 
 const router = express.Router();
 router.use(async (req, _res, next) => { try { req.legalScope = await projectGuard.getProjectScope(req.user); } catch { /* unrestricted */ } next(); });
@@ -93,14 +93,39 @@ router.get("/", async (req, res) => {
     for (const x of r.recordset) add("legal_postreg", x.TaskId, `${x.Task} · ${x.LandCode}`, "Post-registration task", x.DueDate, `/legal/land/post-registration/${x.LandId}`);
   });
 
-  // Verification activities assigned to this user (Legal V2).
-  if (await has(pool, "LegalVerificationActivity")) await run(async () => {
-    const r = await pool.request().input("U", sql.Int, uid).query(`
-      SELECT a.ActivityId, a.ActivityNo, a.ActivityName, a.Status, a.DueDate, a.VerificationId, v.VerificationNo, v.ProjectId
-      FROM dbo.LegalVerificationActivity a JOIN dbo.LegalVerification v ON v.VerificationId = a.VerificationId AND v.Status <> N'Closed'
-      WHERE a.AssignedUserId = @U AND a.Status NOT IN (N'Completed', N'Not Applicable')`);
-    for (const x of r.recordset) if (!req.legalScope || req.legalScope.includes(Number(x.ProjectId)))
-      add("legal_activity", x.ActivityId, `${x.ActivityNo}. ${x.ActivityName}`, `${x.VerificationNo} · ${x.Status}`, x.DueDate, `/legal/land/verification/${x.VerificationId}`);
+  // Verification activities (Legal V2.1): my open work; submitted work and N/A requests waiting for me as verifier;
+  // Final Legal Reviews waiting for a Legal Reviewer.
+  if (await has(pool, "LegalVerificationActivity") && (await col(pool, "LegalVerificationActivity", "VerifyStatus"))) await run(async () => {
+    const verifier = isAdmin(req) || st.has("Verifier") || st.has("Legal Reviewer") || st.has("Legal Admin");
+    const r = await pool.request().input("U", sql.Int, uid).input("Vf", sql.Bit, verifier ? 1 : 0).query(`
+      SELECT a.ActivityId, ISNULL(t.DisplayNo, CAST(a.ActivityNo AS NVARCHAR(5))) AS Ref, a.ActivityName, a.Status, a.VerifyStatus, a.DueDate, a.VerificationId, v.VerificationNo, v.ProjectId,
+             a.AssignedUserId, a.VerifierUserId, a.SubmittedBy, a.SubmittedAt, a.NaRequestedAt, a.NaRequestedBy
+      FROM dbo.LegalVerificationActivity a JOIN dbo.LegalActivityTemplate t ON t.TemplateId = a.TemplateId
+      JOIN dbo.LegalVerification v ON v.VerificationId = a.VerificationId AND v.Status NOT IN (N'Closed', N'Verified', N'Rejected')
+      WHERE (a.AssignedUserId = @U AND a.Status NOT IN (N'Submitted for Review', N'Closed'))
+         OR (a.Status = N'Submitted for Review' AND (a.VerifierUserId = @U OR (a.VerifierUserId IS NULL AND @Vf = 1)) AND ISNULL(a.SubmittedBy, 0) <> @U)
+         OR (a.NaRequestedAt IS NOT NULL AND a.VerifyStatus <> N'N/A' AND @Vf = 1 AND ISNULL(a.NaRequestedBy, 0) <> @U)`);
+    for (const x of r.recordset) {
+      if (req.legalScope && !req.legalScope.includes(Number(x.ProjectId))) continue;
+      const path = `/legal/land/verification/${x.VerificationId}`;
+      if (x.Status === "Submitted for Review" && x.AssignedUserId !== uid) add("legal_activity", `v${x.ActivityId}`, `Verify ${x.Ref}. ${x.ActivityName}`, `${x.VerificationNo} · submitted`, null, path);
+      else if (x.NaRequestedAt && x.AssignedUserId !== uid && x.VerifyStatus !== "N/A" && x.Status !== "Closed") add("legal_activity", `n${x.ActivityId}`, `N/A request · ${x.Ref}. ${x.ActivityName}`, x.VerificationNo, null, path);
+      else if (x.AssignedUserId === uid) add("legal_activity", x.ActivityId, `${x.Ref}. ${x.ActivityName}`, `${x.VerificationNo} · ${x.VerifyStatus === "Returned" ? "returned to you" : x.Status}`, x.DueDate, path);
+    }
+    if (isAdmin(req) || st.has("Legal Reviewer")) {
+      const fr = await pool.request().query("SELECT VerificationId, VerificationNo, ProjectId, UpdatedAt FROM dbo.LegalVerification WHERE Status = N'Ready for Review'");
+      for (const x of fr.recordset) if (!req.legalScope || req.legalScope.includes(Number(x.ProjectId)))
+        add("legal_approval", `fr${x.VerificationId}`, `Final Legal Review · ${x.VerificationNo}`, "All mandatory activities assessed", null, `/legal/land/verification/${x.VerificationId}`);
+    }
+  });
+
+  // Post-registration mutation / conversion assigned to me (V2.1).
+  if (await col(pool, "LegalMutation", "Kind")) await run(async () => {
+    const r = await pool.request().input("U", sql.Int, uid).query(sc(`
+      SELECT m.MutationId, m.LandId, m.Kind, m.ApplicationNo, m.ApplicationStatus, m.DueDate, l.LandCode FROM dbo.LegalMutation m
+      JOIN dbo.LegalLand l ON l.LandId = m.LandId AND l.IsActive = 1
+      WHERE m.IsActive = 1 AND m.AssignedUserId = @U AND m.ApplicationStatus NOT IN (N'Approved', N'Rejected') AND m.CompletionDate IS NULL`));
+    for (const x of r.recordset) add("legal_postreg", `m${x.MutationId}`, `${x.Kind} · ${x.LandCode}`, `${x.ApplicationNo ?? "No application no."} · ${x.ApplicationStatus}`, x.DueDate, `/legal/land/post-registration/${x.LandId}`);
   });
 
   res.json(out);

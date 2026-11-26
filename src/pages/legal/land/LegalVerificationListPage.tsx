@@ -12,7 +12,9 @@ import { getStartableEnquiries, getVerifications, startVerification, type Verifi
 
 const fmt = (d: string | null) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—");
 const input = "h-9 w-full border border-foreground/30 bg-background px-2 text-sm focus:border-foreground focus:outline-none";
-export const WS_TONE: Record<string, string> = { "In Progress": "text-sky-700", "Ready for Review": "text-violet-700", Verified: "text-emerald-700", Returned: "text-destructive", "On Hold": "text-amber-700", Closed: "text-muted-foreground" };
+export const WS_TONE: Record<string, string> = { "In Progress": "text-sky-700", "Ready for Review": "text-violet-700", Verified: "text-emerald-700", Returned: "text-destructive", Rejected: "text-destructive", "On Hold": "text-amber-700", Closed: "text-muted-foreground" };
+/** Workspace status as people read it ("Verified" = the Final Legal Review is approved). */
+export const wsLabel = (s: string) => (s === "Verified" ? "Legally approved" : s === "Ready for Review" ? "Final review pending" : s);
 
 /** Start a workspace for an enquiry that has none yet. */
 function StartPanel({ onDone }: { onDone: (id: number) => void }) {
@@ -82,7 +84,7 @@ export default function LegalVerificationListPage() {
               <button key={w.VerificationId} onClick={() => navigate(`/legal/land/verification/${w.VerificationId}`)} className="border border-border bg-card p-3 text-left hover:border-foreground">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <span><b className="font-mono">{w.VerificationNo}</b> <span className="text-xs text-muted-foreground">· {w.EnquiryNo}</span></span>
-                  <span className={`text-xs font-semibold ${WS_TONE[w.Status] ?? ""}`}>{w.Status}</span>
+                  <span className={`text-xs font-semibold ${WS_TONE[w.Status] ?? ""}`}>{wsLabel(w.Status)}</span>
                 </div>
                 <p className="mt-1 truncate text-sm">{[w.MouzaName, w.LandLocation].filter(Boolean).join(" · ") || "—"}</p>
                 <p className="text-xs text-muted-foreground">{w.ProjectName ?? "No project"} · started {fmt(w.StartDate)}{w.TargetDate ? ` · target ${fmt(w.TargetDate)}` : ""}{w.LeadName ? ` · lead ${w.LeadName}` : ""}</p>
@@ -92,6 +94,8 @@ export default function LegalVerificationListPage() {
                   {w.OnHold > 0 && <span className="text-xs font-semibold text-amber-700">{w.OnHold} on hold</span>}
                   {w.Discrepancies > 0 && <span className="text-xs font-semibold text-destructive">{w.Discrepancies} discrepanc{w.Discrepancies === 1 ? "y" : "ies"}</span>}
                   {w.MissingDocuments > 0 && <span className="text-xs font-semibold text-amber-700">{w.MissingDocuments} need documents</span>}
+                  {(w.AwaitingVerification ?? 0) > 0 && <span className="text-xs font-semibold text-violet-700">{w.AwaitingVerification} to verify</span>}
+                  {(w.Returned ?? 0) > 0 && <span className="text-xs font-semibold text-destructive">{w.Returned} returned</span>}
                 </div>
               </button>
             ))}

@@ -95,7 +95,15 @@ export const getLandReview = async (id: number) => handle<LandReview>(await fetc
 export const checkReviewStep = async (id: number, body: { step: string; field?: string; decision?: "ok" | "bad" | "na" | null; remark?: string; all?: "ok" | "clear"; values?: Record<string, string | null> }) =>
   handle<{ message: string }>(await fetchWithAuth(`${BASE}/land/${id}/review/check`, json("PUT", body)));
 export const submitReview = async (id: number, remarks?: string) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/land/${id}/review/submit`, json("POST", { remarks })));
-export const decideReview = async (id: number, action: "Approve" | "Return", remarks?: string) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/land/${id}/review/decide`, json("POST", { action, remarks })));
+/** Land Approval. Refused with needsException while the Final Legal Review is not approved (V2.1); an authorised user
+ * may then approve with an exception reason, which is recorded. */
+export class LandGateError extends Error { needsException = true; }
+export const decideReview = async (id: number, action: "Approve" | "Return", remarks?: string, exceptionReason?: string) => {
+  const res = await fetchWithAuth(`${BASE}/land/${id}/review/decide`, json("POST", { action, remarks, exceptionReason }));
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) { if ((body as { needsException?: boolean }).needsException) throw new LandGateError((body as { error: string }).error); throw new Error((body as { error?: string }).error || "Request failed"); }
+  return body as { message: string };
+};
 export const getReviewQueue = async (qs: string) => handle<{ items: ReviewQueueRow[]; total?: number; page?: number; pageSize?: number; canVerify?: boolean; canApprove?: boolean }>(await fetchWithAuth(`${BASE}/reviews?${qs}`));
 export const requestReview = async (id: number, remarks?: string) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/land/${id}/review/request`, json("POST", { remarks })));
 export const returnReview = async (id: number, remarks: string) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/land/${id}/review/return`, json("POST", { remarks })));

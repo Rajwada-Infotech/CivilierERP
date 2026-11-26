@@ -111,7 +111,7 @@ const txnSql = (type) => `
 const mutationSql = (done) => `
   SELECT ${LAND}, x.ApplicationNo AS [Application], x.ApplicationDate AS [Applied], x.OfficeName AS Office, x.NewOwner AS [New owner(s)], x.ApplicationStatus AS Status,
          x.HearingDate AS [Hearing], x.OrderNo AS [Order no.], x.OrderDate AS [Order date]
-  FROM dbo.LegalMutation x ${JOIN_LAND} WHERE x.IsActive = 1 AND x.ApplicationStatus ${done ? "=" : "<>"} N'Approved' ORDER BY x.MutationId DESC`;
+  FROM dbo.LegalMutation x ${JOIN_LAND} WHERE x.IsActive = 1 AND x.Kind = N'Mutation' AND x.ApplicationStatus ${done ? "=" : "<>"} N'Approved' ORDER BY x.MutationId DESC`;
 // The date column each report's Day / Range / Financial-year filter applies to.
 const DATE_COL = {
   "enquiry-register": "Date", "current-ownership": "Since", "ownership-history": "Date", inheritance: "Date of death",

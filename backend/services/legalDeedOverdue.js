@@ -103,10 +103,12 @@ async function runActivityDueJob() {
   const pool = getPool();
   if (!(await pool.request().query("SELECT OBJECT_ID('dbo.LegalActivityReminderLog','U') AS t")).recordset[0].t) return 0;
   const rows = (await pool.request().query(`
-    SELECT a.ActivityId, a.ActivityNo, a.ActivityName, a.AssignedUserId, a.DueDate, a.VerificationId, v.VerificationNo,
+    SELECT a.ActivityId, a.ActivityNo, a.ActivityName, a.AssignedUserId, a.DueDate, a.VerificationId, v.VerificationNo, v.LeadUserId, a.EscalatedOn,
+           ISNULL(t.EscalateAfterDays, 3) AS EscalateAfterDays,
            DATEDIFF(DAY, CAST(GETDATE() AS DATE), a.DueDate) AS DaysLeft
-    FROM dbo.LegalVerificationActivity a JOIN dbo.LegalVerification v ON v.VerificationId = a.VerificationId AND v.Status <> N'Closed'
-    WHERE a.AssignedUserId IS NOT NULL AND a.DueDate IS NOT NULL AND a.Status NOT IN (N'Completed', N'Not Applicable', N'On Hold')
+    FROM dbo.LegalVerificationActivity a JOIN dbo.LegalActivityTemplate t ON t.TemplateId = a.TemplateId
+    JOIN dbo.LegalVerification v ON v.VerificationId = a.VerificationId AND v.Status NOT IN (N'Closed', N'Verified', N'Rejected')
+    WHERE a.AssignedUserId IS NOT NULL AND a.DueDate IS NOT NULL AND a.Status NOT IN (N'Submitted for Review', N'Closed', N'On Hold')
       AND (a.DueDate < CAST(GETDATE() AS DATE)
            OR DATEDIFF(DAY, CAST(GETDATE() AS DATE), a.DueDate) IN (SELECT DaysBefore FROM dbo.LegalActivityReminderRule WHERE IsActive = 1))`)).recordset;
   let sent = 0;
@@ -123,6 +125,13 @@ async function runActivityDueJob() {
     await pool.request().input("A", r.ActivityId).input("D", r.DueDate).input("K", kind)
       .query("INSERT INTO dbo.LegalActivityReminderLog (ActivityId, DueDate, Kind) VALUES (@A, @D, @K)");
     sent++;
+    // Escalation: overdue for EscalateAfterDays (Setup → Verification Activities) → the lead and Legal Admins, once per due date.
+    if (r.DaysLeft < 0 && -r.DaysLeft >= r.EscalateAfterDays && !r.EscalatedOn) {
+      const { notify } = require("./legalNotify");
+      await notify(pool, { users: [r.LeadUserId], roles: ["Legal Admin"], except: r.AssignedUserId, type: "legal_activity_escalated",
+        title: `Escalated — overdue ${-r.DaysLeft} days: ${r.ActivityName}`, body: `${r.VerificationNo} · due ${due}. Reassign or follow up.`, refId: r.VerificationId, refType: "legal_verification" });
+      await pool.request().input("A", r.ActivityId).query("UPDATE dbo.LegalVerificationActivity SET EscalatedOn = CAST(GETDATE() AS DATE) WHERE ActivityId = @A");
+    }
   }
   return sent;
 }

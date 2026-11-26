@@ -7,7 +7,7 @@ import { LegalFileLink } from "@/components/legal/LegalDocumentPreview";
 import { askLegal } from "@/components/legal/LegalAsk";
 import { InlineRecordEditor, SECTION_MASTERS } from "@/components/legal/InlineRecordEditor";
 import { clearCourtCase, getDiligence } from "@/api/legalDiligenceApi";
-import { checkReviewStep, decideReview, getLandReview, getSectionRights, returnReview, submitReview, type EntryField, type EntryRecord, type LandReview, type ReviewStep } from "@/api/legalFlowApi";
+import { checkReviewStep, decideReview, LandGateError, getLandReview, getSectionRights, returnReview, submitReview, type EntryField, type EntryRecord, type LandReview, type ReviewStep } from "@/api/legalFlowApi";
 
 const val = (x: unknown) => {
   if (x === null || x === undefined || x === "") return "—";
@@ -244,7 +244,17 @@ export function ReviewDecision({ landId, versionNo }: { landId: number; versionN
   const qc = useQueryClient();
   const [remark, setRemark] = useState("");
   const decide = useMutation({
-    mutationFn: (a: "Approve" | "Return") => decideReview(landId, a, remark.trim() || undefined),
+    mutationFn: async (a: "Approve" | "Return") => {
+      try { return await decideReview(landId, a, remark.trim() || undefined); }
+      catch (e) {
+        if (!(e instanceof LandGateError)) throw e;
+        // Final Legal Review not approved: only an authorised exception (recorded) lets the land through.
+        const reason = await askLegal({ title: "Final Legal Review not approved", message: `${e.message}. Approving now records a land-approval exception (Legal Reviewer, Legal Admin or admin only).`,
+          input: { label: "Reason for the exception", required: true }, confirmText: "Approve with exception" });
+        if (!reason) throw new Error("Not approved — the Final Legal Review is pending");
+        return decideReview(landId, a, remark.trim() || undefined, reason);
+      }
+    },
     onSuccess: (r) => { toast.success(r.message); setRemark(""); ["legal-review", "legal-flow", "legal-review-queue"].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); },
     onError: (e: Error) => { toast.error(e.message); qc.invalidateQueries({ queryKey: ["legal-review-queue"] }); },
   });

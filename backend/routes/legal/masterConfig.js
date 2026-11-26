@@ -102,6 +102,13 @@ const LAND_ID = { name: "LandId", label: "Land property", type: "ref", ref: "lan
 const landChild = (title, table, pk, desc, rest) => ({
   title, group: "Land Management", pageKey: "legal-land-master", table, pk, parent: "LandId", desc, ...rest,
 });
+// Post-registration mutation / conversion: tell the employee when it is assigned to them.
+const postRegAssigned = async (pool, req, row, before, kind) => {
+  if (!row?.AssignedUserId || Number(row.AssignedUserId) === Number(before?.AssignedUserId)) return;
+  const l = (await pool.request().input("L", row.LandId).query("SELECT LandCode FROM dbo.LegalLand WHERE LandId = @L")).recordset[0];
+  await require("../../services/legalNotify").notify(pool, { users: [row.AssignedUserId], except: req?.user?.userId, type: "legal_postreg_assigned",
+    title: `${kind} assigned: ${l?.LandCode ?? ""}`, body: `${row.ApplicationNo ? `Application ${row.ApplicationNo} · ` : ""}${row.DueDate ? `target ${String(row.DueDate).slice(0, 10)} · ` : ""}Open Legal → Post-registration.`, refId: row.LandId });
+};
 // Enquiry RS / LR records: a converted enquiry is read-only (its land holds the records now).
 const enquiryOpen = async (pool, values) => {
   const e = values?.EnquiryId && (await pool.request().input("E", values.EnquiryId).query("SELECT LandId FROM dbo.LegalLandEnquiry WHERE EnquiryId = @E")).recordset[0];
@@ -1265,7 +1272,10 @@ const MASTERS = {
   mutation: landChild("Mutation", "LegalMutation", "MutationId",
     "The mutation application at the BL&LRO, tracked apart from registration: a registered deed is not a completed mutation.", {
       label: "ISNULL(r.ApplicationNo, 'Mutation ' + CAST(r.MutationId AS NVARCHAR(10))) + ' - ' + r.ApplicationStatus", orderBy: "MutationId",
+      // V2.1: the same table holds post-registration conversions (Kind = Conversion, see "conversion").
+      scope: { column: "Kind", value: "Mutation" },
       review: { field: "ApplicationStatus", by: "DecidedBy", at: "DecidedAt", free: ["Not Applied", "Draft", "Submitted", "Under Process", "Hearing Scheduled", "Objection Raised", "Correction Required"] },
+      afterWrite: (pool, req, row, before) => postRegAssigned(pool, req, row, before, "Mutation"),
       fields: [
         LAND_ID,
         { name: "RegisteredDeedId", label: "Registered deed", type: "ref", ref: "registered-deed", filterBy: "LandId" },
@@ -1278,13 +1288,21 @@ const MASTERS = {
         { name: "PreviousKhatian", label: "Previous Khatian", type: "text", max: 60 },
         { name: "PreviousOwner", label: "Previous owner(s)", type: "text", max: 300 },
         { name: "NewOwner", label: "New owner(s)", type: "text", required: true, max: 300 },
+        { name: "ApplicantName", label: "Applicant", type: "text", max: 200 },
+        { name: "AssignedUserId", label: "Assigned employee", type: "ref", ref: "user" },
+        { name: "DueDate", label: "Internal target date", type: "date" },
+        { name: "Fee", label: "Fee (₹)", type: "decimal" },
+        { name: "PaymentRef", label: "Payment reference", type: "text", max: 100 },
+        { name: "PaymentDate", label: "Payment date", type: "date" },
         { name: "ApplicationStatus", label: "Application status", type: "select", required: true, options: MUTATION_STATUSES, default: "Draft" },
         { name: "HearingDate", label: "Hearing date", type: "date" },
         { name: "ObjectionDetails", label: "Objection details", type: "textarea", max: 1000, requiredWhen: { field: "ApplicationStatus", values: ["Objection Raised"] } },
         { name: "OrderNo", label: "Mutation order number", type: "text", max: 80, requiredWhen: { field: "ApplicationStatus", values: ["Approved"] } },
         { name: "OrderDate", label: "Mutation order date", type: "date", requiredWhen: { field: "ApplicationStatus", values: ["Approved"] } },
+        { name: "CompletionDate", label: "Completed on", type: "date" },
         { name: "DocFileId", label: "Application copy", type: "file" },
         { name: "OrderFileId", label: "Mutation order", type: "file" },
+        { name: "ReportFileId", label: "Report", type: "file" },
         { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
         ACTIVE,
       ],
@@ -1326,6 +1344,73 @@ const MASTERS = {
         { name: "ReceiptFileId", label: "Receipt", type: "file" },
         VERIFICATION,
         { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
+  // Post-registration land conversion (V2.1): same table as mutation, Kind = Conversion — its own deadline, assignee,
+  // documents and status history. Rule conversion_after_mutation (Setup → Legal Rules) holds it at "Applied" until
+  // the land has an approved mutation.
+  conversion: landChild("Land Conversion", "LegalMutation", "MutationId",
+    "The land-use conversion application after registration, tracked apart from mutation. Estimated durations are internal targets, not government timelines.", {
+      pageKey: "legal-conversion-master",
+      label: "ISNULL(r.ApplicationNo, 'Conversion ' + CAST(r.MutationId AS NVARCHAR(10))) + ' - ' + r.ApplicationStatus", orderBy: "MutationId",
+      scope: { column: "Kind", value: "Conversion" },
+      afterWrite: (pool, req, row, before) => postRegAssigned(pool, req, row, before, "Conversion"),
+      check: async (pool, values) => {
+        if (!["Under Process", "Hearing Scheduled", "Approved"].includes(values.ApplicationStatus)) return null;
+        const rule = (await pool.request().query("SELECT IsBlocking, IsActive FROM dbo.LegalRuleConfig WHERE RuleKey = N'conversion_after_mutation'")).recordset[0];
+        if (!rule?.IsActive || !rule?.IsBlocking) return null;
+        const ok = (await pool.request().input("L", values.LandId).query("SELECT COUNT(*) AS n FROM dbo.LegalMutation WHERE LandId = @L AND IsActive = 1 AND Kind = N'Mutation' AND ApplicationStatus = N'Approved'")).recordset[0].n;
+        return ok ? null : "Conversion can go beyond Submitted only after the land's mutation is approved (Setup → Legal Rules)";
+      },
+      fields: [
+        LAND_ID,
+        { name: "ApplicationNo", label: "Conversion application number", type: "text", max: 80 },
+        { name: "ApplicationDate", label: "Application date", type: "date" },
+        { name: "OfficeName", label: "Authority / office", type: "text", required: true, max: 200 },
+        { name: "MouzaId", label: "Mouza", type: "ref", ref: "mouza" },
+        { name: "DagNo", label: "Dag number", type: "text", max: 60 },
+        { name: "PreviousKhatian", label: "Khatian", type: "text", max: 60 },
+        { name: "ApplicantName", label: "Applicant", type: "text", max: 200 },
+        { name: "AssignedUserId", label: "Assigned employee", type: "ref", ref: "user" },
+        { name: "DueDate", label: "Internal target date", type: "date" },
+        { name: "CurrentClass", label: "Current land classification", type: "text", max: 60 },
+        { name: "RequestedClass", label: "Requested land classification", type: "text", required: true, max: 60 },
+        { name: "Fee", label: "Fee (₹)", type: "decimal" },
+        { name: "PaymentRef", label: "Payment reference", type: "text", max: 100 },
+        { name: "PaymentDate", label: "Payment date", type: "date" },
+        { name: "ApplicationStatus", label: "Application status", type: "select", required: true, options: MUTATION_STATUSES, default: "Draft" },
+        { name: "HearingDate", label: "Hearing date", type: "date" },
+        { name: "InspectionDate", label: "Inspection date", type: "date" },
+        { name: "ObjectionDetails", label: "Objection details", type: "textarea", max: 1000, requiredWhen: { field: "ApplicationStatus", values: ["Objection Raised"] } },
+        { name: "OrderNo", label: "Conversion order number", type: "text", max: 80, requiredWhen: { field: "ApplicationStatus", values: ["Approved"] } },
+        { name: "OrderDate", label: "Conversion order date", type: "date", requiredWhen: { field: "ApplicationStatus", values: ["Approved"] } },
+        { name: "CompletionDate", label: "Completed on", type: "date" },
+        { name: "DocFileId", label: "Application copy", type: "file" },
+        { name: "OrderFileId", label: "Conversion order", type: "file" },
+        { name: "ReportFileId", label: "Report", type: "file" },
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
+  // Picker over both kinds (for queries); not a screen of its own.
+  "post-reg-application": landChild("Mutation / Conversion Application", "LegalMutation", "MutationId", "Mutation and conversion applications of a land.", {
+    adminOnly: true, noDelete: true,
+    label: "r.Kind + ' ' + ISNULL(r.ApplicationNo, CAST(r.MutationId AS NVARCHAR(10))) + ' - ' + r.ApplicationStatus", orderBy: "MutationId",
+    fields: [LAND_ID, { name: "Kind", label: "Type", type: "select", required: true, options: ["Mutation", "Conversion"] }, { name: "ApplicationNo", label: "Application number", type: "text", max: 80 }, ACTIVE],
+  }),
+  "application-query": landChild("Application Query", "LegalApplicationQuery", "QueryId",
+    "Queries raised on a mutation or conversion application, and the replies sent.", {
+      pageKey: "legal-application-query-master",
+      label: "CONVERT(NVARCHAR(10), r.QueryDate, 105) + ' - ' + LEFT(r.QueryText, 60)", orderBy: "MutationId, QueryDate",
+      fields: [
+        LAND_ID,
+        { name: "MutationId", label: "Application", type: "ref", ref: "post-reg-application", filterBy: "LandId", required: true },
+        { name: "QueryDate", label: "Query date", type: "date", required: true },
+        { name: "QueryText", label: "Query", type: "textarea", required: true, max: 1000 },
+        { name: "ResponseDate", label: "Response date", type: "date" },
+        { name: "ResponseText", label: "Response", type: "textarea", max: 1000 },
+        { name: "FileId", label: "Query / reply copy", type: "file" },
         ACTIVE,
       ],
     }),

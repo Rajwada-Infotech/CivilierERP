@@ -8,7 +8,7 @@ type Data = Record<string, string | number | null>;
 interface Edge { id: number; from: string; to: string; data: Data }
 interface Node { key: string; name: string; col: number; row: number; root: boolean; firstYear: number | null; noEarlier: boolean }
 
-const NODE_W = 190, NODE_H = 46, COL_GAP = 120, ROW_GAP = 26, PAD = 24;
+const NODE_W = 190, NODE_H = 46, COL_GAP = 180, ROW_GAP = 26, PAD = 24;
 const norm = (s: unknown) => String(s ?? "").trim().replace(/\s+/g, " ").toLowerCase();
 const yearOf = (d: Data) => (d.transferDate ? Number(String(d.transferDate).slice(0, 4)) : d.transferYear != null ? Number(d.transferYear) : null);
 
@@ -51,7 +51,7 @@ function FlowSvg({ rows, svgRef }: { rows: { EntryId: number; data: Data }[]; sv
   const at = new Map(nodes.map((n) => [n.key, n]));
   const W = PAD * 2 + (Math.max(...nodes.map((n) => n.col)) + 1) * (NODE_W + COL_GAP) - COL_GAP;
   const H = PAD * 2 + (Math.max(...nodes.map((n) => n.row)) + 1) * (NODE_H + ROW_GAP) - ROW_GAP + 30;
-  const tone = (v: unknown) => (v === "Verified" ? "#15803d" : v === "Missing Document" ? "#dc2626" : "#b45309");
+  const tone = (v: unknown) => (v === "Verified" ? "#15803d" : v === "Missing Document" || v === "Disputed" ? "#dc2626" : "#b45309");
   return (
     <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} width={W} height={H} role="img" aria-label="Historical ownership flowchart" style={{ fontFamily: "inherit", maxWidth: "none" }}>
       <defs>{["#15803d", "#dc2626", "#b45309"].map((c) => (
@@ -66,12 +66,14 @@ function FlowSvg({ rows, svgRef }: { rows: { EntryId: number; data: Data }[]; sv
         const d = back ? `M${x1},${y1} C${x1 + 60},${y1 + 80} ${x2 - 60},${y2 + 80} ${x2},${y2}` : `M${x1},${y1} C${(x1 + x2) / 2},${y1} ${(x1 + x2) / 2},${y2} ${x2},${y2}`;
         const c = tone(e.data.verification);
         const year = yearOf(e.data);
-        const label = `${e.data.transferType ?? ""}${year ? ` ${year}` : ""}${e.data.deedNo ? ` · ${e.data.deedNo}` : ""}`;
+        // Partial transfers show what moved and what the previous owner kept (structured area data).
+        const area = e.data.area != null ? ` · ${e.data.area}${e.data.areaBefore != null ? ` of ${e.data.areaBefore}, keeps ${e.data.areaRetained ?? Number(e.data.areaBefore) - Number(e.data.area)}` : ""}` : "";
+        const label = `${e.data.transferType ?? ""}${year ? ` ${year}` : ""}${e.data.deedNo ? ` · ${e.data.deedNo}` : ""}${area}`;
         const mx = (x1 + x2) / 2, my = (y1 + y2) / 2 + (back ? 60 : 0) - 6 + (i % 2) * 12;
         return (
           <g key={e.id}>
             <path d={d} fill="none" stroke={c} strokeWidth={1.6} strokeDasharray={e.data.verification === "Verified" ? undefined : "5 4"} markerEnd={`url(#arr${c.slice(1)})`} />
-            <text x={mx} y={my} textAnchor="middle" fontSize={10} fill={c} stroke="hsl(var(--card))" strokeWidth={3} paintOrder="stroke">{label}{e.data.verification === "Missing Document" ? " ⚠" : ""}</text>
+            <text x={mx} y={my} textAnchor="middle" fontSize={10} fill={c} stroke="hsl(var(--card))" strokeWidth={3} paintOrder="stroke">{label}{e.data.verification === "Missing Document" || e.data.verification === "Disputed" ? " ⚠" : ""}</text>
           </g>
         );
       })}
@@ -90,7 +92,7 @@ function FlowSvg({ rows, svgRef }: { rows: { EntryId: number; data: Data }[]; sv
       <g transform={`translate(${PAD}, ${H - 14})`} fontSize={10}>
         <line x1={0} y1={-3} x2={24} y2={-3} stroke="#15803d" strokeWidth={1.6} /><text x={30} y={0} fill="currentColor">Verified</text>
         <line x1={90} y1={-3} x2={114} y2={-3} stroke="#b45309" strokeWidth={1.6} strokeDasharray="5 4" /><text x={120} y={0} fill="currentColor">Unverified</text>
-        <line x1={190} y1={-3} x2={214} y2={-3} stroke="#dc2626" strokeWidth={1.6} strokeDasharray="5 4" /><text x={220} y={0} fill="currentColor">Missing document</text>
+        <line x1={190} y1={-3} x2={214} y2={-3} stroke="#dc2626" strokeWidth={1.6} strokeDasharray="5 4" /><text x={220} y={0} fill="currentColor">Missing document / disputed</text>
       </g>
     </svg>
   );

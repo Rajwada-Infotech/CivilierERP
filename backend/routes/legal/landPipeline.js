@@ -256,7 +256,7 @@ async function gates(conn, land) {
            (SELECT COUNT(*) FROM dbo.LegalOwnershipRecord r WHERE r.EventId = e.EventId AND r.IsActive = 1 AND r.VerificationStatus <> N'Verified') AS RecordsOpen,
            (SELECT COUNT(*) FROM dbo.LegalRegisteredDeed d WHERE d.RegisteredId = e.RegisteredDeedId AND d.ApprovalStatus = N'Approved') AS DeedApproved
       FROM dbo.LegalOwnershipEvent e WHERE e.LandId = @Id AND e.IsActive = 1 AND e.RegisteredDeedId IS NOT NULL;
-    SELECT MutationId, ApplicationNo, ApplicationStatus FROM dbo.LegalMutation WHERE LandId = @Id AND IsActive = 1 ORDER BY MutationId;
+    SELECT MutationId, ApplicationNo, ApplicationStatus FROM dbo.LegalMutation WHERE LandId = @Id AND IsActive = 1 AND Kind = N'Mutation' ORDER BY MutationId;
     SELECT VerificationStatus FROM dbo.LegalMutationRecord WHERE LandId = @Id AND IsActive = 1;
     SELECT CheckItem, Result FROM dbo.LegalFinalCheck WHERE LandId = @Id AND IsActive = 1;
     SELECT SettlementStatus, ApprovedAt FROM dbo.LegalSettlement WHERE LandId = @Id AND IsActive = 1;
@@ -438,7 +438,7 @@ router.get("/stats", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
       WHERE e.IsActive = 1 ORDER BY e.EventDate DESC, e.EventId DESC;
       SELECT
         (SELECT COUNT(DISTINCT d.LandId) FROM dbo.LegalLandDeed d WHERE d.IsActive = 1 AND d.RegistrationStatus NOT IN (N'Successfully Registered', N'Registered Deed Awaiting', N'Completed')) AS pendingRegistration,
-        (SELECT COUNT(*) FROM dbo.LegalRegisteredDeed rd WHERE rd.IsActive = 1 AND NOT EXISTS (SELECT 1 FROM dbo.LegalMutation m WHERE m.RegisteredDeedId = rd.RegisteredId AND m.ApplicationStatus = N'Approved')) AS mutationPending;
+        (SELECT COUNT(*) FROM dbo.LegalRegisteredDeed rd WHERE rd.IsActive = 1 AND NOT EXISTS (SELECT 1 FROM dbo.LegalMutation m WHERE m.RegisteredDeedId = rd.RegisteredId AND m.Kind = N'Mutation' AND m.ApplicationStatus = N'Approved')) AS mutationPending;
       SELECT l.LandId, l.LandCode, l.LandName, l.EntryType, l.LandStatus, l.PossessionStatus, l.WorkflowStatus, l.IsOnHold,
              CAST(l.Area AS FLOAT) AS Area, u.UnitName, d.DistrictName, m.MouzaName, m.JLNo,
              ISNULL(l.VerificationStatus, N'Draft') AS VerificationStatus,
@@ -601,7 +601,7 @@ router.get("/:id/overview", requirePageRight(LAND_PAGE, "view"), async (req, res
         (SELECT COUNT(*) FROM dbo.LegalMortgage WHERE LandId = @Id AND IsActive = 1
            AND (LoanStatus IN (N'Active', N'Overdue') OR MortgageStatus IN (N'Mortgage Active', N'Loan Outstanding', N'Release Pending'))) AS activeMortgages,
         (SELECT COUNT(*) FROM dbo.LegalMortgage WHERE LandId = @Id AND IsActive = 1) AS mortgages,
-        (SELECT COUNT(*) FROM dbo.LegalMutation WHERE LandId = @Id AND IsActive = 1) AS mutations,
+        (SELECT COUNT(*) FROM dbo.LegalMutation WHERE LandId = @Id AND IsActive = 1 AND Kind = N'Mutation') AS mutations,
         (SELECT COUNT(*) FROM dbo.LegalPayment WHERE LandId = @Id AND IsActive = 1) AS payments,
         (SELECT COUNT(*) FROM dbo.LegalLandTax WHERE LandId = @Id AND IsActive = 1) AS taxRecords,
         (SELECT COUNT(*) FROM dbo.LegalValuation WHERE LandId = @Id AND IsActive = 1) AS valuations,
@@ -1252,7 +1252,7 @@ async function currentRegister(conn, id) {
     SELECT LrKhatianNo + ' / ' + LrDagNo AS Ref, 'Original' AS Kind FROM dbo.LegalLandLrRecord WHERE LandId = @Id AND IsActive = 1
     UNION ALL SELECT NewLrKhatianNo + ' / ' + NewLrDagNo, 'After mutation' FROM dbo.LegalMutationRecord WHERE LandId = @Id AND IsActive = 1;
     SELECT TOP 1 RegisteredDeedNo, RegistrationDate, ApprovalStatus FROM dbo.LegalRegisteredDeed WHERE LandId = @Id AND IsActive = 1 ORDER BY RegistrationDate DESC;
-    SELECT TOP 1 ApplicationStatus, OrderNo FROM dbo.LegalMutation WHERE LandId = @Id AND IsActive = 1 ORDER BY MutationId DESC;
+    SELECT TOP 1 ApplicationStatus, OrderNo FROM dbo.LegalMutation WHERE LandId = @Id AND IsActive = 1 AND Kind = N'Mutation' ORDER BY MutationId DESC;
     SELECT TOP 1 Decision FROM dbo.LegalClearance WHERE LandId = @Id AND IsActive = 1 ORDER BY ClearanceId DESC;
     SELECT TOP 1 SettlementStatus FROM dbo.LegalSettlement WHERE LandId = @Id AND IsActive = 1 ORDER BY SettlementId DESC;`);
   const [land, owners, sold, rs, lr, deed, mutation, clearance, settlement] = r.recordsets;
@@ -1548,7 +1548,7 @@ router.get("/:id/dossier", requirePageRight(LAND_PAGE, "view"), async (req, res)
              (SELECT TOP 1 RegistrationDate FROM dbo.LegalRegisteredDeed r WHERE r.DeedId = d.DeedId AND r.IsActive = 1) AS RegistrationDate
         FROM dbo.LegalLandDeed d LEFT JOIN dbo.LegalDeedType dt ON dt.DeedTypeId = d.DeedTypeId LEFT JOIN dbo.LegalRegistrationOffice o ON o.OfficeId = d.RegistrationOfficeId
         WHERE d.LandId = @Id AND d.IsActive = 1;
-      SELECT ApplicationNo, OfficeName, ApplicationStatus, OrderNo, OrderDate FROM dbo.LegalMutation WHERE LandId = @Id AND IsActive = 1;
+      SELECT ApplicationNo, OfficeName, ApplicationStatus, OrderNo, OrderDate FROM dbo.LegalMutation WHERE LandId = @Id AND IsActive = 1 AND Kind = N'Mutation';
       SELECT s.StepNo, s.StepCode, s.StepName, ISNULL(st.Status, N'Not Started') AS Status, st.UpdatedAt,
              (SELECT name FROM dbo.users WHERE id = st.UpdatedBy) AS UpdatedByName
         FROM dbo.LegalWorkflowStep s LEFT JOIN dbo.LegalWorkflowStepState st ON st.StepCode = s.StepCode AND st.LandId = @Id
@@ -2284,7 +2284,16 @@ router.get("/post-registration/list", requirePageRight(LAND_PAGE, "view"), pagea
              (SELECT FileName FROM dbo.LegalMasterFile f WHERE f.FileId = t.FileId) AS FileName, t.UpdatedAt, (SELECT name FROM dbo.users WHERE id = t.UpdatedBy) AS UpdatedByName
       FROM dbo.LegalPostRegTask t JOIN dbo.LegalLand l ON l.LandId = t.LandId AND l.WorkflowStatus = N'Registered' ORDER BY t.LandId, t.TaskNo`)).recordset;
     const clearances = (await clearanceReady(pool)) ? (await pool.request().query(`${CLEARANCE_SELECT} WHERE c.Kind IN (N'LA', N'ULC')`)).recordset : [];
-    res.json({ lands: lands.map((l) => ({ ...l, tasks: tasks.filter((t) => t.LandId === l.LandId),
+    // V2.1: mutation and conversion, each tracked on its own (LegalMutation.Kind).
+    const hasKind = !!(await pool.request().query("SELECT COL_LENGTH('dbo.LegalMutation', 'Kind') AS c")).recordset[0].c;
+    const apps = hasKind ? (await pool.request().query(`
+      SELECT m.MutationId, m.LandId, m.Kind, m.ApplicationNo, CONVERT(char(10), m.ApplicationDate, 23) AS ApplicationDate, m.OfficeName, m.ApplicationStatus,
+             m.AssignedUserId, u.name AS AssignedName, CONVERT(char(10), m.DueDate, 23) AS DueDate, CONVERT(char(10), m.HearingDate, 23) AS HearingDate,
+             CONVERT(char(10), m.CompletionDate, 23) AS CompletionDate, m.RequestedClass,
+             (SELECT COUNT(*) FROM dbo.LegalApplicationQuery q WHERE q.MutationId = m.MutationId AND q.IsActive = 1 AND q.ResponseDate IS NULL) AS OpenQueries
+      FROM dbo.LegalMutation m JOIN dbo.LegalLand l ON l.LandId = m.LandId AND l.WorkflowStatus = N'Registered'
+      LEFT JOIN dbo.users u ON u.id = m.AssignedUserId WHERE m.IsActive = 1 ORDER BY m.Kind DESC, m.MutationId`)).recordset : [];
+    res.json({ lands: lands.map((l) => ({ ...l, tasks: tasks.filter((t) => t.LandId === l.LandId), applications: apps.filter((a) => a.LandId === l.LandId),
       clearances: Object.keys(CLEARANCE_KINDS).map((k) => ({ Kind: k, Label: CLEARANCE_KINDS[k], Status: "Not Applied", LandId: l.LandId, ...clearances.find((c) => c.LandId === l.LandId && c.Kind === k) })) })),
       statuses: POST_REG_STATUS });
   } catch (err) {
