@@ -36,6 +36,8 @@ router.get("/", cache("finance-dashboard", 60, { dropOnAnyWrite: true }), async 
       recentPaymentsReceived,
       madeTimeline,
       receivedTimeline,
+      invoiceStats,
+      overdueStats,
     ] = await Promise.all([
       // ── Payments Made (NewPayment) ──────────────────────────────────────────
       pool.request().query(`
@@ -165,9 +167,47 @@ router.get("/", cache("finance-dashboard", 60, { dropOnAnyWrite: true }), async 
         WHERE CAST(RPDocDate AS DATE) >= DATEADD(DAY, -13, CAST(GETDATE() AS DATE))
         GROUP BY CAST(RPDocDate AS DATE)
       `),
+
+      // ── Invoices (ExpenseBooking) and approvals waiting ────────────────────
+      // Invoices: every booking that isn't deleted / rejected / cancelled; paid = fully settled (EBillStatus, kept by
+      // utils/syncBillStatus.js). Waiting for approval: invoices and payments made in Pending.
+      pool.request().query(`
+        SELECT
+          COUNT(CASE WHEN ISNULL(EStatus, '') NOT IN ('Deleted', 'Rejected', 'Cancelled') THEN 1 END) AS InvoiceCount,
+          COUNT(CASE WHEN ISNULL(EStatus, '') NOT IN ('Deleted', 'Rejected', 'Cancelled') AND EBillStatus = 'Paid' THEN 1 END) AS PaidCount,
+          COUNT(CASE WHEN EStatus = 'Pending' THEN 1 END) AS PendingCount,
+          (SELECT COUNT(*) FROM dbo.NewPayment WHERE Status = 'Pending') AS PaymentPendingCount
+        FROM dbo.ExpenseBooking
+      `),
+
+      // ── Overdue ────────────────────────────────────────────────────────────
+      // Invoices: an instalment (dbo.EmiInstallments) past its due date and still Pending, on an invoice that isn't
+      // paid or deleted. Payments: an outgoing cheque past its cheque date, neither cleared nor bounced in bank
+      // reconciliation (the PDC report's "Overdue", routes/pdcReport.js).
+      pool.request().query(`
+        SELECT
+          (SELECT COUNT(DISTINCT eb.Eid) FROM dbo.EmiInstallments ei JOIN dbo.ExpenseBooking eb ON eb.Eid = ei.ExpenseBookingId
+            WHERE ei.Status = 'Pending' AND ei.DueDate < CAST(GETDATE() AS DATE)
+              AND ISNULL(eb.EStatus, '') NOT IN ('Deleted', 'Rejected', 'Cancelled') AND ISNULL(eb.EBillStatus, '') <> 'Paid') AS InvoiceCount,
+          (SELECT ISNULL(SUM(ei.Amount), 0) FROM dbo.EmiInstallments ei JOIN dbo.ExpenseBooking eb ON eb.Eid = ei.ExpenseBookingId
+            WHERE ei.Status = 'Pending' AND ei.DueDate < CAST(GETDATE() AS DATE)
+              AND ISNULL(eb.EStatus, '') NOT IN ('Deleted', 'Rejected', 'Cancelled') AND ISNULL(eb.EBillStatus, '') <> 'Paid') AS InvoiceAmount,
+          (SELECT COUNT(*) FROM dbo.NewPayment np
+            LEFT JOIN dbo.BankReconciliation brc ON brc.SourceType = 'PAYMENT' AND brc.SourceID = np.PPaymentID
+            WHERE np.PMode IN ('Cheque', 'Post-Dated Cheque') AND np.PChequeNo IS NOT NULL
+              AND ISNULL(np.Status, 'Draft') NOT IN ('Draft', 'Rejected', 'Cancelled', 'Deleted')
+              AND ISNULL(brc.IsMatched, 0) = 0 AND ISNULL(brc.IsBounced, 0) = 0 AND np.PChequeDate < CAST(GETDATE() AS DATE)) AS PaymentCount,
+          (SELECT ISNULL(SUM(np.PAmount), 0) FROM dbo.NewPayment np
+            LEFT JOIN dbo.BankReconciliation brc ON brc.SourceType = 'PAYMENT' AND brc.SourceID = np.PPaymentID
+            WHERE np.PMode IN ('Cheque', 'Post-Dated Cheque') AND np.PChequeNo IS NOT NULL
+              AND ISNULL(np.Status, 'Draft') NOT IN ('Draft', 'Rejected', 'Cancelled', 'Deleted')
+              AND ISNULL(brc.IsMatched, 0) = 0 AND ISNULL(brc.IsBounced, 0) = 0 AND np.PChequeDate < CAST(GETDATE() AS DATE)) AS PaymentAmount
+      `),
     ]);
 
     const pm = paymentMadeStats.recordset[0];
+    const inv = invoiceStats.recordset[0];
+    const od = overdueStats.recordset[0];
     const rp = receivedPaymentStats.recordset[0];
     const ch = chequeStats.recordset[0];
     const cd = cardStats.recordset[0];
@@ -202,6 +242,18 @@ router.get("/", cache("finance-dashboard", 60, { dropOnAnyWrite: true }), async 
         totalAmount: parseFloat(pm.TotalAmount),
         todayAmount: parseFloat(pm.TodayAmount),
         thisMonthAmount: parseFloat(pm.ThisMonthAmount),
+        pendingApprovalCount: inv.PaymentPendingCount,
+      },
+      invoices: {
+        totalCount: inv.InvoiceCount,
+        paidCount: inv.PaidCount,
+        pendingApprovalCount: inv.PendingCount,
+      },
+      overdue: {
+        invoiceCount: od.InvoiceCount,
+        invoiceAmount: parseFloat(od.InvoiceAmount),
+        paymentCount: od.PaymentCount,
+        paymentAmount: parseFloat(od.PaymentAmount),
       },
       receivedPayments: {
         totalCount: rp.TotalCount,
