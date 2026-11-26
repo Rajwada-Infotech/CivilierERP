@@ -10,7 +10,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CircleMarker, MapContainer, Polygon, Polyline, TileLayer, Tooltip, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
-import { Check, Download, Image as ImageIcon, Loader2, Play, Search } from "lucide-react";
+import { Check, Download, Image as ImageIcon, Loader2, Pause, Play, Search } from "lucide-react";
 import { connectSocket } from "@/lib/socket";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MaintenanceShell } from "@/components/maintenance/MaintenanceShell";
@@ -229,6 +229,27 @@ function ReplayTab() {
   });
   useEffect(() => setPos(data ? data.points.length - 1 : 0), [data]);
   const pts = data?.points ?? [];
+  // Play: walks the route from where the slider is (from the start when it's at the end). At 1× a whole shift plays
+  // in about 30 seconds, whatever its length.
+  const [playing, setPlaying] = useState(false);
+  const [speed, setSpeed] = useState(1);
+  useEffect(() => setPlaying(false), [data]);
+  useEffect(() => {
+    if (!playing || pts.length < 2) return;
+    const step = Math.max(1, Math.round((pts.length / 375) * speed));
+    const t = setInterval(() => {
+      setPos((p) => {
+        const next = Math.min(pts.length - 1, p + step);
+        if (next >= pts.length - 1) setPlaying(false);
+        return next;
+      });
+    }, 80);
+    return () => clearInterval(t);
+  }, [playing, speed, pts.length]);
+  const togglePlay = () => {
+    if (!playing && pos >= pts.length - 1) setPos(0);
+    setPlaying(!playing);
+  };
   const here = pts[Math.min(pos, pts.length - 1)];
   const blue = tok("--primary");
   const red = tok("--destructive");
@@ -289,7 +310,26 @@ function ReplayTab() {
           </div>
           {pts.length > 0 ? (
             <div className="flex items-center gap-3">
-              <input type="range" min={0} max={pts.length - 1} value={pos} onChange={(e) => setPos(Number(e.target.value))} className="flex-1" aria-label="Time" />
+              <button type="button" onClick={togglePlay} disabled={pts.length < 2} className={`${KEY_INK} h-8 px-3`} aria-label={playing ? "Pause the replay" : "Play the replay"}>
+                {playing ? <Pause size={13} /> : <Play size={13} />} {playing ? "Pause" : "Play"}
+              </button>
+              <select value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className={`${filterCls} w-20`} aria-label="Replay speed">
+                {[1, 2, 4, 8].map((x) => (
+                  <option key={x} value={x}>{x}×</option>
+                ))}
+              </select>
+              <input
+                type="range"
+                min={0}
+                max={pts.length - 1}
+                value={pos}
+                onChange={(e) => {
+                  setPlaying(false);
+                  setPos(Number(e.target.value));
+                }}
+                className="flex-1"
+                aria-label="Time"
+              />
               <span className="font-heading tabular-nums text-xs w-44 text-right">
                 {here ? `${when(here.at)}${here.inZone === false ? " · outside" : ""}` : ""}
               </span>

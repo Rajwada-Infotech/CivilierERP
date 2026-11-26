@@ -17,6 +17,7 @@
  *
  * Tracking (doc phase 3):
  *   POST /pings                          guard's phone: { pings: [{ at, lat, lng, accuracy?, battery? }] } -> { stored, onShift }
+ *   (guard)             GET /patrols/current   POST /patrols/start   POST /patrols/end     patrol rounds
  *   security-live       GET /live  GET /guards/tracked  GET /guards/:id/trail?from&to  GET /alerts?open=1
  *                       POST /alerts/:id/acknowledge  GET /visitor-log?from&to&gateId&status&q&page
  *   security-geofences  GET /geofences  POST /geofences/preview  POST /geofences  PUT /geofences/:id  DELETE /geofences/:id
@@ -558,6 +559,41 @@ router.post("/pings", async (req, res) => {
   if (!isGuard(req)) return bad(res, "Only a guard's phone sends location.", 403);
   try {
     res.json(await tracking.recordPings(getPool(), me(req), req.body?.pings));
+  } catch (err) {
+    visitorFail(req, res, err);
+  }
+});
+
+// ── Patrol rounds (guard): start a round at the guard's gate while on shift, end it when done. The route is the
+// guard's location pings between the two times, so shift tracking must be on.
+const patrols = require("../services/securityPatrols");
+
+router.get("/patrols/current", async (req, res) => {
+  if (!isGuard(req)) return bad(res, "Only a guard patrols.", 403);
+  try {
+    res.json({ patrol: await patrols.currentPatrol(getPool(), me(req)) });
+  } catch (err) {
+    visitorFail(req, res, err);
+  }
+});
+
+router.post("/patrols/start", async (req, res) => {
+  if (!isGuard(req)) return bad(res, "Only a guard patrols.", 403);
+  try {
+    const pool = getPool();
+    const cur = await guardAssignmentNow(pool, me(req));
+    if (!cur?.onDuty) return bad(res, "A patrol can start only during your shift.", 409);
+    res.json({ patrol: await patrols.startPatrol(pool, me(req), cur.gateId, cur.projectId) });
+  } catch (err) {
+    visitorFail(req, res, err);
+  }
+});
+
+router.post("/patrols/end", async (req, res) => {
+  if (!isGuard(req)) return bad(res, "Only a guard patrols.", 403);
+  try {
+    await patrols.endOpen(getPool(), me(req));
+    res.json({ patrol: null });
   } catch (err) {
     visitorFail(req, res, err);
   }

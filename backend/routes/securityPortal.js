@@ -15,6 +15,7 @@
  *   GET  /gates                        the gates of their projects (and whether a guard is on duty)
  *   GET  /calls/available   POST /calls { gateId }   GET /calls/incoming   GET /calls/:id   POST /calls/:id/answer|decline|end
  *   GET  /complaints/options   GET /complaints   POST /complaints     complaints about security guards
+ *   GET  /patrol?from&to   GET /patrol/:id   patrol rounds at their project(s), and one round's route (replay)
  */
 const express = require("express");
 const router = express.Router();
@@ -222,6 +223,57 @@ router.get("/complaints", async (req, res) => {
 router.post("/complaints", async (req, res) => {
   try {
     res.status(201).json(await complaints.raiseComplaint(getPool(), customerOf(req), req.body || {}));
+  } catch (err) {
+    failed(req, res, err);
+  }
+});
+
+// ── Patrol: residents replay the patrol rounds guards walked at the project(s) they live in (a guard starts and ends a
+// round in their app). Only rounds at the resident's own project(s), from the last 7 days.
+const tracking = require("../services/securityTracking");
+const patrols = require("../services/securityPatrols");
+const PATROL_DAYS = 7;
+
+async function residentProjects(pool, customerId) {
+  return (
+    await pool.request().input("c", sql.Int, customerId).query(`
+      SELECT DISTINCT ProjectId AS id FROM dbo.SecurityResident WHERE CustomerId = @c AND IsActive = 1`)
+  ).recordset.map((r) => r.id);
+}
+
+// ?from&to: the rounds started in that time (default: the last 24 hours), and the project's zones for the map.
+router.get("/patrol", async (req, res) => {
+  const to = req.query.to ? new Date(String(req.query.to)) : new Date();
+  const from = req.query.from ? new Date(String(req.query.from)) : new Date(to.getTime() - 86400000);
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to <= from) return res.status(400).json({ error: "Give a from / to time." });
+  const oldest = new Date(Date.now() - PATROL_DAYS * 86400000);
+  try {
+    const pool = getPool();
+    const projects = await residentProjects(pool, customerOf(req));
+    if (!projects.length) return res.json({ patrols: [], zones: [] });
+    const [rows, zones] = await Promise.all([
+      patrols.patrolsIn(pool, projects, from < oldest ? oldest : from, to),
+      tracking.zonesInScope(pool, projects),
+    ]);
+    res.json({
+      patrols: rows.map((p) => ({ id: p.id, guardName: p.guardName, gateName: p.gateName, startedAt: p.startedAt, endedAt: p.endedAt })),
+      zones: zones.filter((z) => z.IsActive).map((z) => ({ id: z.ZoneId, name: z.Name, shapes: tracking.zoneShapes(z) })),
+    });
+  } catch (err) {
+    failed(req, res, err);
+  }
+});
+
+// One round's route (until now while it is still going).
+router.get("/patrol/:id", async (req, res) => {
+  const id = idOf(req);
+  if (!id) return res.status(400).json({ error: "Invalid patrol." });
+  try {
+    const pool = getPool();
+    const projects = await residentProjects(pool, customerOf(req));
+    const patrol = projects.length ? await patrols.patrolAt(pool, id, projects) : null;
+    if (!patrol || new Date(patrol.startedAt) < new Date(Date.now() - PATROL_DAYS * 86400000)) return res.status(404).json({ error: "Patrol not found." });
+    res.json(await patrols.patrolTrail(pool, patrol));
   } catch (err) {
     failed(req, res, err);
   }

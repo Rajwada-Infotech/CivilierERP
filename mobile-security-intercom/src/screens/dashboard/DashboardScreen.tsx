@@ -12,6 +12,7 @@ import type { MainStackParamList } from "@/navigation/MainStack";
 import { useVisitorQueue, refusedWhileQueued } from "@/visitors/offlineQueue";
 import { useVisitorEvents } from "@/visitors/useSecuritySocket";
 import { TrackingCard } from "@/tracking/TrackingCard";
+import { PatrolCard } from "@/tracking/PatrolCard";
 import { fetchWithAuth } from "@/services/fetchWithAuth";
 import { View, Text, ScrollView, RefreshControl, Alert } from "react-native";
 import Svg, { G, Line, Rect, Text as SvgText } from "react-native-svg";
@@ -301,6 +302,7 @@ export default function DashboardScreen() {
         {view === "guard" && (
           <>
             <TrackingCard onDuty={!!a?.onDuty} shiftEnd={a?.shiftEnd ?? null} />
+            <PatrolCard onDuty={!!a?.onDuty} />
             <View style={{ borderTopWidth: 1, borderTopColor: S.rule, padding: 16, gap: 10 }}>
               <Key tone="ink" label="New visitor" icon={<UserPlus size={15} color={S.paper} />} onPress={() => {
                   refusedWhileQueued.length = 0;
