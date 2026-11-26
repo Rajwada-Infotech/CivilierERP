@@ -378,11 +378,11 @@ const FinanceDashboard = () => {
                     </button>
                   ))}
                 </div>
-                {/* Overdue: invoice instalments past their due date, and outgoing cheques past their date that haven't cleared. */}
+                {/* Overdue: approved invoices with nothing paid yet, and payments past their date that aren't approved yet. */}
                 <div style={{ border: "1px solid var(--ink)", borderTop: 0, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
                   {[
-                    { label: "Invoices overdue", count: n0(data.overdue.invoiceCount), amount: n0(data.overdue.invoiceAmount), sub: "instalments past their due date", path: "/finance/invoice" },
-                    { label: "Payments overdue", count: n0(data.overdue.paymentCount), amount: n0(data.overdue.paymentAmount), sub: "cheques past their date, not cleared", path: "/payments" },
+                    { label: "Invoices overdue", count: n0(data.overdue.invoiceCount), amount: n0(data.overdue.invoiceAmount), sub: "approved, nothing paid yet", path: "/finance/invoice" },
+                    { label: "Payments overdue", count: n0(data.overdue.paymentCount), amount: n0(data.overdue.paymentAmount), sub: "past the payment date, not approved yet", path: "/payments" },
                   ].map((b, i) => (
                     <button key={b.label} onClick={() => navigate(b.path)} style={{ textAlign: "left", padding: "12px 14px", borderLeft: i ? "1px solid var(--rule-soft)" : 0 }}>
                       <span className="label link" style={{ color: b.count ? "var(--red)" : "var(--ink)" }}>{b.label}</span>
