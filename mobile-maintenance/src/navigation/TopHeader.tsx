@@ -1,8 +1,5 @@
-﻿// Shared stack header — mirrors mobile-supplier's TopHeader.tsx exactly:
-// animated logo on the left, notification bell (badge =
-// useMaintenanceAlerts().alerts.length) and profile avatar on the right. No
-// hamburger/menu button — there's nothing behind it yet (see MainStack.tsx),
-// and Dashboard/Notifications/Profile are all reachable without one.
+﻿// The customer's stack header: back (on a page) or the logo (on a tab), the screen's name, the bell (what needs them
+// and recent updates) and their initials (profile, settings, sign out). See CustomerHeader below.
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ComponentRef, type PropsWithChildren, type RefObject } from "react";
 import { Animated, BackHandler, Easing, Image, ScrollView, View, Text, useWindowDimensions } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -16,7 +13,6 @@ import { portal } from "@/api/customerPortalApi";
 import { colors, sheet } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { useAuth } from "@/auth/AuthContext";
-import { useMaintenanceAlerts } from "@/hooks/useMaintenanceAlerts";
 import { AnimatedLogo } from "@/components/AnimatedLogo";
 import { navigate, navigationRef, openCustomerScreen } from "./navigationRef";
 import { useBrand } from "@/theme/ThemeContext";
@@ -37,10 +33,7 @@ function initialsOf(name?: string) {
 }
 
 export function TopHeader(props: NativeStackHeaderProps) {
-  const { currentUser } = useAuth();
-  // A customer's header: back, the screen's title and their own profile. The staff header's alerts read staff
-  // data, which a customer's sign-in can't (and mustn't) load.
-  return currentUser?.kind === "customer" ? <CustomerHeader {...props} /> : <StaffHeader />;
+  return <CustomerHeader {...props} />;
 }
 
 /** A customer's header: back (on a page) or the logo (on a tab), the screen's name, the bell — what needs them and
@@ -523,62 +516,5 @@ function AccountMenu({ open, onClose, target }: { open: boolean; onClose: () => 
         </View>
       </Animated.View>
     </View>
-  );
-}
-
-function StaffHeader() {
-  const { currentUser } = useAuth();
-  const { alerts } = useMaintenanceAlerts();
-  const alertCount = alerts.length;
-
-  return (
-    <SafeAreaView
-      edges={["top"]}
-      style={{ backgroundColor: colors.background, borderBottomWidth: 1, borderBottomColor: `${colors.border}80` }}
-    >
-      <View className="flex-row items-center justify-between px-4 py-2.5">
-        <View className="flex-1 min-w-0">
-          <AnimatedLogo iconSize={28} />
-        </View>
-
-        <View className="flex-row items-center gap-3">
-          <Tap onPress={() => navigate("Notifications")} style={{ padding: 2 }}>
-            <View>
-              <Bell size={20} color={colors.foreground} />
-              {alertCount > 0 && (
-                <View
-                  style={{
-                    position: "absolute",
-                    top: -3,
-                    right: -4,
-                    minWidth: 15,
-                    height: 15,
-                    borderRadius: 8,
-                    paddingHorizontal: 3,
-                    backgroundColor: "#ef4444",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    borderWidth: 1.5,
-                    borderColor: colors.background,
-                  }}
-                >
-                  <Text style={{ color: "#fff", fontSize: 9, fontFamily: fonts.heading.bold, lineHeight: 11 }}>
-                    {alertCount > 9 ? "9+" : alertCount}
-                  </Text>
-                </View>
-              )}
-            </View>
-          </Tap>
-
-          <Tap onPress={() => navigate("Profile")}>
-            <View className="w-8 h-8 rounded-full items-center justify-center" style={{ backgroundColor: ACCENT }}>
-              <Text style={{ color: "#1a1a1a", fontSize: 11, fontFamily: fonts.heading.bold }}>
-                {initialsOf(currentUser?.name)}
-              </Text>
-            </View>
-          </Tap>
-        </View>
-      </View>
-    </SafeAreaView>
   );
 }

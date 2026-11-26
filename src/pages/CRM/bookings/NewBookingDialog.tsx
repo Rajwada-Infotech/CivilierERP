@@ -29,11 +29,16 @@ export function NewBookingDialog({ applicationId, onClose }: { applicationId: st
   const [form, setForm] = useState<BookingForm>({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
 
-  const { data: apps = [], isLoading: loadingApps } = useQuery({ queryKey: ["crm-apps"], queryFn: fetchApps, staleTime: 5 * 60_000 });
-  const { data: users = [] } = useQuery({ queryKey: ["sa-users"], queryFn: fetchUsers, staleTime: 5 * 60_000 });
-  const { data: units = [], isLoading: loadingUnits } = useQuery({ queryKey: ["unit-master"], queryFn: fetchUnits, staleTime: 5 * 60_000 });
-  const { data: plots = [], isLoading: loadingPlots } = useQuery({ queryKey: ["plot-master"], queryFn: fetchPlots, staleTime: 5 * 60_000 });
-  const { data: paymentPlans = [] } = useQuery({ queryKey: ["crm-payment-plans-active"], queryFn: fetchPaymentPlans, staleTime: 5 * 60_000 });
+  const { data: apps = [], isLoading: loadingApps, isError: appsError, refetch: retryApps } = useQuery({ queryKey: ["crm-apps"], queryFn: fetchApps, staleTime: 5 * 60_000 });
+  const { data: users = [], isError: usersError, refetch: retryUsers } = useQuery({ queryKey: ["sa-users"], queryFn: fetchUsers, staleTime: 5 * 60_000 });
+  const { data: units = [], isLoading: loadingUnits, isError: unitsError, refetch: retryUnits } = useQuery({ queryKey: ["unit-master"], queryFn: fetchUnits, staleTime: 5 * 60_000 });
+  const { data: plots = [], isLoading: loadingPlots, isError: plotsError, refetch: retryPlots } = useQuery({ queryKey: ["plot-master"], queryFn: fetchPlots, staleTime: 5 * 60_000 });
+  const { data: paymentPlans = [], isLoading: loadingPaymentPlans, isError: paymentPlansError, refetch: retryPaymentPlans } = useQuery({ queryKey: ["crm-payment-plans-active"], queryFn: fetchPaymentPlans, staleTime: 5 * 60_000 });
+  const appsUnavailable = appsError && apps.length === 0;
+  const unitsUnavailable = unitsError && units.length === 0;
+  const plotsUnavailable = plotsError && plots.length === 0;
+  const paymentPlansUnavailable = paymentPlansError && paymentPlans.length === 0;
+  const usersUnavailable = usersError && users.length === 0;
 
   // The plan tagged to this booking (via the Application): its BookingAmount is the fixed figure.
   const selectedPlan = useMemo(
@@ -225,8 +230,8 @@ export function NewBookingDialog({ applicationId, onClose }: { applicationId: st
         <div>
           <label className={labelCls}>Application * (approved, not yet booked)</label>
           <Select value={form.ApplicationId || undefined} onValueChange={handleApplicationSelect}>
-            <SelectTrigger className={`${inputCls} rounded-none`}>
-              <SelectValue placeholder={loadingApps ? "Loading applications…" : (apps as any[]).length ? "Select application" : "No approved application is waiting for a booking"} />
+            <SelectTrigger className={`${inputCls} rounded-none`} disabled={loadingApps || appsUnavailable}>
+              <SelectValue placeholder={loadingApps ? "Loading applications…" : appsUnavailable ? "Couldn’t load applications" : (apps as any[]).length ? "Select application" : "No approved application is waiting for a booking"} />
             </SelectTrigger>
             <SelectContent>
               {(apps as any[]).map((a: any) => (
@@ -236,6 +241,7 @@ export function NewBookingDialog({ applicationId, onClose }: { applicationId: st
               ))}
             </SelectContent>
           </Select>
+          {appsUnavailable && <p role="alert" className="mt-1 text-xs text-destructive">Couldn’t load applications. <button type="button" onClick={() => retryApps()} className="underline underline-offset-2">Try again</button></p>}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
@@ -253,14 +259,16 @@ export function NewBookingDialog({ applicationId, onClose }: { applicationId: st
                       options={(availablePlots as any[]).map((p: any) => ({ id: String(p.Id), label: `${p.ProjectName} · ${p.BlockName} · ${p.PlotName}`, group: p.BlockName }))}
                       value={form.PlotIds}
                       onChange={handlePlotsChange}
-                      placeholder="Select plots"
+                      placeholder={loadingPlots ? "Loading plots…" : availablePlots.length ? "Select plots" : "No available plots"}
                       searchPlaceholder="Search plots…"
                       itemNoun="plot"
+                      emptyMessage={loadingPlots ? "Loading available plots…" : plotsUnavailable ? "Couldn’t load plots." : "No plots are available to book."}
+                      disabled={loadingPlots || availablePlots.length === 0}
                     />
                   ) : (
                     <Select value={form.UnitIds[0] || undefined} onValueChange={(id) => handleUnitsChange([id])}>
-                      <SelectTrigger className={`${inputCls} rounded-none`}>
-                        <SelectValue placeholder="Select unit" />
+                      <SelectTrigger className={`${inputCls} rounded-none`} disabled={loadingUnits || unitsUnavailable || availableUnits.length === 0}>
+                        <SelectValue placeholder={loadingUnits ? "Loading units…" : unitsUnavailable ? "Couldn’t load units" : availableUnits.length ? "Select unit" : "No available units"} />
                       </SelectTrigger>
                       <SelectContent className="max-w-[min(90vw,420px)]">
                         {(availableUnits as any[]).map((u: any) => (
@@ -269,10 +277,12 @@ export function NewBookingDialog({ applicationId, onClose }: { applicationId: st
                       </SelectContent>
                     </Select>
                   )}
-                  {appPreferredUnitId != null && !appPreferredUnitAvailable && (
+                  {isPlotBooking && plotsUnavailable && <p role="alert" className="text-[0.6875rem] text-destructive mt-1">Couldn’t load plots. <button type="button" onClick={() => retryPlots()} className="underline underline-offset-2">Try again</button></p>}
+                  {!isPlotBooking && unitsUnavailable && <p role="alert" className="text-[0.6875rem] text-destructive mt-1">Couldn’t load units. <button type="button" onClick={() => retryUnits()} className="underline underline-offset-2">Try again</button></p>}
+                  {!loadingUnits && !unitsUnavailable && appPreferredUnitId != null && !appPreferredUnitAvailable && (
                     <p className="text-[0.6875rem] text-destructive mt-1">The application's unit is no longer available; pick another.</p>
                   )}
-                  {appPreferredPlotIds.length > 0 && !appPreferredPlotsAvailable && (
+                  {!loadingPlots && !plotsUnavailable && appPreferredPlotIds.length > 0 && !appPreferredPlotsAvailable && (
                     <p className="text-[0.6875rem] text-destructive mt-1">The application's plot is no longer available; pick another.</p>
                   )}
                 </>
@@ -328,7 +338,12 @@ export function NewBookingDialog({ applicationId, onClose }: { applicationId: st
             </div>
             <div>
               <label className={labelCls}>{isPlotBooking ? "Payment schedule" : "Payment plan (from the application)"}</label>
-              {ro(isPlotBooking ? "No payment plan: booking amount, then the balance" : (selectedPlan?.PlanName || selectedApp?.PaymentPlanName || "Default 7-stage split"))}
+              {ro(isPlotBooking ? "No payment plan: booking amount, then the balance"
+                : selectedPlan?.PlanName || selectedApp?.PaymentPlanName
+                  || (selectedApp?.PaymentPlanId
+                    ? loadingPaymentPlans ? "Loading payment plan…" : paymentPlansUnavailable ? "Couldn’t load payment plan" : "Payment plan unavailable"
+                    : "Default 7-stage split"))}
+              {!isPlotBooking && paymentPlansUnavailable && <p role="alert" className="mt-1 text-[0.6875rem] text-destructive">Couldn’t load payment plans. <button type="button" onClick={() => retryPaymentPlans()} className="underline underline-offset-2">Try again</button></p>}
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <div>
@@ -347,12 +362,13 @@ export function NewBookingDialog({ applicationId, onClose }: { applicationId: st
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <div>
-                <label className={labelCls}>Booking amount (₹) {!isPlotBooking && selectedPlan ? "(plan)" : ""}</label>
+                <label className={labelCls}>Initial payment (₹) {!isPlotBooking && selectedPlan ? "(plan)" : ""}</label>
                 {/* A plot sale has no plan: the amount typed here is the Booking milestone, the rest the Balance. */}
                 <input type="number" value={form.BookingAmount} onChange={(e) => setForm((f) => ({ ...f, BookingAmount: e.target.value }))}
                   disabled={!isPlotBooking && !!selectedPlan}
                   placeholder={isPlotBooking ? "Empty for one full payment" : selectedPlan ? undefined : "From the payment plan"}
                   className={!isPlotBooking && selectedPlan ? inputClsDisabled : inputCls} />
+                <p className="mt-1 text-[0.625rem] leading-snug text-muted-foreground">{isPlotBooking ? "The remaining value becomes the balance payment." : selectedPlan ? "Fixed first payment from the selected plan." : "The remaining value follows the payment plan."}</p>
               </div>
               <div>
                 <label className={labelCls}>Assigned to</label>
@@ -362,6 +378,7 @@ export function NewBookingDialog({ applicationId, onClose }: { applicationId: st
                     <SelectContent>{users.map((u) => <SelectItem key={u.value} value={u.value}>{u.label}</SelectItem>)}</SelectContent>
                   </Select>
                 )}
+                {usersUnavailable && <p role="alert" className="mt-1 text-[0.6875rem] text-destructive">Couldn’t load assignees. <button type="button" onClick={() => retryUsers()} className="underline underline-offset-2">Try again</button></p>}
               </div>
             </div>
           </Panel>

@@ -68,6 +68,7 @@ const CrmApplication: React.FC = () => {
   const [pageSize, setPageSize] = useState(PAGE_SIZE);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [step, setStep] = useState(1);
+  const wizardStepsRef = useRef<HTMLDivElement>(null);
   // Furthest step this application has actually reached — persisted
   // server-side as CrmApplication.CurrentStep so Resume can land back where
   // the user left off, and so the stepper tabs can be clicked to jump to
@@ -111,6 +112,14 @@ const CrmApplication: React.FC = () => {
   // Approved, no Edit control renders and this can't be unlocked at all.
   const [paymentLocked, setPaymentLocked] = useState(false);
 
+  // Keep the selected step in view when the step row scrolls horizontally on
+  // small screens. The current-step summary below remains the readable label.
+  useEffect(() => {
+    if (!dialogOpen) return;
+    const current = wizardStepsRef.current?.querySelector<HTMLElement>("[aria-current='step']");
+    current?.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
+  }, [dialogOpen, step]);
+
   // (No more planLocked/auto-fetch state — Unit Master no longer has a
   // single "default" plan to silently apply; Payment Plan is always an
   // explicit, mandatory pick once a unit is on the application.)
@@ -133,8 +142,17 @@ const CrmApplication: React.FC = () => {
     setSearchParams((sp) => { sp.delete("id"); return sp; }, { replace: true });
   };
 
-  const listFilters: ApplicationListFilters = { search, status: statusFilter, displayStage: activeStage, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId };
-  const { data: listData, isLoading, isError, error } = useQuery({
+  const effectiveStatusFilter = activeStage === "Converted" ? "All" : statusFilter;
+  const listFilters: ApplicationListFilters = { search, status: effectiveStatusFilter, displayStage: activeStage, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId };
+  const hasAppliedFilters = !!(search || effectiveStatusFilter !== "All" || cpb.companyId || cpb.projectId || cpb.blockId);
+  const emptyQueueMessage = hasAppliedFilters
+    ? "No applications match these filters. Clear filters or try a broader search."
+    : activeStage === "Converted"
+      ? "No converted applications yet."
+      : activeStage === "NotConverted"
+        ? "No rejected or cancelled applications yet."
+        : "No applications in process yet.";
+  const { data: listData, isLoading, isError, error, refetch: refetchApplications } = useQuery({
     queryKey: ["crm-apps", listFilters, page, pageSize],
     queryFn: () => fetchApplicationsList(listFilters, page, pageSize),
     placeholderData: (prev) => prev,
@@ -145,8 +163,8 @@ const CrmApplication: React.FC = () => {
   // always matches "how many total match everything except which tab is
   // active", independent of pagination.
   const { data: stageCounts = { InProcess: 0, Converted: 0, NotConverted: 0 } } = useQuery({
-    queryKey: ["crm-apps-stage-counts", search, statusFilter, cpb],
-    queryFn: () => fetchStageCounts({ search, status: statusFilter, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
+    queryKey: ["crm-apps-stage-counts", search, effectiveStatusFilter, cpb],
+    queryFn: () => fetchStageCounts({ search, status: effectiveStatusFilter, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
     placeholderData: (prev) => prev,
   });
   // Any filter change resets back to page 1 — otherwise a narrower result
@@ -154,6 +172,16 @@ const CrmApplication: React.FC = () => {
   function updateFilter<T>(setter: (v: T) => void) {
     return (v: T) => { setter(v); setPage(1); };
   }
+  const changeStage = (stage: Stage) => {
+    updateFilter(setActiveStage)(stage);
+    // Status filters apply to the application record. The Converted queue is
+    // grouped by booking progress, so it must not inherit a hidden filter.
+    if (stage === "Converted") setStatusFilter("All");
+  };
+  useEffect(() => {
+    // Normalize shared links such as ?stage=Converted&status=Pending too.
+    if (activeStage === "Converted" && statusFilter !== "All") setStatusFilter("All");
+  }, [activeStage, statusFilter, setStatusFilter]);
   const { data: viewingAppDetail } = useQuery({
     queryKey: ["crm-app-detail", viewingAppId],
     queryFn: () => fetchAppDetail(viewingAppId as number),
@@ -492,11 +520,6 @@ const CrmApplication: React.FC = () => {
   // the counts endpoint, so this page no longer filters/counts client-side
   // — `apps` from the query above is already the current page's correctly
   // filtered rows, and `stageCounts` above is already the server's totals.
-  const conversionRate = useMemo(() => {
-    const convTotal = stageCounts.Converted + stageCounts.NotConverted;
-    return convTotal > 0 ? Math.round((stageCounts.Converted / convTotal) * 100) : 0;
-  }, [stageCounts]);
-
   // Source field is no longer editable in the wizard (see CrmApplication
   // task history), but Source is still submitted and still shown in the
   // applications table/review page — so still silently carry it over from
@@ -917,13 +940,14 @@ const CrmApplication: React.FC = () => {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || "Could not save changes");
         setUnitLocked(true);
-        toast.success("Project/Unit selection updated");
+        toast.success("Property selection updated");
         window.dispatchEvent(new CustomEvent("approval-action"));
-        // Parking already picked in another block than the new unit — the next step is Parking, to check it.
+        // If saved parking no longer matches the property, warn before continuing.
         if (data.parkingWarning) toast.warning(data.parkingWarning, { duration: 12000 });
         if (form.PreferredUnitIds[0]) qc.invalidateQueries({ queryKey: ["unit-master"] });
         if (form.PreferredPlotIds.length) qc.invalidateQueries({ queryKey: ["plot-master"] });
-        advanceStep(2);
+        // Plot applications skip Parking just like a brand-new plot flow.
+        advanceStep(form.PreferredPlotIds.length ? 3 : 2);
         return;
       }
 
@@ -1058,11 +1082,13 @@ const CrmApplication: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["unit-matrix"] });
       qc.invalidateQueries({ queryKey: ["parking-matrix"] });
       qc.invalidateQueries({ queryKey: ["unit-master"] });
-      if (subData.booking?.BookingNo) {
-          if (subData.booking.alreadyExists) {
+      // The server answers with bookingNo (crmApplications.js PUT /:id/submit); booking.BookingNo is the older shape.
+      const newBookingNo = subData.bookingNo ?? subData.booking?.BookingNo;
+      if (newBookingNo) {
+          if (subData.booking?.alreadyExists) {
             toast.success("Application changes saved");
           } else {
-            toast.success(`Booking ${subData.booking.BookingNo} created — payment milestones auto-generated`);
+            toast.success(`Booking ${newBookingNo} created — payment milestones auto-generated`);
           }
       } else if (subData.bookingError) {
         // Auto-create failed (e.g. a unit-hold conflict in the interim) —
@@ -1142,28 +1168,19 @@ const CrmApplication: React.FC = () => {
     });
   };
   const handleCreateBooking = async (a: any) => {
-    if (!a.PreferredUnitId) {
-      toast.error("This application has no unit selected — edit it and pick a unit before a booking can be created");
-      return;
-    }
     setCreatingBookingId(a.Id);
     try {
-      const res = await fetchWithAuth("/api/crm/bookings", {
+      const res = await fetchWithAuth(`${API}/${a.Id}/create-booking`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ApplicationId: a.Id, UnitId: a.PreferredUnitId, RatePerSqFt: a.RatePerSqFt,
-          PaymentPlanId: a.PaymentPlanId, BookingDate: a.DateOfApply, TokenType: a.TokenType,
-          TokenValue: a.TokenValue, BookingAmount: a.BookingAmount, PaymentMode: a.PaymentMode,
-          DepositBankId: a.DepositBankId,
-          AssignedTo: a.AssignedTo, Notes: a.Notes,
-          BrokerId: a.BrokerId, BrokerageRatePercent: a.BrokerageRatePercent, BrokeragePaymentPlan: a.BrokeragePaymentPlan,
-        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not create booking");
-      toast.success(`Booking ${data.BookingNo} created — payment milestones auto-generated`);
+      toast.success(`Booking ${data.booking?.BookingNo || "created"} — payment milestones auto-generated`);
       qc.invalidateQueries({ queryKey: ["crm-apps"] });
+      qc.invalidateQueries({ queryKey: ["unit-master"] });
+      qc.invalidateQueries({ queryKey: ["plot-master"] });
+      qc.invalidateQueries({ queryKey: ["unit-matrix"] });
+      qc.invalidateQueries({ queryKey: ["parking-matrix"] });
       navigate(`/crm/bookings?applicationId=${a.Id}`);
     } catch (e: any) {
       toast.error(translateError(e.message));
@@ -1174,60 +1191,62 @@ const CrmApplication: React.FC = () => {
   const convertedColumns: ColumnDef<any, unknown>[] = [
     { accessorKey: "ApplicationNo", header: "Application", size: 120,
       cell: (i) => (
-        <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer font-heading tabular-nums text-xs font-semibold text-primary hover:underline">
+        <button type="button" onClick={() => openApplication(i.row.original.Id)} className="text-left font-heading tabular-nums text-xs font-semibold text-primary hover:underline">
           {i.getValue() as string}
           {i.row.original.UnitChangeNo && <span className="block text-[0.6875rem] font-medium font-sans text-sky-700 dark:text-sky-400 whitespace-nowrap">Unit change {i.row.original.UnitChangeNo}</span>}
-        </span>
+        </button>
       ) },
-    {/* Mobile folded into this cell — same rationale/pattern as
-       inProcessColumns above. Sizes across this set are generous (sum
-       ~1420px) so table-layout:fixed fills a normal desktop card
-       edge-to-edge instead of bunching columns on the left. */
-      accessorKey: "ApplicantName", header: "Applicant", size: 190,
+    // Applicant and contact stay together in one scan-friendly column;
+    // mobile uses the focused application card below.
+    { accessorKey: "ApplicantName", header: "Applicant", size: 190,
       cell: (i) => (
-        <div onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer">
-          <div className="font-medium text-foreground break-words"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} /></div>
-          <div className="text-xs text-muted-foreground">
-            {i.row.original.Mobile}
-            {i.row.original.LeadUid ? ` · Lead: ${i.row.original.LeadUid}` : ""}
-          </div>
+        <div>
+          <button type="button" onClick={() => openApplication(i.row.original.Id)} className="block w-full text-left font-medium text-foreground break-words">
+            <ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} />
+          </button>
+          {i.row.original.Mobile
+            ? <span className="text-xs text-muted-foreground">{i.row.original.Mobile}</span>
+            : <span className="text-xs text-muted-foreground">No mobile on file</span>}
         </div>
       ) },
     // Booked-on date sits under the booking so the row fits a laptop screen.
     { accessorKey: "BookingNo", header: "Booking", size: 170,
       cell: (i) => (
-        <div onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer">
-          <div className="font-heading tabular-nums text-xs font-semibold text-foreground">{i.row.original.BookingNo}</div>
-          <div className="text-[0.6875rem] text-muted-foreground tabular-nums">{i.row.original.BookingDate ? String(i.row.original.BookingDate).slice(0, 10) : "—"}</div>
+        <button type="button" onClick={() => openApplication(i.row.original.Id)} className="w-full text-left">
+          <span className="block font-heading tabular-nums text-xs font-semibold text-foreground">{i.row.original.BookingNo}</span>
+          <span className="block text-[0.6875rem] text-muted-foreground tabular-nums">{i.row.original.BookingDate ? String(i.row.original.BookingDate).slice(0, 10) : "—"}</span>
           <SheetMark text={i.row.original.BookingStatus || "—"} tone={i.row.original.BookingStatus ? appTone(i.row.original.BookingStatus) : "none"} />
-        </div>
+        </button>
       ) },
     { id: "unitProject", header: "Unit / Project", size: 200, enableSorting: false,
       cell: (i) => (
-        <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer text-xs">
+        <button type="button" onClick={() => openApplication(i.row.original.Id)} className="text-left text-xs">
           {[i.row.original.BookingProjectName, i.row.original.BookingUnitNo].filter(Boolean).join(" · ") || "—"}
-        </span>
+        </button>
       ) },
     { accessorKey: "BookingTotalValue", header: "Value", size: 150,
       cell: (i) => {
         const val = i.row.original.BookingGrandTotal ?? i.row.original.BookingTotalValue;
-        return <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer text-xs font-medium">{val ? `₹${Number(val).toLocaleString("en-IN")}` : "—"}</span>;
+        return <button type="button" onClick={() => openApplication(i.row.original.Id)} className="text-left text-xs font-medium">{val ? `₹${Number(val).toLocaleString("en-IN")}` : "—"}</button>;
       } },
-    { id: "actions", header: "", size: 80, enableSorting: false,
+    { id: "actions", header: "", size: 155, enableSorting: false,
       cell: (i) => {
         const r = i.row.original;
         const canRequestCxl = (canEditApplications || canRequestBookingCancellation) && r.BookingId
           && r.BookingStatus !== CrmStatus.CANCELLED && r.DeedStatus !== "Registered";
         return (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button className="h-7 w-7 inline-flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-primary/10" title="More actions">
-                <MoreHorizontal size={15} />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56 rounded-none">
-              <DropdownMenuItem onClick={() => openApplication(r.Id)} className="gap-2"><FileText size={14} /> View details</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => navigate(`/crm/bookings?applicationId=${r.Id}`)} className="gap-2"><Building2 size={14} /> View booking</DropdownMenuItem>
+          <div className="flex items-center gap-1.5">
+            {r.BookingId && <button type="button" onClick={() => navigate(`/crm/bookings?view=${r.BookingId}`)} className={`${KEY_LINE} h-7 px-2`}>
+              <Building2 size={12} /> Open booking
+            </button>}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button aria-label={`More actions for ${r.ApplicationNo || "this application"}`} className="h-7 w-7 inline-flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-primary/10" title="More actions">
+                  <MoreHorizontal size={15} />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56 rounded-none">
+                <DropdownMenuItem onClick={() => openApplication(r.Id)} className="gap-2"><FileText size={14} /> View details</DropdownMenuItem>
               {r.Stage === "Converted" && (
                 <DropdownMenuItem onClick={() => setPdfDialogApp({ id: r.Id, no: r.ApplicationNo })} className="gap-2"><FileText size={14} /> Application form (PDF)</DropdownMenuItem>
               )}
@@ -1244,8 +1263,9 @@ const CrmApplication: React.FC = () => {
                   <Ban size={14} /> Deed registered — no cancellation
                 </DropdownMenuItem>
               )}
-            </DropdownMenuContent>
-          </DropdownMenu>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         );
       } },
   ];
@@ -1265,27 +1285,23 @@ const CrmApplication: React.FC = () => {
     // scrolling sideways; nothing shown before is dropped.
     { accessorKey: "ApplicationNo", header: "Application", size: 120,
       cell: (i) => (
-        <div onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer">
-          <div className="font-heading tabular-nums text-xs font-semibold text-foreground hover:underline">{i.getValue() as string}</div>
+        <div>
+          <button type="button" onClick={() => openApplication(i.row.original.Id)} className="text-left font-heading tabular-nums text-xs font-semibold text-foreground hover:underline">{i.getValue() as string}</button>
           {i.row.original.UnitChangeNo && <div className="text-[0.6875rem] font-medium text-sky-700 dark:text-sky-400 whitespace-nowrap">Unit change {i.row.original.UnitChangeNo}</div>}
           <div className="text-[0.6875rem] text-muted-foreground tabular-nums">{i.row.original.CreatedAt ? String(i.row.original.CreatedAt).slice(0, 10) : "—"}</div>
         </div>
       ) },
-    {/* Mobile folded into this cell (as a second line, same pattern used on
-       CrmLeads/CrmCustomers) instead of its own column — one less dedicated
-       column for a value that's rarely scanned on its own, freeing real
-       width back to the columns people actually compare row-to-row. Sizes
-       across this whole set are generous (sum ~1420px) so table-layout:fixed
-       fills a normal desktop card edge-to-edge instead of leaving the
-       columns bunched on the left with dead space after Date. */
+    { /* Applicant and contact stay together in one scan-friendly column;
+       mobile uses the focused application card below. */
       accessorKey: "ApplicantName", header: "Applicant", size: 180,
       cell: (i) => (
-        <div onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer">
-          <div className="font-medium text-foreground break-words"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} /></div>
-          <div className="text-xs text-muted-foreground">
-            {i.row.original.Mobile}
-            {i.row.original.LeadUid ? ` · Lead: ${i.row.original.LeadUid}` : ""}
-          </div>
+        <div>
+          <button type="button" onClick={() => openApplication(i.row.original.Id)} className="block w-full text-left font-medium text-foreground break-words">
+            <ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} />
+          </button>
+          {i.row.original.Mobile
+            ? <span className="text-xs text-muted-foreground">{i.row.original.Mobile}</span>
+            : <span className="text-xs text-muted-foreground">No mobile on file</span>}
         </div>
       ) },
     { id: "interestedProject", header: "Interested in", size: 170, enableSorting: false,
@@ -1293,21 +1309,17 @@ const CrmApplication: React.FC = () => {
         const r = i.row.original;
         const typeBit = [r.BhkPreference, r.PropertyType].filter(Boolean).join(" · ") || r.UnitTypeFromMaster || "";
         return (
-          <div onClick={() => openApplication(r.Id)} className="cursor-pointer">
-            <div>{[r.InterestedProject, typeBit].filter(Boolean).join(" · ") || "—"}</div>
-            {r.RatePerSqFt ? <div className="text-xs text-muted-foreground tabular-nums">₹{Number(r.RatePerSqFt).toLocaleString("en-IN")}/sqft</div> : null}
-          </div>
+          <button type="button" onClick={() => openApplication(r.Id)} className="w-full text-left">
+            <span className="block">{[r.InterestedProject, typeBit].filter(Boolean).join(" · ") || "—"}</span>
+            {r.RatePerSqFt ? <span className="block text-xs text-muted-foreground tabular-nums">₹{Number(r.RatePerSqFt).toLocaleString("en-IN")}/sqft</span> : null}
+          </button>
         );
       } },
-    { accessorKey: "Source", header: "Source / assigned", size: 150,
+    { accessorKey: "AssigneeName", header: "Assigned to", size: 130,
       cell: (i) => (
-        <div onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer text-xs">
-          <div>{i.row.original.Source || "—"}</div>
-          <div className="text-muted-foreground">
-            {[i.row.original.PlatformName, i.row.original.CampaignName, i.row.original.AdName].filter(Boolean).join(" › ") || i.row.original.ChannelPartnerName || ""}
-          </div>
-          {i.row.original.AssigneeName && <div className="text-muted-foreground">To {i.row.original.AssigneeName}</div>}
-        </div>
+        <button type="button" onClick={() => openApplication(i.row.original.Id)} className="text-left text-xs">
+          {i.getValue() as string || <span className="text-muted-foreground">Unassigned</span>}
+        </button>
       ) },
     { accessorKey: "Status", header: "Status", size: 190,
       cell: (i) => {
@@ -1319,20 +1331,22 @@ const CrmApplication: React.FC = () => {
         // immediately visible without opening the detail panel.
         // Only an approved booking is "Booked"; until then it is still
         // working through the booking approvals.
-        const displayStatus = r.Stage !== "Converted" ? r.Status
-          : r.BookingStatus === CrmStatus.APPROVED ? "Booked" : "In Approval";
+        const displayStatus = r.Stage === "Converted"
+          ? r.BookingStatus === CrmStatus.APPROVED ? "Booked" : "In Approval"
+          : activeStage === "NotConverted" && r.BookingNo ? r.BookingStatus || "Booking closed" : r.Status;
+        const hasPreferredInventory = !!(r.PreferredUnitId != null || r.PreferredUnitIdsCsv || r.PreferredPlotIdsCsv);
         return (
           // The pinned Status column is nowrap; the notes under the mark wrap.
-          <div onClick={() => openApplication(r.Id)} className="cursor-pointer space-y-0.5 whitespace-normal">
+          <button type="button" onClick={() => openApplication(r.Id)} className="text-left space-y-0.5 whitespace-normal">
             <span className="whitespace-nowrap"><SheetMark text={displayStatus} tone={appTone(displayStatus)} /></span>
             {/* For NotConverted applications that had a booking which was later
                 cancelled/rejected — show the dead booking number so staff know
                 this isn't the same as an application that was simply rejected
                 pre-booking. */}
             {r.Stage === "NotConverted" && r.BookingNo && (
-              <div className="text-[0.625rem] text-muted-foreground font-heading tabular-nums">
-                {r.BookingNo} · {r.BookingStatus}
-              </div>
+              <span className="block text-[0.625rem] text-muted-foreground font-heading tabular-nums">
+                {r.BookingNo}
+              </span>
             )}
             {/* Where it stands and what is next, beside the status itself. */}
             {activeStage === "InProcess" && r.Status === CrmStatus.PENDING && r.Stage !== "Converted" && r.UnitUnavailableForBooking && (
@@ -1346,12 +1360,12 @@ const CrmApplication: React.FC = () => {
                 <Clock size={10} /> Not submitted yet — complete the wizard and submit
               </span>
             )}
-            {activeStage === "InProcess" && r.Status === CrmStatus.PENDING && r.PreferredUnitId == null && (
+            {activeStage === "InProcess" && r.Status === CrmStatus.PENDING && r.Stage !== "Converted" && !hasPreferredInventory && (
               <span className="flex items-center gap-1 text-[0.6875rem] text-foreground">
-                <AlertTriangle size={10} /> Submitted but no unit selected — edit to add a unit
+                <AlertTriangle size={10} /> Submitted but no property selected — edit to add one
               </span>
             )}
-            {activeStage === "InProcess" && r.Status === CrmStatus.PENDING && r.PreferredUnitId != null && r.Stage !== "Converted" && (
+            {activeStage === "InProcess" && r.Status === CrmStatus.PENDING && r.Stage !== "Converted" && hasPreferredInventory && !r.UnitUnavailableForBooking && (
               <span className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
                 <Clock size={10} /> Submitted — booking not yet created
               </span>
@@ -1367,25 +1381,28 @@ const CrmApplication: React.FC = () => {
             )}
             {activeStage !== "InProcess" && !canCancelApplication(r) && (
               <span className="text-[0.6875rem] text-muted-foreground">
-                {r.BookingNo && r.BookingStatus === CrmStatus.CANCELLED
-                  ? `Booking cancelled — application closed`
+                {r.BookingNo
+                  ? `Booking ${r.BookingStatus || "closed"} — application closed`
                   : `${r.Status} — no further action`}
               </span>
             )}
-          </div>
+          </button>
         );
       } },
-    { id: "actions", header: "", size: 110, enableSorting: false,
+    { id: "actions", header: "", size: 150, enableSorting: false,
       cell: (i) => {
         const a = i.row.original;
         const canResume = canEditApplications && activeStage === "InProcess" && isResumeEditable(a);
-        // Only an unfinished application keeps a button on the row (Resume);
-        // everything else lives in the ⋯ menu.
+        // Put the next workflow action on the row; reserve the menu for
+        // secondary actions such as viewing details, PDF, cancel, and delete.
         const resumeOnRow = canResume && isResumable(a);
         const editLabel = a.Status === CrmStatus.REJECTED ? "Fix & Resubmit" : "Edit";
-        const canCreateBooking = activeStage === "InProcess" && a.Status === CrmStatus.PENDING && a.Stage !== "Converted"
-          && !a.UnitUnavailableForBooking && a.PreferredUnitId != null && !a.UnitChangeNo;
-        const hasMenu = (canResume && !resumeOnRow) || canCreateBooking || a.Stage === "Converted"
+        const canCreateBooking = canEditApplications && activeStage === "InProcess" && a.Status === CrmStatus.PENDING && a.Stage !== "Converted"
+          && !a.UnitUnavailableForBooking && !!(a.PreferredUnitId != null || a.PreferredUnitIdsCsv || a.PreferredPlotIdsCsv) && !a.UnitChangeNo;
+        const needsInventoryFix = activeStage === "InProcess" && a.Status === CrmStatus.PENDING && a.Stage !== "Converted"
+          && (a.UnitUnavailableForBooking || !(a.PreferredUnitId != null || a.PreferredUnitIdsCsv || a.PreferredPlotIdsCsv));
+        const canFixInventory = canResume && needsInventoryFix;
+        const hasMenu = (canResume && !resumeOnRow && !canFixInventory) || a.Stage === "Converted"
           || canCancelApplication(a) || canDeleteApplication(a);
         // Sent back: the preparer corrects it in the form; resubmitted: the checker looks at the booking again.
         const sb = sentBackByApp.get(a.Id);
@@ -1412,6 +1429,22 @@ const CrmApplication: React.FC = () => {
                   <PlayCircle size={12} /> {loadingApplication ? "Loading…" : "Resume"}
                 </button>
               )}
+              {canFixInventory && (
+                <button onClick={() => loadApplicationIntoWizard(a.Id, 1)} disabled={loadingApplication} className={`${KEY_INK} h-7 px-2`}>
+                  <Building2 size={12} /> {loadingApplication ? "Loading…" : a.UnitUnavailableForBooking ? "Change unit" : "Choose property"}
+                </button>
+              )}
+              {activeStage === "InProcess" && a.Stage === "Converted" && a.BookingId && (
+                <button onClick={() => navigate(`/crm/bookings?view=${a.BookingId}`)} className={`${KEY_LINE} h-7 px-2`}>
+                  <Building2 size={12} /> Open booking
+                </button>
+              )}
+              {canCreateBooking && (
+                <button onClick={() => handleCreateBooking(a)} disabled={creatingBookingId === a.Id}
+                  className={`${KEY_INK} h-7 px-2`}>
+                  <Building2 size={12} /> {creatingBookingId === a.Id ? "Creating…" : "Create booking"}
+                </button>
+              )}
               {/* Legacy only: a Rejected application from old data gets its resubmit. */}
               {activeStage === "InProcess" && (
                 <ApprovalActions
@@ -1428,7 +1461,7 @@ const CrmApplication: React.FC = () => {
               {hasMenu && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <button className="h-7 w-7 inline-flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-primary/10" title="More actions">
+                    <button aria-label={`More actions for ${a.ApplicationNo || "this application"}`} className="h-7 w-7 inline-flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-primary/10" title="More actions">
                       <MoreHorizontal size={15} />
                     </button>
                   </DropdownMenuTrigger>
@@ -1437,11 +1470,6 @@ const CrmApplication: React.FC = () => {
                     {canResume && !resumeOnRow && (
                       <DropdownMenuItem onClick={() => loadApplicationIntoWizard(a.Id)} disabled={loadingApplication} className="gap-2">
                         <PlayCircle size={14} /> {editLabel}
-                      </DropdownMenuItem>
-                    )}
-                    {canCreateBooking && (
-                      <DropdownMenuItem onClick={() => handleCreateBooking(a)} disabled={creatingBookingId === a.Id} className="gap-2">
-                        <Building2 size={14} /> {creatingBookingId === a.Id ? "Creating…" : "Create booking"}
                       </DropdownMenuItem>
                     )}
                     {/* Application Form PDF — only once a live booking exists (backend enforces the same gate). */}
@@ -1470,6 +1498,79 @@ const CrmApplication: React.FC = () => {
       } },
   ];
 
+  // Phone cards use a sales workflow hierarchy instead of turning every
+  // desktop table column (campaign, source, etc.) into an equal-weight field.
+  // The existing action cell is passed through so role-gated actions stay in
+  // one place and behave identically in both layouts.
+  const renderMobileApplicationCard = (a: any, actionContent: React.ReactNode) => {
+    const hasBooking = a.Stage === "Converted";
+    const hasBookingRecord = hasBooking || !!a.BookingNo;
+    const hasPreferredInventory = !!(a.PreferredUnitId != null || a.PreferredUnitIdsCsv || a.PreferredPlotIdsCsv);
+    const displayStatus = hasBooking
+      ? a.BookingStatus === CrmStatus.APPROVED ? "Booked" : "In approval"
+      : activeStage === "NotConverted" && a.BookingNo ? a.BookingStatus || "Booking closed" : a.Status;
+    const project = hasBookingRecord ? a.BookingProjectName : a.InterestedProject;
+    const property = hasBookingRecord
+      ? a.BookingUnitNo
+      : [a.BhkPreference, a.PropertyType].filter(Boolean).join(" · ") || a.UnitTypeFromMaster;
+    const value = hasBookingRecord ? a.BookingGrandTotal ?? a.BookingTotalValue : null;
+    const applicationDate = a.DateOfApply || a.CreatedAt;
+
+    return (
+      <article key={`application-card-${a.Id}`} className="rounded-lg border border-border bg-card px-4 py-3.5 shadow-sm">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <button type="button" onClick={() => openApplication(a.Id)} className="font-heading text-sm font-semibold text-primary hover:underline text-left">
+              {a.ApplicationNo || "Application"}
+            </button>
+            <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
+              {applicationDate ? `Applied ${String(applicationDate).slice(0, 10)}` : "Application"}
+              {a.UnitChangeNo ? ` · Unit change ${a.UnitChangeNo}` : ""}
+            </p>
+          </div>
+          <SheetMark text={displayStatus || "—"} tone={appTone(displayStatus)} />
+        </div>
+
+        <div className="mt-3">
+          <button type="button" onClick={() => openApplication(a.Id)} className="block text-left w-full text-sm font-semibold text-foreground">
+            <ApplicantNames name={a.ApplicantName} bookingId={a.BookingId} applicationId={a.ApplicationId} />
+          </button>
+          {a.Mobile
+            ? <span className="block text-xs text-muted-foreground mt-0.5">{a.Mobile}</span>
+            : <span className="block text-xs text-muted-foreground mt-0.5">No mobile on file</span>}
+        </div>
+
+        <div className="mt-3 pt-3 border-t border-border/70 flex flex-wrap items-start justify-between gap-x-4 gap-y-2 text-xs">
+          <div className="min-w-0">
+            <span className="block text-[0.625rem] uppercase tracking-wider text-muted-foreground">{hasBookingRecord ? "Booking" : "Interested in"}</span>
+            <span className="block mt-0.5 text-foreground font-medium truncate">
+              {hasBookingRecord ? a.BookingNo || "Booking in progress" : project || "Project not selected"}
+              {property ? ` · ${property}` : ""}
+            </span>
+            {hasBookingRecord && a.BookingDate && <span className="block mt-0.5 text-[0.6875rem] text-muted-foreground tabular-nums">Booked {String(a.BookingDate).slice(0, 10)}</span>}
+          </div>
+          {value != null && <div className="shrink-0 text-right">
+            <span className="block text-[0.625rem] uppercase tracking-wider text-muted-foreground">Booking value</span>
+            <span className="block mt-0.5 font-semibold text-foreground tabular-nums">{Number(value) ? `₹${Number(value).toLocaleString("en-IN")}` : "—"}</span>
+          </div>}
+          {!hasBooking && <div className="w-full text-[0.6875rem] text-muted-foreground">Assigned to {a.AssigneeName || "Unassigned"}</div>}
+        </div>
+
+        {activeStage === "InProcess" && a.Status === CrmStatus.PENDING && !hasBooking && (
+          <p className={`mt-2 text-[0.6875rem] ${a.UnitUnavailableForBooking ? "text-destructive" : "text-muted-foreground"}`}>
+            {a.UnitUnavailableForBooking ? "Unit unavailable · re-pick a unit" : !hasPreferredInventory ? "No property selected · edit application" : "Submitted · booking not yet created"}
+          </p>
+        )}
+        {hasBooking && a.BookingStatus !== CrmStatus.APPROVED && (
+          <p className="mt-2 text-[0.6875rem] text-muted-foreground">{a.BookingNo ? `${a.BookingNo} · ` : ""}Pending {bookingWorkflowStageLabel[a.BookingWorkflowStage] || "approval"}</p>
+        )}
+        <SentBackNote applicationId={a.Id} />
+
+        {actionContent && <div className="mt-3 pt-3 border-t border-border/70 flex justify-end">{actionContent}</div>}
+      </article>
+    );
+  };
+
   usePageRights("crm-applications");
 
   return (
@@ -1478,7 +1579,7 @@ const CrmApplication: React.FC = () => {
       <SheetShell
         eyebrow="CivilierERP · CRM"
         title="Applications"
-        subtitle="Every detail captured once, here. Bookings is review-only from this point on."
+        subtitle="Create applications, track their progress, and continue unfinished work from the queue."
         action={
           canCreateApplications && (
             <button onClick={openNewWizard} className={`${KEY_INK} h-9 px-4 shrink-0`}>
@@ -1487,33 +1588,25 @@ const CrmApplication: React.FC = () => {
           )
         }
       >
-      <div className="space-y-5">
+      <div className="space-y-5 crm-application-queue">
         <div className="bg-card" style={{ border: RULE }}>
-          <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
-            {[
-              { label: "In process", value: stageCounts.InProcess, note: "Draft or submitted, no booking yet" },
-              { label: "Converted", value: stageCounts.Converted, note: "A booking was made" },
-              { label: "Not converted", value: stageCounts.NotConverted, note: "Rejected, cancelled or expired" },
-              { label: "Conversion rate", value: `${conversionRate}%`, note: "Converted of all closed" },
-            ].map((x) => (
-              <div key={x.label}>
-                <p className="label">{x.label}</p>
-                <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{x.value}</p>
-                <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
-              </div>
-            ))}
+          <div className="px-5 py-3 flex items-center justify-between gap-3" style={{ borderBottom: RULE }}>
+            <div>
+              <h2 className="text-sm font-semibold text-foreground">Application queue</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">Choose a queue, then open an application to review or continue it.</p>
+            </div>
+            <span aria-live="polite" aria-atomic="true" className="text-xs text-muted-foreground shrink-0">
+              {total.toLocaleString("en-IN")} {hasAppliedFilters ? (total === 1 ? "match" : "matches") : (total === 1 ? "application" : "applications")}
+            </span>
           </div>
-        </div>
-
-        <div className="bg-card" style={{ border: RULE }}>
           {/* overflow-y-hidden pins the vertical axis: overflow-x-auto alone turns overflow-y to auto too, and a
               sub-pixel overflow from the badges then showed a native scrollbar on this row. */}
-          <div className="flex items-stretch overflow-x-auto overflow-y-hidden" style={{ borderBottom: RULE }}>
+          <div aria-label="Application queues" className="flex items-stretch overflow-x-auto overflow-y-hidden" style={{ borderBottom: RULE }}>
             {STAGES.map((stg) => {
               const Icon = stageIcon[stg];
               const active = activeStage === stg;
               return (
-                <button key={stg} onClick={() => updateFilter(setActiveStage)(stg)}
+                <button key={stg} type="button" aria-pressed={active} onClick={() => changeStage(stg)}
                   className={`inline-flex items-center gap-2 px-4 h-11 font-heading text-[0.6875rem] font-semibold uppercase tracking-[0.1em] shrink-0 transition-colors ${active ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground hover:bg-primary/5"}`}
                   style={{ borderRight: RULE_SOFT }}>
                   <Icon size={13} /> {stageLabel[stg]}
@@ -1524,7 +1617,7 @@ const CrmApplication: React.FC = () => {
           </div>
 
           <div className="px-5 py-4 flex flex-wrap items-center gap-3" style={{ borderBottom: RULE }}>
-            <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+            <input type="search" aria-label="Search applications by applicant, mobile, or application number" value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && updateFilter(setSearch)(searchInput.trim())}
               placeholder="Search name, mobile, application no…"
               className="h-9 w-full sm:w-72 border border-foreground/40 focus:border-foreground bg-card px-3 text-xs text-foreground outline-none" />
@@ -1544,21 +1637,25 @@ const CrmApplication: React.FC = () => {
               </Select>
             )}
             <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
-            {(search || statusFilter !== "All" || cpb.companyId || cpb.projectId || cpb.blockId) && (
+            {hasAppliedFilters && (
               <button onClick={() => { updateFilter(setSearchInput)(""); setSearch(""); setStatusFilter("All"); setCpb({ companyId: "", projectId: "", blockId: "" }); setPage(1); }}
                 className={`${KEY_LINE} h-9 px-3`}>Clear filters</button>
             )}
           </div>
 
           {isError ? (
-            <p className="px-5 py-10 text-center text-sm text-destructive">{(error as Error)?.message}</p>
+            <div role="alert" className="px-5 py-10 flex flex-col items-center gap-3 text-center">
+              <p className="text-sm text-destructive">{(error as Error)?.message || "Could not load applications."}</p>
+              <button type="button" onClick={() => refetchApplications()} className={`${KEY_LINE} h-9 px-4`}>Try again</button>
+            </div>
           ) : (
             <DataTable serverPagination={{ page, pageSize, total, onPageChange: setPage, onPageSizeChange: (n) => { setPageSize(n); setPage(1); } }}
               data={apps}
               columns={activeStage === "Converted" ? convertedColumns : inProcessColumns}
+              mobileCardRenderer={renderMobileApplicationCard}
               searchable={false}
               loading={isLoading}
-              emptyMessage={activeStage === "Converted" ? "No converted applications match these filters." : activeStage === "NotConverted" ? "No rejected or cancelled applications match these filters." : "No applications in process match these filters."}
+              emptyMessage={emptyQueueMessage}
               className="border-0"
             />
           )}
@@ -1584,7 +1681,7 @@ const CrmApplication: React.FC = () => {
               and Bank/KYC again. A step beyond what's been reached yet isn't
               clickable — steps 2-6 all need applicationId (created in step 1)
               and Bank/KYC intentionally still gates via its own Next/Save. */}
-          <div className="flex items-stretch flex-wrap" style={{ border: RULE }}>
+          <div ref={wizardStepsRef} className="flex items-stretch overflow-x-auto overflow-y-hidden" role="group" aria-label="Application steps" style={{ border: RULE }}>
             {wizardStepLabels.map((label, i) => {
               const stepNum = i + 1;
               // A plot sale has no parking step.
@@ -1596,6 +1693,7 @@ const CrmApplication: React.FC = () => {
                     type="button"
                     onClick={() => reachable && setStep(stepNum)}
                     disabled={!reachable}
+                    aria-current={step === stepNum ? "step" : undefined}
                     className={`flex-1 inline-flex items-center justify-center gap-1.5 px-2.5 h-9 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.08em] whitespace-nowrap transition-colors ${
                       step === stepNum
                         ? "bg-foreground text-card"
@@ -1610,6 +1708,11 @@ const CrmApplication: React.FC = () => {
                 </React.Fragment>
               );
             })}
+          </div>
+
+          <div className="flex items-center justify-between gap-3 px-3 py-2 bg-muted/20 border-x border-b border-border">
+            <p className="text-xs font-medium text-foreground">Step {form.PreferredPlotIds.length && step > 2 ? step - 1 : step} of {form.PreferredPlotIds.length ? wizardStepLabels.length - 1 : wizardStepLabels.length}: {wizardStepLabels[step - 1]}</p>
+            <p className="text-[0.6875rem] text-muted-foreground">Complete this section, then select <span className="font-medium text-foreground">Next</span>.</p>
           </div>
 
           {/* What Data Review / booking approval sent back, on the step that holds it. */}
@@ -2255,7 +2358,7 @@ const CrmApplication: React.FC = () => {
             </div>
           )}
 
-          <div className="flex justify-between gap-2 pt-3" style={{ borderTop: RULE }}>
+          <div className="sticky bottom-0 z-20 flex justify-between gap-2 pt-3 pb-1 bg-background" style={{ borderTop: RULE }}>
             <button
               onClick={() => step > 1 && setStep(step === 3 && form.PreferredPlotIds.length ? 1 : step - 1)}
               disabled={step === 1}

@@ -1,15 +1,15 @@
-// Lets components outside the NavigationContainer (SidebarMenu, TopHeader)
+// Lets components outside the NavigationContainer (TopHeader, push taps in App.tsx)
 // trigger navigation — same need the web app's MobileNav.tsx solves with
 // react-router's useNavigate() from inside the tree; RN's overlay
 // components sit outside it, so they need a ref instead.
 import { createNavigationContainerRef } from "@react-navigation/native";
-import type { MainStackParamList } from "./MainStack";
+import type { CustomerStackParamList } from "./CustomerStack";
 
-export const navigationRef = createNavigationContainerRef<MainStackParamList>();
+export const navigationRef = createNavigationContainerRef<CustomerStackParamList>();
 
-export function navigate<RouteName extends keyof MainStackParamList>(
+export function navigate<RouteName extends keyof CustomerStackParamList>(
   name: RouteName,
-  params?: MainStackParamList[RouteName],
+  params?: CustomerStackParamList[RouteName],
 ) {
   if (navigationRef.isReady()) {
     (navigationRef.navigate as (name: string, params?: object) => void)(name, params);

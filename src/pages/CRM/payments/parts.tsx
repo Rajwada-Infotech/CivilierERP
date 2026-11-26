@@ -37,7 +37,7 @@ export function PlanRibbon({ plan, activeId, onPick, onDark }: { plan: any[]; ac
           f.waived ? "Waived" : f.missing > 0 ? `${late ? "Overdue" : "Still to come"} ${fmt(f.missing)}` : null,
         ].filter(Boolean).join(" · ");
         return (
-          <button key={m.Id} type="button" onClick={() => onPick(m)} title={tip} aria-label={tip}
+          <button key={m.Id} type="button" onClick={() => onPick(m)} title={tip} aria-label={tip} aria-pressed={activeId === m.Id}
             style={{ flex: `${Math.max(Number(m.AmountDue) || 0, 1)} 1 0`, minWidth: 6 }}
             className={cn("flex h-full outline-none focus-visible:ring-2 focus-visible:ring-primary hover:opacity-75", f.waived ? RIBBON.waived.cls : late ? lateCls : openCls, activeId === m.Id && (onDark ? "ring-2 ring-inset ring-white" : "ring-2 ring-inset ring-foreground"))}>
             {!f.waived && f.due > 0 && (
@@ -118,12 +118,20 @@ const ROW_FILL = { collected: "bg-emerald-500", finance: "bg-amber-400", overdue
 
 /** Every rupee received as one line against all that is due: verified by Finance, with Finance, not yet with Finance. */
 export function CollectionBar({ due, collected, finance, recorded, onDark, title }: { due: number; collected: number; finance: number; recorded: number; onDark?: boolean; title?: string }) {
-  const w = (n: number) => `${due > 0 ? Math.min(100, (n / due) * 100) : 0}%`;
+  let remaining = 100;
+  const w = (n: number) => {
+    const width = due > 0 ? Math.min(remaining, Math.max(0, (n / due) * 100)) : 0;
+    remaining = Math.max(0, remaining - width);
+    return `${width}%`;
+  };
+  const collectedWidth = w(collected);
+  const financeWidth = w(finance);
+  const recordedWidth = w(recorded);
   return (
-    <span className={cn("flex w-full rounded-full overflow-hidden", onDark ? "h-2.5 bg-white/15" : "h-1.5 bg-slate-200 dark:bg-slate-700")} title={title}>
-      {collected > 0 && <span className={onDark ? BAND_DOT.collected : "bg-emerald-500"} style={{ width: w(collected), minWidth: 3 }} />}
-      {finance > 0 && <span className={onDark ? BAND_DOT.finance : "bg-amber-400"} style={{ width: w(finance), minWidth: 3 }} />}
-      {recorded > 0 && <span className={RIBBON.recorded.cls} style={{ width: w(recorded), minWidth: 3 }} />}
+    <span aria-hidden="true" className={cn("flex w-full rounded-full overflow-hidden", onDark ? "h-2.5 bg-white/15" : "h-1.5 bg-slate-200 dark:bg-slate-700")} title={title}>
+      {collected > 0 && <span className={onDark ? BAND_DOT.collected : "bg-emerald-500"} style={{ width: collectedWidth }} />}
+      {finance > 0 && <span className={onDark ? BAND_DOT.finance : "bg-amber-400"} style={{ width: financeWidth }} />}
+      {recorded > 0 && <span className={RIBBON.recorded.cls} style={{ width: recordedWidth }} />}
     </span>
   );
 }
@@ -181,7 +189,13 @@ function nextStep(r: LedgerRow) {
   if (r.Closed) return <GridStatusPill status={r.BookingStatus} />;
   if (!r.PlanCount) return <span className="text-muted-foreground">No schedule yet</span>;
   const m = nextOpenMilestone(r.plan || []);
-  if (!m) return <span className="text-muted-foreground">{r.WithFinance > 0 || r.Recorded > 0 ? "Pending with Finance" : "All covered"}</span>;
+  if (!m) {
+    const pendingStages = [
+      Number(r.WithFinance) > 0 ? `${fmtShort(r.WithFinance)} pending with Finance` : null,
+      Number(r.Recorded) > 0 ? `${fmtShort(r.Recorded)} not sent to Finance` : null,
+    ].filter(Boolean);
+    return <span className="text-muted-foreground">{pendingStages.length ? pendingStages.join(" · ") : "All covered"}</span>;
+  }
   return <span>{m.MilestoneName} <span className="tabular-nums font-semibold">{fmt(milestoneFill(m).missing)}</span></span>;
 }
 // An ageing figure: a dash for nothing, so the eye goes to the money, and the later the money the stronger the ink.
@@ -208,7 +222,7 @@ export const LEDGER_COLS: GridCol<LedgerRow>[] = [
     <span className="flex items-center gap-3 py-1.5 min-w-0">
       <Initials name={r.ApplicantName} />
       <span className="min-w-0">
-        <span className="block font-semibold text-foreground capitalize truncate" title={r.ApplicantName}>{asName(r.ApplicantName)}</span>
+        <Link to={`/crm/payments?bookingId=${r.BookingId}`} onClick={(event) => event.stopPropagation()} aria-label={`Open payment milestones for ${r.ApplicantName}, booking ${r.BookingNo}`} className="block font-semibold text-primary capitalize truncate hover:underline focus-visible:underline" title={r.ApplicantName}>{asName(r.ApplicantName)}</Link>
         <span className="block text-xs text-muted-foreground tabular-nums truncate">{r.BookingNo} · {r.UnitNo}{r.ProjectName ? ` · ${r.ProjectName}` : ""}{r.Closed ? <span className="text-destructive"> · {r.BookingStatus}</span> : null}</span>
       </span>
     </span>
@@ -271,6 +285,53 @@ export const LEDGER_COLS: GridCol<LedgerRow>[] = [
 // ── The plan ─────────────────────────────────────────────────────────────────
 /** The token's state, as on the booking's own Payments tab: bounced, with Finance, not yet sent, or not yet receipted.
  *  Approved shows nowhere here: it's already in Collected. */
+/** Booking queue card for phones: collection stages and balances without horizontal scrolling. */
+export function LedgerMobileCard({ row, onOpen }: { row: LedgerRow; onOpen: () => void }) {
+  const received = Number(row.Collected) + Number(row.WithFinance) + Number(row.Recorded);
+  const withFinance = Number(row.WithFinance);
+  const recorded = Number(row.Recorded);
+  const accessibleSummary = row.Closed
+    ? `${received > 0 ? `${fmt(received)} received` : "Nothing received"}; closed, no balance owed`
+    : `${fmt(received)} received of ${fmt(row.TotalDue)} due; ${fmt(row.ToCollect)} to collect; ${row.OverdueAmount > 0 ? `${fmt(row.OverdueAmount)} overdue by ${row.DaysLate} days` : "nothing overdue"}; ${withFinance > 0 ? `${fmt(withFinance)} pending with Finance` : "nothing pending with Finance"}${recorded > 0 ? `; ${fmt(recorded)} not sent to Finance` : ""}`;
+  return (
+    <article role="button" tabIndex={0} onClick={onOpen}
+      onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(); } }}
+      aria-label={`Open payment milestones for ${row.ApplicantName}, booking ${row.BookingNo || "number unavailable"}. ${accessibleSummary}`}
+      className={cn(GRID_CARD, "block w-full rounded-lg p-3.5 text-left shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary")}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold capitalize text-foreground" title={row.ApplicantName}>{asName(row.ApplicantName)}</p>
+          <p className="mt-0.5 truncate text-xs text-muted-foreground tabular-nums">{row.BookingNo}{row.UnitNo ? ` · ${row.UnitNo}` : ""}{row.ProjectName ? ` · ${row.ProjectName}` : ""}</p>
+        </div>
+        <GridStatusPill status={row.BookingStatus} />
+      </div>
+      {row.Closed ? (
+        <div className="mt-3 border-t border-border/70 pt-2 text-xs text-muted-foreground tabular-nums">
+          {received > 0 ? <><strong className="text-foreground">{fmtShort(received)}</strong> received</> : "Nothing received"} · Closed, no balance owed
+        </div>
+      ) : (
+        <>
+          <div className="mt-3"><CollectionBar due={Number(row.TotalDue)} collected={Number(row.Collected)} finance={Number(row.WithFinance)} recorded={Number(row.Recorded)} /></div>
+          <div className="mt-1.5 flex justify-between gap-3 text-xs tabular-nums">
+            <span className="text-muted-foreground"><strong className="text-foreground">{fmtShort(received)}</strong> of {fmtShort(row.TotalDue)}</span>
+            <span className="font-medium">{pct(received, row.TotalDue)}%</span>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-3 border-t border-border/70 pt-2.5 text-xs">
+            <div><span className="block text-muted-foreground">Balance to collect</span><span className="mt-0.5 block font-semibold tabular-nums">{fmtShort(row.ToCollect)}</span></div>
+            <div className="text-right"><span className="block text-muted-foreground">Overdue</span><span className={cn("mt-0.5 block font-semibold tabular-nums", row.OverdueAmount > 0 && "text-destructive")}>{row.OverdueAmount > 0 ? `${fmtShort(row.OverdueAmount)} · ${row.DaysLate}d` : "—"}</span></div>
+          </div>
+          <div className="mt-2 flex flex-wrap justify-between gap-x-3 gap-y-1 text-[0.6875rem] text-muted-foreground">
+            <span>{withFinance > 0 ? `${fmtShort(withFinance)} pending with Finance` : "None pending with Finance"}</span>
+            {recorded > 0 && <span>{fmtShort(recorded)} not sent to Finance</span>}
+            {row.AssignedToName && <span className="truncate">Owner: {row.AssignedToName}</span>}
+          </div>
+          {row.PlanCount > 0 && <p className="mt-2 border-t border-border/70 pt-2 text-xs">Next: {nextStep(row)}</p>}
+        </>
+      )}
+    </article>
+  );
+}
+
 export function TokenNote({ booking, moneyReceipts }: { booking: any; moneyReceipts: any[] }) {
   if (!(Number(booking?.TokenValue) > 0)) return null;
   const receipt = moneyReceipts[0];
@@ -454,7 +515,7 @@ export function WaiverSection({ waivers, canEdit, onChanged }: { waivers: any[];
         { header: "Status", cell: (w: any) => { const st = waiverState(w); return <GridToneMark text={st.label} tone={st.tone} />; } },
         { header: "Actions", cell: (w: any) => (!canEdit || !waiverState(w).reversible ? null
           : w.ReversalBlock ? <span className="block max-w-[14rem] whitespace-normal text-xs text-muted-foreground">{w.ReversalBlock}</span>
-          : <button type="button" onClick={() => { setReversing(w); setReason(""); }} className={cn(KEY_LINE, SMALL_KEY)}><Undo2 size={12} /> Reverse</button>) },
+          : <button type="button" onClick={() => { setReversing(w); setReason(""); }} aria-label={`Reverse waiver for ${w.MilestoneName || "milestone"}`} className={cn(KEY_LINE, SMALL_KEY)}><Undo2 size={12} /> Reverse</button>) },
       ]} />
       {reversing && (
         <Dialog open onOpenChange={(o) => { if (!o && !busy) setReversing(null); }}>
@@ -464,8 +525,8 @@ export function WaiverSection({ waivers, canEdit, onChanged }: { waivers: any[];
               <DialogDescription className="text-xs tabular-nums">{reversing.MilestoneName}: {fmt(reversing.Amount)} becomes due again once the reversal is approved.</DialogDescription>
             </DialogHeader>
             <div>
-              <label className={cn("block mb-1.5", LBL)}>Reason</label>
-              <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} autoFocus className={TEXTAREA} />
+              <label className={cn("block mb-1.5", LBL)} htmlFor="waiver-reversal-reason">Reason</label>
+              <textarea id="waiver-reversal-reason" value={reason} onChange={(e) => setReason(e.target.value)} rows={3} autoFocus className={TEXTAREA} />
             </div>
             <DialogFooter className="gap-2">
               <button type="button" onClick={() => setReversing(null)} disabled={busy} className={cn(KEY_LINE, "h-9 px-4")}>Cancel</button>
@@ -481,10 +542,17 @@ export function WaiverSection({ waivers, canEdit, onChanged }: { waivers: any[];
 // Deposits that aren't usable money: never counted, never applied.
 const UNAVAILABLE = ["Bounced", "Held", "Void", "Cancelled", "Refunded"];
 
-export function OnAccountPanel({ onAccountData, notFullyPaid, fundsOnHand, requiredAmount, fullPaymentShortfall, inVerification = 0, milestones, canManuallyApply, canEdit, onApply }: {
+export function OnAccountPanel({ onAccountData, loading, error, onRetry, notFullyPaid, fundsOnHand, requiredAmount, fullPaymentShortfall, inVerification = 0, milestones, canManuallyApply, canEdit, onApply }: {
+  loading: boolean; error: string | null; onRetry: () => void;
   onAccountData: any; notFullyPaid: boolean; fundsOnHand: number; requiredAmount: number; inVerification?: number;
   fullPaymentShortfall: number; milestones: any[]; canManuallyApply: boolean; canEdit: boolean; onApply: (payment: any) => void;
 }) {
+  if (loading || error) return (
+    <div className="flex flex-wrap items-center gap-2 px-4 py-4 text-sm">
+      {loading ? <span role="status" className="text-muted-foreground">Loading deposit balances…</span> : <span role="alert" className="text-destructive">Could not load deposit balances: {error}</span>}
+      {!loading && <button type="button" onClick={onRetry} className="font-semibold text-primary underline underline-offset-2">Retry</button>}
+    </div>
+  );
   const hasOutstanding = milestones.some((m: any) => m.Status !== CrmStatus.PAID && m.Status !== "Waived" && Number(m.AmountDue) > Number(m.AmountPaid || 0));
   const usableLeft = (onAccountData?.payments || []).some((p: any) => !UNAVAILABLE.includes(p.Status) && Number(p.Amount) > Number(p.AppliedAmount || 0));
   return (
@@ -511,7 +579,7 @@ export function OnAccountPanel({ onAccountData, notFullyPaid, fundsOnHand, requi
         { header: "", cell: (p: any) => {
           const remaining = UNAVAILABLE.includes(p.Status) ? 0 : Number(p.Amount) - Number(p.AppliedAmount || 0);
           const canApply = canEdit && remaining > 0 && p.Status !== "Applied" && canManuallyApply && hasOutstanding;
-          return canApply ? <button type="button" onClick={() => onApply(p)} title="This deposit should apply itself once its milestone is eligible: use this only as a manual fallback" className={cn(KEY_LINE, SMALL_KEY)}>Apply manually</button> : null;
+          return canApply ? <button type="button" onClick={() => onApply(p)} aria-label={`Apply deposit ${p.ReceiptNo || "on account"} manually`} title="This deposit should apply itself once its milestone is eligible: use this only as a manual fallback" className={cn(KEY_LINE, SMALL_KEY)}>Apply manually</button> : null;
         } },
       ]} />
     </>
@@ -560,7 +628,55 @@ export function MilestoneTable({ milestones, canEdit, closed = false, onAccountD
   // One main action on the page: paying the milestone money is missing on next.
   const nextOpenId = nextOpenMilestone(milestones)?.Id;
   return (
-    <div className="overflow-x-auto thin-scroll">
+    <>
+    <div className="divide-y divide-border md:hidden">
+      {milestones.length === 0 ? <p className="px-4 py-10 text-center text-sm text-muted-foreground">No milestones on this booking.</p> : milestones.map((m) => {
+        const overdue = !closed && isOverdue(m);
+        const f = milestoneFill(m);
+        const stage = MONEY_STAGE[m.MoneyStage as string] || null;
+        const covered = m.MoneyStage === "Verified";
+        const status = closed && m.Status !== CrmStatus.PAID ? "Closed" : stage ? stage.label : overdue ? (f.held + f.finance + f.recorded > 0 ? "Overdue · part received" : "Overdue") : m.Status === CrmStatus.PENDING ? "Due" : m.Status;
+        const open = !closed && m.Status !== CrmStatus.PAID && m.Status !== "Waived";
+        const pmt = onAccountBalance > 0 && m.Id === nextMilestone?.Id
+          ? onAccountData?.payments?.find((p: any) => !UNAVAILABLE.includes(p.Status) && Number(p.Amount) - Number(p.AppliedAmount || 0) > 0)
+          : null;
+        const noAmount = Number(m.AmountDue) === 0 && Number(m.AmountPaid || 0) === 0 && m.Status === CrmStatus.PAID;
+        const shown = activeId === m.Id;
+        const details = milestoneDetails(m);
+        return (
+          <article key={m.Id} id={`milestone-${m.Id}`} className={cn("p-3 space-y-2.5", shown && "bg-primary/5 ring-1 ring-inset ring-primary/30")}>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h4 className="font-medium text-sm leading-snug"><span className="text-muted-foreground tabular-nums mr-1.5">{m.MilestoneNo}.</span>{m.MilestoneName}
+                  {m.Remarks && <button type="button" onClick={() => onRemarks(m)} title={m.Remarks} aria-label={`Read remarks for ${m.MilestoneName}`} className="ml-1.5 align-middle text-muted-foreground hover:text-foreground inline-flex"><MessageSquare size={12} /></button>}
+                </h4>
+                <p className="mt-0.5 text-xs text-muted-foreground">Due {fmtDate(m.DueDate)}</p>
+              </div>
+              <span title={stage?.hint}>{m.Status === "Waived" ? <GridStatusPill status="Waived" /> : <GridToneMark text={pendingWaivers?.has(m.Id) ? "Waiver awaiting approval" : status} tone={pendingWaivers?.has(m.Id) ? "waiting" : closed ? "draft" : overdue ? "stopped" : stage?.tone ?? "waiting"} />}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+              <div><span className="block text-muted-foreground">Amount due</span><span className="font-semibold tabular-nums">{noAmount ? "No amount due" : fmt(m.AmountDue)}</span></div>
+              <div className="text-right"><span className="block text-muted-foreground">Balance</span><span className={cn("font-semibold tabular-nums", !closed && !f.waived && f.missing > 0 && "text-foreground")}>{closed || f.waived || f.missing <= 0 ? "—" : fmt(f.missing)}</span></div>
+              <div className="col-span-2"><span className="block text-muted-foreground mb-0.5">Received against it</span>{moneyWords(m)}</div>
+            </div>
+            {details.length > 0 && <div className="flex flex-wrap gap-x-3 gap-y-1 text-[0.6875rem] text-muted-foreground">{details.map(([label, value]) => <span key={label}>{label}: <span className="text-foreground/80 tabular-nums">{value}</span></span>)}</div>}
+            {canEdit && open && <div className="flex flex-wrap items-center gap-1.5 border-t border-border/70 pt-2">
+              {!covered && <button type="button" onClick={() => onPay(m)} aria-label={`Record payment for ${m.MilestoneName}`} className={cn(m.Id === nextOpenId ? KEY_INK : KEY_LINE, SMALL_KEY)}>Pay</button>}
+              {pmt && (notFullyPaid
+                ? <span title={`Adjusted automatically once the full booking amount is received: a further ${fmt(fullPaymentShortfall)} is needed`} className={passive}>Auto</span>
+                : !canManuallyApply
+                ? <span title="Raise the Demand before applying on-account money to this milestone" className={passive}>Raise demand</span>
+                : <button type="button" onClick={() => onApply(pmt, m)} aria-label={`Apply on-account money to ${m.MilestoneName}`} title="The full booking amount is received, so this should adjust automatically: use this only if it has not" className={cn(KEY_LINE, SMALL_KEY)}>Apply</button>)}
+              {!covered && !pendingWaivers?.has(m.Id) && <button type="button" onClick={() => onWaive(m)} aria-label={`Request waiver for ${m.MilestoneName}`} className={cn(KEY_LINE, SMALL_KEY)}>Waive</button>}
+            </div>}
+          </article>
+        );
+      })}
+      {milestones.length > 0 && <div className="flex justify-between gap-4 bg-muted px-3 py-2.5 text-xs font-semibold">
+        <span>Total</span><span className="text-right tabular-nums">{fmt(milestones.reduce((n, m) => n + (m.Status === "Waived" ? 0 : Number(m.AmountDue) || 0), 0))}<span className="ml-2 text-muted-foreground font-normal">{closed ? "—" : `${fmt(milestones.reduce((n, m) => n + (milestoneFill(m).waived ? 0 : milestoneFill(m).missing), 0))} remaining`}</span></span>
+      </div>}
+    </div>
+    <div className="hidden overflow-x-auto thin-scroll md:block">
       <table className="w-full text-[0.8125rem] min-w-[820px]">
         <thead>
           <tr>
@@ -580,7 +696,7 @@ export function MilestoneTable({ milestones, canEdit, closed = false, onAccountD
             const stage = MONEY_STAGE[m.MoneyStage as string] || null;
             const covered = m.MoneyStage === "Verified";
             const status = closed && m.Status !== CrmStatus.PAID ? "Closed" : stage ? stage.label : overdue ? (f.held + f.finance + f.recorded > 0 ? "Overdue · part received" : "Overdue") : m.Status === CrmStatus.PENDING ? "Due" : m.Status;
-            const open = m.Status !== CrmStatus.PAID && m.Status !== "Waived";
+            const open = !closed && m.Status !== CrmStatus.PAID && m.Status !== "Waived";
             const pmt = onAccountBalance > 0 && m.Id === nextMilestone?.Id
               ? onAccountData?.payments?.find((p: any) => !UNAVAILABLE.includes(p.Status) && Number(p.Amount) - Number(p.AppliedAmount || 0) > 0)
               : null;
@@ -589,7 +705,7 @@ export function MilestoneTable({ milestones, canEdit, closed = false, onAccountD
             const details = milestoneDetails(m);
             return (
               <React.Fragment key={m.Id}>
-                <tr id={`milestone-${m.Id}`} className={cn("hover:bg-muted/40", shown && "bg-primary/5")}>
+                <tr id={`milestone-desktop-${m.Id}`} className={cn("hover:bg-muted/40", shown && "bg-primary/5")}>
                   <td className={td}>
                     <div className="font-medium py-1">
                       <span className="text-muted-foreground tabular-nums mr-1.5">{m.MilestoneNo}</span>{m.MilestoneName}
@@ -605,17 +721,17 @@ export function MilestoneTable({ milestones, canEdit, closed = false, onAccountD
                   <td className={cn(td, "text-right tabular-nums whitespace-nowrap font-medium")}>{noAmount ? <span className="text-xs font-normal text-muted-foreground">No amount due</span> : fmt(m.AmountDue)}</td>
                   <td className={cn(td, "text-xs")}>{moneyWords(m)}</td>
                   <td className={cn(td, "text-right tabular-nums whitespace-nowrap", f.missing > 0 && "font-semibold")}>{closed || f.waived || f.missing <= 0 ? dash : fmt(f.missing)}</td>
-                  <td className={td} title={stage?.hint}>{m.Status === "Waived" ? <GridStatusPill status="Waived" /> : <GridToneMark text={pendingWaivers?.has(m.Id) ? "Waiver awaiting approval" : status} tone={pendingWaivers?.has(m.Id) ? "waiting" : overdue ? "stopped" : stage?.tone ?? "waiting"} />}</td>
+                  <td className={td} title={stage?.hint}>{m.Status === "Waived" ? <GridStatusPill status="Waived" /> : <GridToneMark text={pendingWaivers?.has(m.Id) ? "Waiver awaiting approval" : status} tone={pendingWaivers?.has(m.Id) ? "waiting" : closed ? "draft" : overdue ? "stopped" : stage?.tone ?? "waiting"} />}</td>
                   <td className={cn(td, "whitespace-nowrap")}>
                     {canEdit && open && (
                       <div className="flex items-center justify-end gap-1.5">
-                        {!covered && <button type="button" onClick={() => onPay(m)} className={cn(m.Id === nextOpenId ? KEY_INK : KEY_LINE, SMALL_KEY)}>Pay</button>}
+                        {!covered && <button type="button" onClick={() => onPay(m)} aria-label={`Record payment for ${m.MilestoneName}`} className={cn(m.Id === nextOpenId ? KEY_INK : KEY_LINE, SMALL_KEY)}>Pay</button>}
                         {pmt && (notFullyPaid
                           ? <span title={`Adjusted automatically once the full booking amount is received: a further ${fmt(fullPaymentShortfall)} is needed`} className={passive}>Auto</span>
                           : !canManuallyApply
                           ? <span title="Raise the Demand before applying on-account money to this milestone" className={passive}>Raise demand</span>
-                          : <button type="button" onClick={() => onApply(pmt, m)} title="The full booking amount is received, so this should adjust automatically: use this only if it has not" className={cn(KEY_LINE, SMALL_KEY)}>Apply</button>)}
-                        {!covered && !pendingWaivers?.has(m.Id) && <button type="button" onClick={() => onWaive(m)} className={cn(KEY_LINE, SMALL_KEY)}>Waive</button>}
+                          : <button type="button" onClick={() => onApply(pmt, m)} aria-label={`Apply on-account money to ${m.MilestoneName}`} title="The full booking amount is received, so this should adjust automatically: use this only if it has not" className={cn(KEY_LINE, SMALL_KEY)}>Apply</button>)}
+                        {!covered && !pendingWaivers?.has(m.Id) && <button type="button" onClick={() => onWaive(m)} aria-label={`Request waiver for ${m.MilestoneName}`} className={cn(KEY_LINE, SMALL_KEY)}>Waive</button>}
                       </div>
                     )}
                   </td>
@@ -637,5 +753,6 @@ export function MilestoneTable({ milestones, canEdit, closed = false, onAccountD
         )}
       </table>
     </div>
+    </>
   );
 }

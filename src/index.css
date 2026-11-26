@@ -858,6 +858,12 @@
     outline-offset: 2px;
 }
 
+.crm-application-queue button:focus-visible,
+.crm-application-queue a:focus-visible {
+    outline: 2px solid #ffad35;
+    outline-offset: 2px;
+}
+
 
 /* Row-click-to-view (see main.tsx): the whole row opens the details, so the
    eye button inside table rows is hidden and the row reads as clickable. */

@@ -2,18 +2,21 @@ const { sql } = require("../db");
 const { send, PROVIDER_CHANNEL } = require("./messageProviders");
 
 /**
- * Core engine for triggering automated communications and logging them.
+ * Core engine for triggering automated communications and logging them. Returns what happened:
+ * { ok } when sent, { ok: false, skipped, error } when the channel is not set up / switched off or there is no
+ * mobile or e-mail, { ok: false, error } when the provider refused. `template` (WhatsApp) = { name, language, params }.
  */
-async function sendAutoCommunication(pool, { bookingId, channel, subject, summary, content, toMobile, toEmail, systemUserId = 1 }) {
+async function sendAutoCommunication(pool, { bookingId, channel, subject, summary, content, toMobile, toEmail, template = null, systemUserId = 1 }) {
   try {
     // 1. Send through the provider saved on the Communicator setup page; a channel
     //    that isn't set up or is switched off sends nothing and logs nothing.
     const to = channel === "Email" ? toEmail : toMobile;
-    if (!PROVIDER_CHANNEL[channel] || !to) return false;
-    const sent = await send(PROVIDER_CHANNEL[channel], { to, subject, text: content });
+    if (!PROVIDER_CHANNEL[channel]) return { ok: false, skipped: true, error: `Unknown channel ${channel}` };
+    if (!to) return { ok: false, skipped: true, error: channel === "Email" ? "No e-mail on record" : "No mobile on record" };
+    const sent = await send(PROVIDER_CHANNEL[channel], { to, subject, text: content, template });
     if (!sent.ok) {
       if (!sent.skipped) console.error(`[communicationTriggers] ${channel} for booking ${bookingId} failed: ${sent.error}`);
-      return false;
+      return sent;
     }
 
     // 2. Log it into the Customer 360 timeline (dbo.CrmCommunicationLog)
@@ -30,10 +33,10 @@ async function sendAutoCommunication(pool, { bookingId, channel, subject, summar
         VALUES (@bid, @ch, @dir, @subj, @sum, SYSDATETIME(), @cb, SYSDATETIME())
       `);
 
-    return true;
+    return { ok: true };
   } catch (error) {
     console.error(`[communicationTriggers] Failed to send ${channel} for booking ${bookingId}:`, error.message);
-    return false;
+    return { ok: false, error: String(error.message || error).slice(0, 300) };
   }
 }
 
@@ -179,6 +182,7 @@ async function triggerPaymentDemand(pool, demandId, systemUserId = 1) {
 }
 
 module.exports = {
+  sendAutoCommunication,
   triggerBookingConfirmed,
   triggerPaymentReceived,
   triggerPaymentDemand

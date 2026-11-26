@@ -3,7 +3,7 @@ import { round2, sumMoney } from "@/lib/crmPriceQuote";
 import { SendBackChoices } from "@/components/ApprovalActions";
 import { useCanApprove } from "@/hooks/useCanApprove";
 import { fmtIstDateTime } from "@/lib/istTime";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -47,8 +47,6 @@ const API = "/api/crm/bookings";
 const PAY_API = "/api/crm/payments";
 const AMEND_API = "/api/crm/booking-amendments";
 const BANK_DETAIL_API = "/api/crm/customer-bank-details";
-const PROJECT_BANK_API = "/api/crm/project-banks";
-const BANK_MASTER_API = "/api/bank-master";
 
 const EMPTY_BANK = {
   BankName: "", BranchName: "", AccountNo: "", IfscCode: "", AccountHolderName: "",
@@ -79,7 +77,10 @@ const fmt = (n: number | null | undefined) =>
 
 async function fetchDetail(id: number): Promise<any> {
   const r = await fetchWithAuth(`${API}/${id}`);
-  return r.ok ? r.json() : null;
+  const data = await r.json().catch(() => ({}));
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(data?.error || "Could not load this booking.");
+  return data;
 }
 // The merged Data Review checklist — the former Application-level Level-1
 // checklist (KYC, Project/Unit/Rate, Payment Plan, Bank/Deposit, Broker,
@@ -87,42 +88,46 @@ async function fetchDetail(id: number): Promise<any> {
 // workflow stage. See crmBookings.js GET/PUT /:id/checklist/*.
 async function fetchChecklist(id: number): Promise<any> {
   const r = await fetchWithAuth(`${API}/${id}/checklist`);
-  return r.ok ? r.json() : null;
+  const data = await r.json().catch(() => ({}));
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(data?.error || "Could not load the booking review checklist.");
+  return data;
 }
 async function fetchInvoices(id: number): Promise<any[]> {
   const r = await fetchWithAuth(`${API}/${id}/invoices`);
-  return r.ok ? r.json() : [];
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data?.error || "Could not load booking invoices.");
+  return Array.isArray(data) ? data : [];
 }
 async function fetchUnitChangeLog(id: number): Promise<any[]> {
   const r = await fetchWithAuth(`${API}/${id}/unit-change-log`);
-  return r.ok ? r.json() : [];
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data?.error || "Could not load unit change history.");
+  return Array.isArray(data) ? data : [];
 }
 async function fetchUnitChange(id: number): Promise<any | null> {
   const r = await fetchWithAuth(`${API}/${id}/unit-change`);
-  return r.ok ? r.json() : null;
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data?.error || "Could not load the unit change.");
+  return data;
 }
 async function fetchMoneyReceipts(bookingId: number): Promise<any[]> {
   const r = await fetchWithAuth(`/api/crm/money-receipts?bookingId=${bookingId}`);
-  return r.ok ? r.json() : [];
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data?.error || "Could not load money receipts.");
+  return Array.isArray(data) ? data : [];
 }
 async function fetchAttachments(id: number): Promise<any[]> {
   const r = await fetchWithAuth(`${API}/${id}/attachments`);
-  return r.ok ? r.json() : [];
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data?.error || "Could not load booking attachments.");
+  return Array.isArray(data) ? data : [];
 }
 async function fetchOnAccount(id: number): Promise<any | null> {
   const r = await fetchWithAuth(`${PAY_API}/booking/${id}/on-account`);
-  return r.ok ? r.json() : null;
-}
-// Deposit bank, scoped to the booking's project — empty means "nothing
-// linked", so callers fall back to the full bank list themselves.
-async function fetchProjectBanks(projectId?: number | null): Promise<any[]> {
-  if (!projectId) return [];
-  const r = await fetchWithAuth(`${PROJECT_BANK_API}/for-project/${projectId}`);
-  return r.ok ? r.json() : [];
-}
-async function fetchAllBanks(): Promise<any[]> {
-  const r = await fetchWithAuth(BANK_MASTER_API);
-  return r.ok ? r.json() : [];
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data?.error || "Could not check the on-account balance.");
+  return data;
 }
 // Same Company/Project/Block/Unit scope filter every other payment-plan
 // picker in the app uses (Unit Master, Application) — a plan with no
@@ -135,23 +140,33 @@ async function fetchScopedPaymentPlans(b: any): Promise<any[]> {
   if (b.BlockId) params.set("blockId", String(b.BlockId));
   if (b.UnitId) params.set("unitId", String(b.UnitId));
   const r = await fetchWithAuth(`/api/crm/payment-plans?${params}`);
-  return r.ok ? r.json() : [];
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data?.error || "Could not load payment plans for this booking.");
+  return Array.isArray(data) ? data : [];
 }
 async function fetchParkingAllotments(bookingId: number): Promise<any[]> {
   const r = await fetchWithAuth(`/api/crm/parking/${bookingId}`);
-  return r.ok ? r.json() : [];
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data?.error || "Could not load parking allotments.");
+  return Array.isArray(data) ? data : [];
 }
 async function fetchExtraCharges(bookingId: number): Promise<any[]> {
   const r = await fetchWithAuth(`/api/crm/extra-charges/${bookingId}`);
-  return r.ok ? r.json() : [];
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data?.error || "Could not load extra charges.");
+  return Array.isArray(data) ? data : [];
 }
 async function fetchExtraChargeTypes(): Promise<any[]> {
   const r = await fetchWithAuth("/api/extra-charge-master");
-  return r.ok ? r.json() : [];
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data?.error || "Could not load extra charge types.");
+  return Array.isArray(data) ? data : [];
 }
 async function fetchPendingAmendments(bookingId: number): Promise<any[]> {
   const r = await fetchWithAuth(`${AMEND_API}/booking/${bookingId}`);
-  return r.ok ? r.json() : [];
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data?.error || "Could not load pending amendments.");
+  return Array.isArray(data) ? data : [];
 }
 
 export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; onClose: () => void }) {
@@ -171,6 +186,12 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   // In the address (?bookingTab=, beside the page's ?view=), so a refresh or a shared link reopens the same tab;
   // dropped again when the popup closes.
   const [tab, setTab] = useUrlParam<Tab>("bookingTab", "Booking", TABS);
+  const detailScrollRef = useRef<HTMLDivElement>(null);
+  const previousTab = useRef(tab);
+  useEffect(() => {
+    if (previousTab.current !== tab) detailScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+    previousTab.current = tab;
+  }, [tab]);
   useEffect(() => () => setTab(""), []); // eslint-disable-line react-hooks/exhaustive-deps
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -255,14 +276,14 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   // eslint-disable-next-line @typescript-eslint/no-unused-vars — kept only if discount feature ships later
   // const [discountForm, setDiscountForm] = useState({ Amount: "", Note: "" });
   const [invoiceSort, setInvoiceSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
-  const [payForm, setPayForm] = useState({ Amount: "", PaymentMode: "Cash", ReceivedDate: "", TransactionRef: "", ChequeDate: "", DepositBankId: "" });
+  const [payForm, setPayForm] = useState({ Amount: "", PaymentMode: "Cash", ReceivedDate: "", TransactionRef: "", ChequeDate: "" });
   const [paySaving, setPaySaving] = useState(false);
   const [planEditOpen, setPlanEditOpen] = useState(false);
   const [unitChangeOpen, setUnitChangeOpen] = useState(false);
   const [planEditValue, setPlanEditValue] = useState("");
   const [planSaving, setPlanSaving] = useState(false);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["crm-booking-detail", bookingId],
     queryFn: () => fetchDetail(bookingId),
   });
@@ -271,16 +292,16 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const isPlotSale = !!booking?.IsPlotSale;
   const plotLines: any[] = (data?.plots ?? []).filter((p: any) => p.Status === "Active");
   const stageState = data?.stageState;
-  const { data: checklistData, refetch: refetchChecklist } = useQuery({
+  const { data: checklistData, isError: checklistError, error: checklistLoadError, refetch: refetchChecklist } = useQuery({
     queryKey: ["crm-booking-checklist", bookingId],
     queryFn: () => fetchChecklist(bookingId),
   });
-  const { data: unitChangeLog = [] } = useQuery({
+  const { data: unitChangeLog = [], isError: unitChangeLogError, error: unitChangeLogLoadError, refetch: refetchUnitChangeLog } = useQuery({
     queryKey: ["crm-booking-unit-change-log", bookingId],
     queryFn: () => fetchUnitChangeLog(bookingId),
     enabled: tab === "Booking",
   });
-  const { data: unitChange } = useQuery({
+  const { data: unitChange, isError: unitChangeError, error: unitChangeLoadError, refetch: refetchUnitChange } = useQuery({
     queryKey: ["crm-booking-unit-change", bookingId],
     queryFn: () => fetchUnitChange(bookingId),
     enabled: tab === "Booking",
@@ -316,24 +337,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const legalWorkStarted = !!(agreement && ["Executed", "Registered"].includes(agreement.Status));
   // paymentSummary available via data?.paymentSummary if reinstated
 
-  const { data: projectBanks = [] } = useQuery({
-    queryKey: ["crm-project-banks-for", booking?.ProjectId],
-    queryFn: () => fetchProjectBanks(booking?.ProjectId),
-    enabled: tab === "Payment & Invoice" && !!booking?.ProjectId,
-  });
-  const { data: allBanks = [] } = useQuery({
-    queryKey: ["bank-master-dropdown"],
-    queryFn: fetchAllBanks,
-    enabled: tab === "Payment & Invoice",
-    staleTime: 5 * 60_000,
-  });
-  // /for-project already resolves the full exclusivity rule server-side
-  // (tagged-only, or every untagged bank as the fallback pool) — falling
-  // back further to the raw, unfiltered bank list here would silently
-  // reintroduce banks tagged exclusively to a DIFFERENT project. Only use
-  // the raw list when this booking's Project isn't known yet.
-  const bankOptions = booking?.ProjectId ? projectBanks : allBanks;
-  const { data: scopedPlans = [] } = useQuery({
+  const { data: scopedPlans = [], isLoading: scopedPlansLoading, isError: scopedPlansError, error: scopedPlansLoadError, refetch: refetchScopedPlans } = useQuery({
     queryKey: ["crm-payment-plans-for-booking", bookingId],
     queryFn: () => fetchScopedPaymentPlans(booking),
     enabled: tab === "Payment Plan" && planEditOpen && !!booking,
@@ -352,7 +356,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, booking?.PaymentMode]);
-  const { data: invoices = [] } = useQuery({
+  const { data: invoices = [], isError: invoicesError, error: invoicesLoadError, refetch: refetchInvoices } = useQuery({
     queryKey: ["crm-booking-invoices", bookingId],
     queryFn: () => fetchInvoices(bookingId),
     // Also needed on the Payment Plan tab now — the milestone list there
@@ -360,26 +364,28 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     // matching invoice, which requires this data to be loaded.
     enabled: tab === "Payment & Invoice" || tab === "Payment Plan",
   });
-  const { data: moneyReceipts = [] } = useQuery({
+  const { data: moneyReceipts = [], isLoading: moneyReceiptsLoading, isError: moneyReceiptsError, error: moneyReceiptsLoadError, refetch: refetchMoneyReceipts } = useQuery({
     queryKey: ["crm-booking-money-receipts", bookingId],
     queryFn: () => fetchMoneyReceipts(bookingId),
     enabled: bookingId != null,
   });
-  const { data: onAccountData, isLoading: onAccountLoading, isError: onAccountError } = useQuery({
+  const { data: onAccountData, isLoading: onAccountLoading, isError: onAccountError, error: onAccountLoadError, refetch: refetchOnAccount } = useQuery({
     queryKey: ["crm-booking-on-account", bookingId],
     queryFn: () => fetchOnAccount(bookingId),
     enabled: bookingId != null,
   });
-  const { data: attachments = [] } = useQuery({
+  const { data: attachments = [], isLoading: attachmentsLoading, isError: attachmentsError, error: attachmentsLoadError, refetch: refetchAttachments } = useQuery({
     queryKey: ["crm-booking-attachments", bookingId],
     queryFn: () => fetchAttachments(bookingId),
     enabled: tab === "Attachments",
   });
-  const { data: portalStatus, isFetching: portalFetching, refetch: refetchPortal } = useQuery({
+  const { data: portalStatus, isFetching: portalFetching, isError: portalStatusError, error: portalStatusLoadError, refetch: refetchPortal } = useQuery({
     queryKey: ["crm-booking-portal-status", bookingId],
     queryFn: async () => {
       const r = await fetchWithAuth(`${API}/${bookingId}/portal-status`);
-      return r.ok ? r.json() : null;
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data?.error || "Could not check Civilier Home access.");
+      return data;
     },
     enabled: tab === "Civilier Home",
   });
@@ -425,23 +431,23 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       setProvisioning(false);
     }
   }
-  const { data: parking = [] } = useQuery({
+  const { data: parking = [], isLoading: parkingLoading, isError: parkingError, error: parkingLoadError, refetch: refetchParking } = useQuery({
     queryKey: ["crm-parking", bookingId],
     queryFn: () => fetchParkingAllotments(bookingId),
     enabled: tab === "Parking & Extra Charges",
   });
-  const { data: extras = [] } = useQuery({
+  const { data: extras = [], isLoading: extrasLoading, isError: extrasError, error: extrasLoadError, refetch: refetchExtras } = useQuery({
     queryKey: ["crm-extra-charges", bookingId],
     queryFn: () => fetchExtraCharges(bookingId),
     enabled: tab === "Parking & Extra Charges",
   });
-  const { data: chargeTypes = [] } = useQuery({
+  const { data: chargeTypes = [], isError: chargeTypesError, error: chargeTypesLoadError, refetch: refetchChargeTypes } = useQuery({
     queryKey: ["extra-charge-master-all"],
     queryFn: fetchExtraChargeTypes,
     enabled: tab === "Parking & Extra Charges",
     staleTime: 5 * 60_000,
   });
-  const { data: pendingAmendments = [] } = useQuery({
+  const { data: pendingAmendments = [], isError: pendingAmendmentsError, error: pendingAmendmentsLoadError, refetch: refetchPendingAmendments } = useQuery({
     queryKey: ["crm-booking-amendments", bookingId],
     queryFn: () => fetchPendingAmendments(bookingId),
     enabled: tab === "Parking & Extra Charges",
@@ -454,23 +460,27 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
   // Verification checklist — only the Parking & ExtraCharges sections are
   // shown on this tab; the full checklist lives on the Welcome Call page.
-  const { data: parkingChecklist, refetch: refetchParkingChecklist } = useQuery({
+  const { data: parkingChecklist, isError: parkingChecklistError, error: parkingChecklistLoadError, refetch: refetchParkingChecklist } = useQuery({
     queryKey: ["crm-welcome-verification-checklist", bookingId],
     queryFn: async () => {
       const r = await fetchWithAuth(`/api/crm/welcome-checklist/${bookingId}`);
-      return r.ok ? r.json() : null;
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data?.error || "Could not load the parking verification checklist.");
+      return data;
     },
     enabled: tab === "Parking & Extra Charges" && bookingId != null,
     staleTime: 30_000,
   });
-  const { data: availableParking = { rates: [], unratedTypesWithInventory: [] } } = useQuery({
+  const { data: availableParking = { rates: [], unratedTypesWithInventory: [] }, isLoading: availableParkingLoading, isError: availableParkingError, error: availableParkingLoadError, refetch: refetchAvailableParking } = useQuery({
     queryKey: ["crm-parking-available", booking?.ProjectId, booking?.BlockId],
     queryFn: async () => {
       if (!booking?.ProjectId) return { rates: [], unratedTypesWithInventory: [] };
       const params = new URLSearchParams({ projectId: String(booking.ProjectId) });
       if (booking.BlockId) params.set("blockId", String(booking.BlockId));
       const r = await fetchWithAuth(`/api/crm/parking/available?${params}`);
-      return r.json();
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data?.error || "Could not load available parking.");
+      return data;
     },
     enabled: tab === "Parking & Extra Charges" && addingParking && !!booking?.ProjectId,
     staleTime: 30_000,
@@ -487,6 +497,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   // ApplicationId), so edits made from either place stay in sync.
   const [bank, setBank] = useState({ ...EMPTY_BANK });
   const [bankLoaded, setBankLoaded] = useState(false);
+  const [bankLoadError, setBankLoadError] = useState<string | null>(null);
+  const [bankReloadToken, setBankReloadToken] = useState(0);
   const [bankSaving, setBankSaving] = useState(false);
   // Locked = read-only "Saved" state, distinct from booking.Status ===
   // "Approved" (which is a permanent, backend-enforced lock). This one is
@@ -508,8 +520,13 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     if (tab !== "Bank Details" || !booking?.ApplicationId) return;
     let cancelled = false;
     setBankLoaded(false);
+    setBankLoadError(null);
     fetchWithAuth(`${BANK_DETAIL_API}/application/${booking.ApplicationId}`)
-      .then((r) => (r.ok ? r.json() : null))
+      .then(async (r) => {
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data?.error || "Could not load bank and KYC details.");
+        return data;
+      })
       .then((d) => {
         if (cancelled) return;
         setBank({
@@ -522,9 +539,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
         setBankVerifiedAt(d?.BookingStageVerifiedAt || null);
         setBankVerifiedByName(d?.BookingStageVerifiedByName || null);
       })
+      .catch((e: any) => { if (!cancelled) setBankLoadError(translateError(e?.message || "Could not load bank and KYC details.")); })
       .finally(() => { if (!cancelled) setBankLoaded(true); });
     return () => { cancelled = true; };
-  }, [tab, booking?.ApplicationId]);
+  }, [tab, booking?.ApplicationId, bankReloadToken]);
 
   const handleSaveBank = async () => {
     if (!booking?.ApplicationId) return;
@@ -1017,7 +1035,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       const resData = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(resData.error || "Submission failed");
       toast.success(`Money Receipt ${resData.ReceiptNo || ""} created.`);
-      setPayForm({ Amount: "", PaymentMode: "Cash", ReceivedDate: "", TransactionRef: "", ChequeDate: "", DepositBankId: "" });
+      setPayForm({ Amount: "", PaymentMode: "Cash", ReceivedDate: "", TransactionRef: "", ChequeDate: "" });
       qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
       qc.invalidateQueries({ queryKey: ["crm-booking-money-receipts", bookingId] });
     } catch (e: any) {
@@ -1219,7 +1237,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   return (<>
     {unitChangeOpen && booking && <ChangeUnitDialog booking={booking} onClose={() => setUnitChangeOpen(false)} />}
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-6xl max-h-[92vh] overflow-y-auto thin-scroll rounded-xl p-5 gap-4">
+      <DialogContent ref={detailScrollRef} className="max-w-6xl max-h-[92vh] overflow-y-auto thin-scroll rounded-xl p-5 gap-4">
         {/* The band below carries the visible title; the dialog keeps one for screen readers. */}
         <DialogHeader className="sr-only">
           <DialogTitle>{booking ? `Booking ${booking.BookingNo}` : "Booking"}</DialogTitle>
@@ -1227,6 +1245,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
         {isLoading ? (
           <div className="py-16 text-center text-muted-foreground text-sm">Loading…</div>
+        ) : isError ? (
+          <div role="alert" className="py-16 text-center text-sm text-destructive">
+            <p>{translateError((error as Error)?.message || "Could not load this booking.")}</p>
+            <button type="button" onClick={() => refetch()} className="mt-2 underline underline-offset-2">Try again</button>
+          </div>
         ) : !booking ? (
           // fetchDetail returns null for a missing / deleted booking or one outside the user's projects.
           <div className="py-16 text-center text-sm text-muted-foreground">This booking could not be found — it may have been deleted, or it belongs to a project you can't open.</div>
@@ -1238,6 +1261,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               const approvedOnAcc = Number(onAccountData?.availableBalance || 0);
               const pendingReceipts = Math.max(0, mrReceived - totalCleared - approvedOnAcc);
               const { onAccount, outstanding, clearedPct, onAccPct } = financialFigures({ grandTotal, cleared: totalCleared, pendingReceipts, approvedOnAccount: approvedOnAcc });
+              const paymentTotalsLoading = onAccountLoading || moneyReceiptsLoading;
+              const paymentTotalsError = onAccountError || moneyReceiptsError;
+              const paymentTotalsState = paymentTotalsError ? "Unavailable" : paymentTotalsLoading ? "Checking…" : null;
               const overdueCount = closed ? 0 : milestoneList.filter((m: any) => m.Status === CrmStatus.PENDING && m.DueDate && new Date(m.DueDate) < new Date()).length;
               const canCancel = !isBookingClosed(booking.Status) && booking.DeedStatus !== 'Registered' && (canDoAction("crm-cancellations", "create") || canEdit);
               return (
@@ -1273,21 +1299,23 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     )}
                   </>}
                   lead={fmtRupees(grandTotal)} leadNote="Grand total"
-                  bar={
+                  bar={paymentTotalsState ? (
+                    <span role="status" className="block h-2.5 text-[0.6875rem] leading-3 text-slate-300">Payment totals {paymentTotalsState.toLowerCase()}</span>
+                  ) : (
                     <span className="flex h-2.5 w-full overflow-hidden rounded-full bg-white/15" role="img"
                       aria-label={`${fmtRupees(totalCleared)} cleared, ${fmtRupees(onAccount)} on account, ${fmtRupees(outstanding)} still due`}>
                       <span className={cn("h-full", BAND_DOT.collected)} style={{ width: `${clearedPct}%` }} title={`${fmtRupees(totalCleared)} cleared`} />
                       <span className={cn("h-full", BAND_DOT.finance)} style={{ width: `${onAccPct}%` }} title={`${fmtRupees(onAccount)} on account`} />
                     </span>
-                  }
+                  )}
                   figures={[
                     { label: "Cleared", dot: BAND_DOT.collected, value: fmtShort(totalCleared), exact: fmtRupees(totalCleared), note: "Applied to milestones" },
-                    { label: "On account", dot: BAND_DOT.finance, value: onAccount > 0 ? fmtShort(onAccount) : "—", exact: fmtRupees(onAccount),
-                      note: onAccount > 0
+                    { label: "On account", dot: BAND_DOT.finance, value: paymentTotalsState || (onAccount > 0 ? fmtShort(onAccount) : "—"), exact: paymentTotalsState || fmtRupees(onAccount),
+                      note: paymentTotalsState || (onAccount > 0
                         ? [pendingReceipts > 0 ? `${fmtRupees(pendingReceipts)} received, not yet settled` : null, approvedOnAcc > 0 ? `${fmtRupees(approvedOnAcc)} deposit, unapplied` : null].filter(Boolean).join(" · ")
-                        : "Nothing held" },
-                    { label: "Outstanding", dot: BAND_DOT.notDue, value: outstanding > 0 ? fmtShort(outstanding) : "Fully collected", exact: fmtRupees(outstanding),
-                      note: outstanding > 0 ? "Not yet received" : "Nothing due", alert: overdueCount > 0 },
+                        : "Nothing held") },
+                    { label: "Outstanding", dot: BAND_DOT.notDue, value: paymentTotalsState || (outstanding > 0 ? fmtShort(outstanding) : "Fully collected"), exact: paymentTotalsState || fmtRupees(outstanding),
+                      note: paymentTotalsState || (outstanding > 0 ? "Not yet received" : "Nothing due"), alert: overdueCount > 0 },
                   ]}
                   footer={overdueCount > 0
                     ? <span className="flex items-center gap-1.5 text-rose-300 font-medium"><AlertTriangle size={13} /> {overdueCount} milestone{overdueCount > 1 ? "s" : ""} overdue</span>
@@ -1369,8 +1397,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 "where is the payment record" directly from the summary. */}
             {booking.Status !== CrmStatus.APPROVED && !closed && (() => {
               const latestReceipt = (moneyReceipts as any[])[0];
-              const mrStatus: string = latestReceipt?.Status
-                || (currentStage !== "Review" ? "Not created yet" : "Available once submitted for approval");
+              const mrStatus: string = moneyReceiptsError
+                ? "Could not verify"
+                : latestReceipt?.Status || (currentStage !== "Review" ? "Not created yet" : "Available once submitted for approval");
               const mrChipClass = latestReceipt?.Status === CrmStatus.APPROVED
                 ? "text-foreground bg-card"
                 : latestReceipt?.Status === "Bounced"
@@ -1389,6 +1418,13 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 </div>
               );
             })()}
+
+            {currentStage === "Review" && checklistError && (
+              <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-xs text-destructive">
+                <span>{translateError((checklistLoadError as Error)?.message || "Could not load the booking review checklist.")}</span>
+                <button type="button" onClick={() => refetchChecklist()} className="ml-2 font-semibold underline underline-offset-2">Try again</button>
+              </div>
+            )}
 
             {/* Overall Data Review progress — a small at-a-glance readout;
                 each item's actual tick/flag/remarks controls now live in
@@ -1417,7 +1453,20 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 always room to wrap inside the dialog's max width. */}
             <div className="flex flex-wrap items-end gap-x-1 border-b border-border" role="tablist" aria-label="Booking sections">
               {TABS.map((t) => (
-                <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)}
+                <button key={t} id={`crm-booking-tab-${TABS.indexOf(t)}`} type="button" role="tab" aria-selected={tab === t}
+                  aria-controls="crm-booking-tabpanel" tabIndex={tab === t ? 0 : -1} onClick={() => setTab(t)}
+                  onKeyDown={(e) => {
+                    const current = TABS.indexOf(t);
+                    const next = e.key === "ArrowRight" ? (current + 1) % TABS.length
+                      : e.key === "ArrowLeft" ? (current - 1 + TABS.length) % TABS.length
+                      : e.key === "Home" ? 0
+                      : e.key === "End" ? TABS.length - 1
+                      : -1;
+                    if (next < 0) return;
+                    e.preventDefault();
+                    setTab(TABS[next]);
+                    requestAnimationFrame(() => document.getElementById(`crm-booking-tab-${next}`)?.focus());
+                  }}
                   className={cn("h-10 px-3 -mb-px border-b-2 text-[0.8125rem] whitespace-nowrap transition-colors",
                     tab === t ? "border-primary text-foreground font-semibold" : "border-transparent text-muted-foreground hover:text-foreground hover:border-border")}>
                   <span className="flex items-center gap-1.5">
@@ -1425,15 +1474,16 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     {currentStage === "Review" && !closed && (() => {
                       const c = tabChecks(t);
                       if (!c.total) return null;
-                      if (c.flagged) return <span title={`${c.flagged} flagged`} className="px-1.5 min-w-[1.25rem] text-center rounded-full text-[0.6875rem] font-semibold bg-destructive/15 text-destructive">!</span>;
-                      if (c.checked === c.total) return <span title="All verified" className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-600"><Check size={10} /></span>;
-                      return <span title={`${c.total - c.checked} to verify`} className={cn("px-1.5 min-w-[1.25rem] text-center rounded-full text-[0.6875rem] tabular-nums", tab === t ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>{c.total - c.checked}</span>;
+                      if (c.flagged) return <span role="img" aria-label={`${c.flagged} flagged`} title={`${c.flagged} flagged`} className="px-1.5 min-w-[1.25rem] text-center rounded-full text-[0.6875rem] font-semibold bg-destructive/15 text-destructive">!</span>;
+                      if (c.checked === c.total) return <span role="img" aria-label="All verified" title="All verified" className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-600"><Check size={10} aria-hidden="true" /></span>;
+                      return <span role="img" aria-label={`${c.total - c.checked} to verify`} title={`${c.total - c.checked} to verify`} className={cn("px-1.5 min-w-[1.25rem] text-center rounded-full text-[0.6875rem] tabular-nums", tab === t ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>{c.total - c.checked}</span>;
                     })()}
                   </span>
                 </button>
               ))}
             </div>
 
+            <div id="crm-booking-tabpanel" role="tabpanel" aria-labelledby={`crm-booking-tab-${TABS.indexOf(tab)}`} tabIndex={0}>
             {tab === "Booking" && (
               <div className="space-y-4 pt-2">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1657,6 +1707,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     for why there's no longer a separate Confirm button
                     here. */}
                 {renderTabChecklist("Booking")}
+                {unitChangeError && <p role="alert" className="text-xs text-destructive">{translateError((unitChangeLoadError as Error)?.message || "Could not load the unit change.")} <button type="button" onClick={() => refetchUnitChange()} className="font-semibold underline underline-offset-2">Try again</button></p>}
                 {unitChange && <section className="border border-border p-4 space-y-2 rounded-lg">
                   <div className="flex items-center justify-between gap-2">
                     <h3 className="text-sm font-semibold text-foreground">Unit change {unitChange.RequestNo}</h3>
@@ -1676,6 +1727,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     {unitChange.Status === "Draft" && unitChange.TargetApplicationId && <Link to={`/crm/applications?edit=${unitChange.TargetApplicationId}&step=1`} className="inline-flex text-xs underline underline-offset-2">Continue in application</Link>}
                   </div>
                 </section>}
+                {unitChangeLogError && <p role="alert" className="text-xs text-destructive">{translateError((unitChangeLogLoadError as Error)?.message || "Could not load unit change history.")} <button type="button" onClick={() => refetchUnitChangeLog()} className="font-semibold underline underline-offset-2">Try again</button></p>}
                 {unitChangeLog.length > 0 && <section className="border border-border p-4 space-y-3 rounded-lg">
                   <div className="flex items-center justify-between gap-2">
                     <h3 className="text-sm font-semibold text-foreground">Unit change history</h3>
@@ -1709,6 +1761,12 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
             {tab === "Payment Plan" && (
               <div className="space-y-4 pt-2">
+                {invoicesError && (
+                  <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-xs text-destructive">
+                    <span>{translateError((invoicesLoadError as Error)?.message || "Could not load booking invoices.")}</span>
+                    <button type="button" onClick={() => refetchInvoices()} className="ml-2 font-semibold underline underline-offset-2">Try again</button>
+                  </div>
+                )}
                 <div className="border border-border p-4 space-y-2 rounded-lg">
                   <div className="flex items-center justify-between gap-2">
                     <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5"><ClipboardCheck size={15} className="text-foreground" /> {isPlotSale ? "Payment Schedule" : "Payment Plan"}</h3>
@@ -1721,19 +1779,20 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   </div>
                   {planEditOpen ? (
                     <div className="space-y-2">
-                      <select value={planEditValue} onChange={(e) => setPlanEditValue(e.target.value)}
+                      <select value={planEditValue} onChange={(e) => setPlanEditValue(e.target.value)} disabled={scopedPlansLoading || scopedPlansError}
                         className="w-full text-sm border border-border px-2.5 py-2 bg-background rounded-md">
-                        <option value="">— Use default milestone schedule —</option>
+                        <option value="">{scopedPlansLoading ? "Loading payment plans…" : "— Use default milestone schedule —"}</option>
                         {(scopedPlans as any[]).filter((p: any) => p.IsActive).map((p: any) => (
                           <option key={p.Id} value={String(p.Id)}>{p.PlanName}</option>
                         ))}
                       </select>
+                      {scopedPlansError && <p role="alert" className="text-[0.6875rem] text-destructive">{translateError((scopedPlansLoadError as Error)?.message || "Could not load payment plans for this booking.")} <button type="button" onClick={() => refetchScopedPlans()} className="font-semibold underline underline-offset-2">Try again</button></p>}
                       <div className="flex justify-end gap-2">
                         <button onClick={() => setPlanEditOpen(false)}
                           className="px-2.5 py-1 text-xs border border-border text-muted-foreground hover:bg-muted rounded-md">
                           Cancel
                         </button>
-                        <button onClick={handleSavePaymentPlan} disabled={planSaving}
+                        <button onClick={handleSavePaymentPlan} disabled={planSaving || scopedPlansLoading || scopedPlansError}
                           className={`${KEY_INK} h-8 px-3`}>
                           {planSaving ? "Saving…" : "Save"}
                         </button>
@@ -1895,7 +1954,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                     {m.DemandNo}
                                   </span>
                                 )}
-                                {!(invoices as any[]).some((inv: any) => inv.MilestoneId === m.Id && inv.Status !== "Void") && (
+                                {!invoicesError && !(invoices as any[]).some((inv: any) => inv.MilestoneId === m.Id && inv.Status !== "Void") && (
                                   <span className="ml-1 text-[0.625rem] px-1.5 py-0.5 border font-medium text-foreground bg-card border-foreground/30 rounded-full">
                                     Invoice Pending
                                   </span>
@@ -1962,6 +2021,18 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
             {tab === "Payment & Invoice" && (
               <div className="space-y-3 pt-2">
+                {invoicesError && (
+                  <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-xs text-destructive">
+                    <span>{translateError((invoicesLoadError as Error)?.message || "Could not load booking invoices.")}</span>
+                    <button type="button" onClick={() => refetchInvoices()} className="ml-2 font-semibold underline underline-offset-2">Try again</button>
+                  </div>
+                )}
+                {moneyReceiptsError && (
+                  <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-xs text-destructive">
+                    <span>{translateError((moneyReceiptsLoadError as Error)?.message || "Could not load money receipts.")}</span>
+                    <button type="button" onClick={() => refetchMoneyReceipts()} className="ml-2 font-semibold underline underline-offset-2">Try again</button>
+                  </div>
+                )}
                 {/* Read-only: refreshed whenever a payment, receipt or on-account change lands. */}
                 <BookingStatement bookingId={booking.Id}
                   refreshKey={`${milestoneList.map((m: any) => m.AmountPaid).join(",")}|${(moneyReceipts as any[]).map((r: any) => r.Status).join(",")}|${bookingOnAccountBalance}`} />
@@ -2059,7 +2130,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     }
 
                     // State A — no receipt yet (booking still at Review / before submission)
-                    if (!receipt) {
+                    if (!receipt && !moneyReceiptsError) {
                       return (
                         <div className="flex items-start gap-2.5 border border-border bg-card px-3 py-2.5 text-xs mt-1 rounded-md">
                           <Clock size={13} className="shrink-0 mt-0.5 text-foreground" />
@@ -2101,7 +2172,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     <p className="text-[0.6875rem] text-muted-foreground">Checking the current on-account balance…</p>
                   )}
                   {onAccountError && (
-                    <p role="alert" className="text-[0.6875rem] text-destructive">Could not check the on-account balance. Refresh this booking before submitting another Booking Amount payment.</p>
+                    <p role="alert" className="text-[0.6875rem] text-destructive">
+                      {translateError((onAccountLoadError as Error)?.message || "Could not check the on-account balance.")} Refresh the balance before submitting another Booking Amount payment.
+                      <button type="button" onClick={() => refetchOnAccount()} className="ml-1 font-semibold underline underline-offset-2">Try again</button>
+                    </p>
                   )}
                 </div>
 
@@ -2149,6 +2223,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                   <Download size={12} /> Download
                                 </button>
                               </div>
+                            ) : invoicesError ? (
+                              <span role="status" className="text-[0.6875rem] text-muted-foreground">Invoice status unavailable</span>
                             ) : p.Status === "Applied" || p.Status === "PartiallyApplied" ? (
                               <div className="flex items-center gap-2 shrink-0">
                                 <span className="text-[0.6875rem] text-muted-foreground italic">
@@ -2191,7 +2267,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 {canEdit && !!firstMilestone && booking.Status !== CrmStatus.APPROVED && !onAccountLoading && !onAccountError
                   && !bookingAmountCoveredInFull && bookingAmountDue > 0
                   && !(Number(firstMilestone?.PendingVerificationAmount) > 0)
-                  && currentStage !== "Review" && moneyReceipts.length === 0 && (
+                  && currentStage !== "Review" && !moneyReceiptsError && moneyReceipts.length === 0 && (
                   <div className="border border-border p-4 space-y-2 rounded-lg">
                     <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5"><IndianRupee size={15} className="text-foreground" /> Submit Payment for Approval</h3>
                     <p className="text-[0.6875rem] text-muted-foreground">Creates the Money Receipt for this booking — it goes Pending until Finance/Account's Head approves it.</p>
@@ -2231,7 +2307,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
             {tab === "Parking & Extra Charges" && (
               <div className="space-y-4 pt-2">
+                {parkingChecklistError && <p role="alert" className="text-xs text-destructive">{translateError((parkingChecklistLoadError as Error)?.message || "Could not load the verification checklist.")} <button type="button" onClick={() => refetchParkingChecklist()} className="font-semibold underline underline-offset-2">Try again</button></p>}
                 {/* Pending amendments banner */}
+                {pendingAmendmentsError && <p role="alert" className="text-xs text-destructive">{translateError((pendingAmendmentsLoadError as Error)?.message || "Could not load pending amendments.")} <button type="button" onClick={() => refetchPendingAmendments()} className="font-semibold underline underline-offset-2">Try again</button></p>}
                 {(pendingAmendments as any[]).length > 0 && (
                   <div className="border border-border bg-card p-3 space-y-2 rounded-lg">
                     <div className="flex items-center justify-between">
@@ -2300,7 +2378,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                       </span>
                     )}
                   </div>
-                  {canEdit && booking.Status !== CrmStatus.APPROVED && !addingParking && (
+                  {parkingError && <p role="alert" className="text-xs text-destructive">{translateError((parkingLoadError as Error)?.message || "Could not load parking allotments.")} <button type="button" onClick={() => refetchParking()} className="font-semibold underline underline-offset-2">Try again</button></p>}
+                  {canEdit && booking.Status !== CrmStatus.APPROVED && !parkingLoading && !parkingError && !addingParking && (
                     <button onClick={() => setAddingParking(true)}
                       className="text-xs px-2 py-1 border border-border text-muted-foreground hover:bg-muted rounded-md">
                       + Add Parking
@@ -2309,7 +2388,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   {addingParking && (
                     <div className="border border-border p-3 space-y-2 bg-muted/20 rounded-lg">
                       <div className="text-xs font-medium text-foreground mb-1">Add Parking Allotment</div>
-                      {(availableParking.rates as any[])?.length === 0 ? (
+                      {availableParkingError ? (
+                        <p role="alert" className="text-xs text-destructive">{translateError((availableParkingLoadError as Error)?.message || "Could not load available parking.")} <button type="button" onClick={() => refetchAvailableParking()} className="font-semibold underline underline-offset-2">Try again</button></p>
+                      ) : availableParkingLoading ? (
+                        <p className="text-xs text-muted-foreground">Loading available parking…</p>
+                      ) : (availableParking.rates as any[])?.length === 0 ? (
                         <p className="text-xs text-muted-foreground mb-3">No parking configured for this project.</p>
                       ) : (
                         <>
@@ -2413,9 +2496,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                       </div>
                     </div>
                   )}
-                  {(parking as any[]).length === 0 ? (
+                  {parkingLoading && (parking as any[]).length === 0 ? (
+                    <p className="text-xs text-muted-foreground">Loading parking allotments…</p>
+                  ) : (parking as any[]).length === 0 && !parkingError ? (
                     <p className="text-xs text-muted-foreground">No parking allotments linked to this booking.</p>
-                  ) : (
+                  ) : (parking as any[]).length > 0 ? (
                     <div className="space-y-2">
                       {(parking as any[]).map((p: any) => (
                         <div key={p.Id} className="border border-border px-3 py-2.5 space-y-2 rounded-lg">
@@ -2533,7 +2618,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                         </div>
                       ))}
                     </div>
-                  )}
+                  ) : null}
                   {(parking as any[]).length > 0 && (
                     welcomeCallChecks && (
                       <ParkingVcSection vc={parkingChecklist} sectionKey="Parking" bookingId={bookingId} onChanged={refetchParkingChecklist} />
@@ -2545,10 +2630,13 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 {/* Extra Charges */}
                 <div className="border border-border p-4 space-y-2 rounded-lg">
                   <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5"><Wallet size={15} className="text-foreground" /> Extra Charges</h3>
+                  {extrasError && <p role="alert" className="text-xs text-destructive">{translateError((extrasLoadError as Error)?.message || "Could not load extra charges.")} <button type="button" onClick={() => refetchExtras()} className="font-semibold underline underline-offset-2">Try again</button></p>}
                   <div className="overflow-x-auto thin-scroll">
-                    {(extras as any[]).length === 0 ? (
+                    {extrasLoading && (extras as any[]).length === 0 ? (
+                      <p className="text-xs text-muted-foreground">Loading extra charges…</p>
+                    ) : (extras as any[]).length === 0 && !extrasError ? (
                       <p className="text-xs text-muted-foreground">No extra charges added yet.</p>
-                    ) : (
+                    ) : (extras as any[]).length > 0 ? (
                       <div className="min-w-[500px]">
                         {(extras as any[]).map((c: any) => (
                           <div key={c.Id} className="flex items-center justify-between gap-2 border border-border px-3 py-2 mb-1.5 rounded-md">
@@ -2594,15 +2682,18 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           </div>
                         ))}
                       </div>
-                    )}
+                    ) : null}
                   </div>
-                  {canEdit && !editingExtraId && booking.Status !== CrmStatus.APPROVED && (
+                  {canEdit && !editingExtraId && booking.Status !== CrmStatus.APPROVED && !extrasLoading && !extrasError && (
                     <>
                       {legalWorkStarted && (
                         <input placeholder="Reason for amendment (required)" value={extraReason}
                           onChange={(e) => setExtraReason(e.target.value)}
                           className="w-full text-sm border border-border px-2.5 py-2 bg-background rounded-md" />
                       )}
+                      <div className="flex items-center gap-2">
+                        {chargeTypesError && <p role="alert" className="text-[0.6875rem] text-destructive">Couldn’t load charge types. <button type="button" onClick={() => refetchChargeTypes()} className="font-semibold underline underline-offset-2">Retry</button></p>}
+                      </div>
                       <div className="flex items-center gap-2">
                         <select value={extraForm.ExtraChargeMasterId} onChange={(e) => {
                           const selected = (chargeTypes as any[]).find((ct: any) => String(ct.Id) === e.target.value);
@@ -2652,6 +2743,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               <div className="space-y-4 pt-2">
                 {!bankLoaded ? (
                   <div className="py-8 text-center text-xs text-muted-foreground">Loading bank details…</div>
+                ) : bankLoadError ? (
+                  <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-5 text-center text-xs text-destructive">
+                    <p>{bankLoadError}</p>
+                    <button type="button" onClick={() => setBankReloadToken((n) => n + 1)} className="mt-2 font-semibold underline underline-offset-2">Try again</button>
+                  </div>
                 ) : (
                   <>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -2723,6 +2819,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   <div className="flex items-center gap-2 text-sm text-muted-foreground py-8 justify-center">
                     <RefreshCw size={15} className="animate-spin" />
                     Checking portal status…
+                  </div>
+                ) : portalStatusError ? (
+                  <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-6 text-center text-xs text-destructive">
+                    <p>{translateError((portalStatusLoadError as Error)?.message || "Could not check Civilier Home access.")}</p>
+                    <button type="button" onClick={() => refetchPortal()} className="mt-2 font-semibold underline underline-offset-2">Try again</button>
                   </div>
                 ) : portalStatus?.hasPortal ? (
                   <div className="border border-border bg-card overflow-hidden rounded-md">
@@ -2886,9 +2987,12 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 {booking.Status === CrmStatus.APPROVED && (
                   <p className="text-xs text-muted-foreground">Locked — this Booking is Approved. Attachments can no longer be added or removed here.</p>
                 )}
-                {(attachments as any[]).length === 0 ? (
+                {attachmentsError && <p role="alert" className="text-xs text-destructive">{translateError((attachmentsLoadError as Error)?.message || "Could not load booking attachments.")} <button type="button" onClick={() => refetchAttachments()} className="font-semibold underline underline-offset-2">Try again</button></p>}
+                {attachmentsLoading && (attachments as any[]).length === 0 ? (
+                  <p className="text-xs text-muted-foreground py-4">Loading attachments…</p>
+                ) : (attachments as any[]).length === 0 && !attachmentsError ? (
                   <p className="text-xs text-muted-foreground py-4">No attachments yet.</p>
-                ) : (
+                ) : (attachments as any[]).length > 0 ? (
                   <div className="overflow-x-auto thin-scroll">
                     <div className="min-w-[600px]">
                       <table className="w-full text-sm">
@@ -2950,7 +3054,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                       </table>
                     </div>
                   </div>
-                )}
+                ) : null}
 
                 {renderTabChecklist("Attachments")}
               </div>
@@ -3083,6 +3187,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
               </div>
             )}
+            </div>
 
             {/* Footer navigation — Previous + one dynamic primary action on
                 the last tab only, all in a single bottom-right cluster. This

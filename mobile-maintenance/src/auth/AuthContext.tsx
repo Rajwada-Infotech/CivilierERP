@@ -1,6 +1,5 @@
-// RN port of src/contexts/AuthContext.tsx (web), trimmed to what a mobile
-// client actually needs: login, logout, currentUser, permission checks.
-// Profile-editing / avatar / admin-user-management pieces stay on web only.
+// Civilier Home is for customers only: they sign in with their registered mobile number (backend/routes/crmPortal.js
+// POST /login, its own accounts and token). Staff use the Civilier CRM app.
 import { unregisterPushAsync } from "@/notifications/pushNotifications";
 import { CUSTOMER_PUSH } from "@/api/customerPortalApi";
 import {
@@ -8,12 +7,11 @@ import {
   useCallback,
   useContext,
   useEffect,
-  useMemo,
   useState,
   type PropsWithChildren,
 } from "react";
 import { fetchWithAuth, ApiError } from "@/services/fetchWithAuth";
-import { endAppSession, startAppSession } from "@/services/appSession";
+import { endAppSession } from "@/services/appSession";
 import { queryClient } from "@/services/queryClient";
 import { onSessionExpired } from "@/services/sessionEvents";
 import {
@@ -23,27 +21,14 @@ import {
   setStoredUser,
   clearAuthStorage,
 } from "@/services/authStorage";
-import { createPermissionCheckers, getInitials } from "./permissions";
-import type { AppUser, LoginResponse, PageAction, PageKey } from "@/types/auth";
+import type { AppUser } from "@/types/auth";
 
 interface AuthContextValue {
   currentUser: AppUser | null;
   isLoading: boolean;
-  // onAuthenticated fires the instant credentials are verified — before
-  // currentUser is set — so a caller (LoginScreen) can show its own
-  // "welcome" moment while RootNavigator is still on the auth stack.
-  // login() itself doesn't resolve (and RootNavigator doesn't swap to
-  // MainStack) until navHoldMs later, matching the web app's own
-  // setTimeout(..., 1800) between a successful SupplierLogin and its
-  // navigate() call — here the "navigate" is just React state.
-  login: (
-    email: string,
-    password: string,
-    onAuthenticated?: (user: AppUser) => void,
-    navHoldMs?: number,
-  ) => Promise<void>;
-  // A customer signs in to the Customer Portal (its own accounts and token, /api/crm-portal) — same
-  // onAuthenticated / navHoldMs contract as the staff login above.
+  // onAuthenticated fires the instant the credentials are verified — before currentUser is set — so LoginScreen can
+  // show its own "welcome" moment while RootNavigator is still on the sign-in screen; the sign-in itself completes
+  // navHoldMs later.
   loginCustomer: (
     mobile: string,
     password: string,
@@ -52,76 +37,33 @@ interface AuthContextValue {
   ) => Promise<void>;
   /** After a customer sets their own password: the server ended every session, so they sign in again. */
   passwordChanged: () => Promise<void>;
-  isCustomer: boolean;
   logout: () => Promise<void>;
-  canAccessPage: (page: PageKey) => boolean;
-  canDoAction: (page: PageKey, action: PageAction) => boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+
+/** Up to two initials from a name ("Rahul Adhikari" → "RA"). */
+export function getInitials(name: string): string {
+  return name.split(" ").filter(Boolean).map((n) => n[0]).join("").toUpperCase().slice(0, 2);
+}
 
 export function AuthProvider({ children }: PropsWithChildren) {
   const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Restore session on cold start.
+  // Restore the session on a cold start. A session that isn't a customer's (a staff sign-in from before Civilier
+  // Home became customer-only) is cleared, so the app opens on the customer sign-in instead of a stranded session.
   useEffect(() => {
     (async () => {
       const [token, user] = await Promise.all([getToken(), getStoredUser<AppUser>()]);
-      if (token && user) setCurrentUser(user);
+      if (token && user?.kind === "customer") setCurrentUser(user);
+      else if (token || user) await clearAuthStorage();
       setIsLoading(false);
     })();
   }, []);
 
-  // fetchWithAuth emits this on any 401 — log the local session out so the
-  // navigator falls back to the auth stack (see RootNavigator.tsx).
+  // fetchWithAuth emits this on any 401 — log the local session out so the navigator falls back to the sign-in.
   useEffect(() => onSessionExpired(() => setCurrentUser(null)), []);
-
-  const login = useCallback(
-    async (
-      email: string,
-      password: string,
-      onAuthenticated?: (user: AppUser) => void,
-      navHoldMs = 0,
-    ) => {
-      const res = await fetchWithAuth("/api/users/login", {
-        method: "POST",
-        body: JSON.stringify({ email, password }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || body.message || "Login failed. Please check your credentials.");
-      }
-      const data: LoginResponse = await res.json();
-
-      queryClient.clear();
-
-      const user: AppUser = {
-        kind: "staff",
-        id: String(data.user.id),
-        name: data.user.name,
-        email: data.user.email,
-        role: data.user.role,
-        initials: getInitials(data.user.name),
-        can_accept_tickets: !!data.user.can_accept_tickets,
-        pagePermissions: data.user.pagePermissions ?? [],
-        isActive: true,
-      };
-
-      await Promise.all([persistToken(data.token), setStoredUser(user)]);
-    // A new session, and its sign-in on the Activity Browser — the web app logs the same from its login.
-    const sessionId = startAppSession();
-    void fetchWithAuth("/api/user-activity", {
-      method: "POST",
-      body: JSON.stringify({ event: "login", sessionId, userId: user.id, userName: user.name, userEmail: user.email, userRole: user.role }),
-      skipActivityLog: true,
-    }).catch(() => {});
-      onAuthenticated?.(user);
-      if (navHoldMs > 0) await new Promise((r) => setTimeout(r, navHoldMs));
-      setCurrentUser(user);
-    },
-    [],
-  );
 
   // Customers sign in with their registered mobile number (crmPortal.js POST /login).
   const loginCustomer = useCallback(
@@ -140,21 +82,18 @@ export function AuthProvider({ children }: PropsWithChildren) {
       queryClient.clear();
       await persistToken(body.token);
       // The customer's name and number come from their own record. Setting their own password is their choice
-      // (Customer 360 → Change password), never asked for here.
+      // (Settings → Change password), never asked for here.
       let me: { Id?: number; Name?: string; Email?: string } = {};
       try {
         const meRes = await fetchWithAuth("/api/crm-portal/me");
         if (meRes.ok) me = await meRes.json();
-      } catch { /* the name is shown from the email until the next sign-in */ }
+      } catch { /* the name is shown from the mobile number until the next sign-in */ }
       const user: AppUser = {
         kind: "customer",
         id: String(me.Id ?? ""),
         name: me.Name || mobile,
         email: me.Email || "",
-        role: "customer",
         initials: getInitials(me.Name || mobile),
-        pagePermissions: [],
-        isActive: true,
       };
       await setStoredUser(user);
       onAuthenticated?.(user);
@@ -171,37 +110,17 @@ export function AuthProvider({ children }: PropsWithChildren) {
   }, []);
 
   const logout = useCallback(async () => {
-    if (currentUser?.kind === "customer") {
-      // This phone stops getting their notifications, then the token ends on the server too (while it still works);
-      // signing out on the phone always succeeds.
-      await unregisterPushAsync(CUSTOMER_PUSH);
-      await fetchWithAuth("/api/crm-portal/logout", { method: "POST" }).catch(() => {});
-    } else {
-      await unregisterPushAsync(); // while the session token still exists
-    }
+    // This phone stops getting their notifications, then the token ends on the server too (while it still works);
+    // signing out on the phone always succeeds.
+    await unregisterPushAsync(CUSTOMER_PUSH);
+    await fetchWithAuth("/api/crm-portal/logout", { method: "POST" }).catch(() => {});
     await clearAuthStorage();
     endAppSession();
     queryClient.clear();
     setCurrentUser(null);
-  }, [currentUser?.kind]);
+  }, []);
 
-  const { canAccessPage: rawAccess, canDoAction: rawAction } = useMemo(
-    () => createPermissionCheckers(currentUser),
-    [currentUser],
-  );
-
-  const value: AuthContextValue = {
-    currentUser,
-    isLoading,
-    login,
-    loginCustomer,
-    passwordChanged,
-    isCustomer: currentUser?.kind === "customer",
-    logout,
-    canAccessPage: rawAccess,
-    canDoAction: rawAction,
-  };
-
+  const value: AuthContextValue = { currentUser, isLoading, loginCustomer, passwordChanged, logout };
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
