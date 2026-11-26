@@ -11,7 +11,7 @@ import { BodyPortal } from "@/components/ui/body-portal";
  * same change. The activity list, durations, dependencies, reminder days and the report list are read live from
  * Setup / the server, so they never go out of date.
  */
-const GUIDE_UPDATED = "26 Nov 2026 · Legal V2.1 (Assign tab, My tasks covers all Legal work)";
+const GUIDE_UPDATED = "26 Nov 2026 · Legal V2.1 (Assign tab, My tasks covers all Legal work, due-date colours)";
 
 type Step = { title: string; where?: string; points: string[] };
 const STEPS: Step[] = [
@@ -69,6 +69,7 @@ const STEPS: Step[] = [
     "My tasks: your verification activities by due date, work returned to you, work waiting for your verification, and your other Legal work — deed drafting, post-registration tasks, mutation and conversion.",
     "Reminders tab and notifications (assignment, due / overdue, report received, submitted, returned, final review and land approval pending). Overdue work escalates to the lead and Legal Admins.",
     "Dashboard counts and workload; Verification reports with dropdown filters and PDF / Excel export; Land Flowchart for each land's journey.",
+    "Dates: every due, target, expiry and next-hearing date across the module is coloured — red overdue, amber due today, blue within 7 days (LA / ULC certificates warn 30 days before expiry); finished work shows plain.",
     "Rules everywhere: you see only your projects; the maker is never the checker; a second save over someone's change is refused; history is never deleted; registered records are locked.",
   ] },
 ];

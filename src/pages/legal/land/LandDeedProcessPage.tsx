@@ -1,4 +1,5 @@
 import { usePaged } from "@/components/legal/usePaged";
+import { DueBadge, dueRow, dueLevel, DUE_BG } from "@/components/legal/DueBadge";
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -15,7 +16,6 @@ import { ExternalLink, Upload } from "lucide-react";
 
 const fmt = (d: string | null) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—");
 const today = new Date().toISOString().slice(0, 10);
-const daysLeft = (d: string) => Math.round((new Date(d).getTime() - new Date(today).getTime()) / 86_400_000);
 
 /** The deed department's list: verified lands with the timeline the verifier set. */
 export default function LandDeedProcessPage() {
@@ -98,10 +98,9 @@ export default function LandDeedProcessPage() {
               <tbody>
                 {lands.map((l) => {
                   const done = l.WorkflowStatus === "Deed Completed";
-                  const left = l.DeedTargetDate ? daysLeft(l.DeedTargetDate) : null;
                   return (
                     <tr key={l.LandId} title="Open all details" onClick={(e) => { if (!(e.target as HTMLElement).closest("button, input, select, textarea, label, a, [role=dialog]")) navigate(`/legal/land/deed-process/${l.LandId}`); }}
-                      className={`cursor-pointer border-t border-border align-top hover:bg-muted/40 ${!done && left != null && left < 0 ? "bg-destructive/10" : ""}`}>
+                      className={`cursor-pointer border-t border-border align-top hover:bg-muted/40 ${dueRow(l.DeedTargetDate, done)}`}>
                       <td className="px-3 py-2 font-mono font-semibold">{l.LandCode}</td>
                       <td className="px-3 py-2">{l.LandName}</td>
                       <td className="px-3 py-2 text-xs text-muted-foreground">{[l.MouzaName, l.DistrictName].filter(Boolean).join(" · ") || "—"}</td>
@@ -115,8 +114,7 @@ export default function LandDeedProcessPage() {
                           </span>
                         ) : (
                           <>
-                            {fmt(l.DeedTargetDate)}
-                            {!done && left != null && <span className={`block ${left < 0 ? "text-destructive" : "text-muted-foreground"}`}>{left < 0 ? `${-left} days overdue` : left === 0 ? "due today" : `${left} days left`}</span>}
+                            <DueBadge date={l.DeedTargetDate} done={done} />
                             {!done && data?.canEditTimeline && <button className="mt-1 block text-xs underline" onClick={() => setEditing({ id: l.LandId, date: l.DeedTargetDate ?? "" })}>Change</button>}
                           </>
                         )}

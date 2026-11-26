@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { DueBadge, dueRow, dueLevel, DUE_BG } from "@/components/legal/DueBadge";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { getLegalLookup } from "@/api/legalMastersApi";
@@ -67,7 +68,7 @@ export function VerificationAssignPanel({ w, canEdit, onSaved }: { w: Workspace;
                   <td className="px-2 py-1">{a.Status} · {a.VerifyStatus}</td>
                   <td className="px-2 py-1"><select disabled={locked} className={sel} value={r.emp} onChange={(e) => set(a.ActivityId, "emp", e.target.value)}><option value="">Not assigned</option>{opts}</select></td>
                   <td className="px-2 py-1"><select disabled={locked} className={`${sel} ${r.emp && r.emp === r.ver ? "border-destructive" : ""}`} value={r.ver} onChange={(e) => set(a.ActivityId, "ver", e.target.value)}><option value="">Any verifier</option>{opts}</select></td>
-                  <td className="px-2 py-1"><input disabled={locked} type="date" className={sel} value={r.due} onChange={(e) => set(a.ActivityId, "due", e.target.value)} /></td>
+                  <td className="px-2 py-1"><input disabled={locked} type="date" className={`${sel} ${locked ? "" : DUE_BG[dueLevel(r.due)]}`} value={r.due} onChange={(e) => set(a.ActivityId, "due", e.target.value)} /></td>
                 </tr>
               );
             })}

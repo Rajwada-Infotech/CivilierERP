@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { DueBadge, dueRow, dueLevel, DUE_BG } from "@/components/legal/DueBadge";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pager } from "@/components/legal/usePaged";
 import { useNavigate } from "react-router-dom";
@@ -335,7 +336,7 @@ function OfficePanel({ o, years, opts, enquiry, canEdit, onChanged }: {
       <div className="legal-g2">
         <div className={`border p-3 ${done ? "border-emerald-600/40 bg-emerald-600/5" : o.DaysOver > 0 ? "border-destructive bg-destructive/10" : "border-amber-500/50 bg-amber-500/5"}`}>
           <p className="text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground">Timeline</p>
-          <p className="mt-1 flex flex-wrap items-center gap-2 text-sm"><b>Due {o.DueDate}</b><Counter due={o.DueDate} done={done} /></p>
+          <p className="mt-1 flex flex-wrap items-center gap-2 text-sm"><b>Due</b> <DueBadge date={o.DueDate} done={done} compact /><Counter due={o.DueDate} done={done} /></p>
           <p className="text-xs text-muted-foreground">{o.SlaDays}-day limit from the enquiry date · years {first}–{thisYear}</p>
           {done && <p className="mt-1 text-xs">Completed{o.CompletedByName ? ` by ${o.CompletedByName}` : ""}{o.CompletedAt ? ` · ${o.CompletedAt.slice(0, 10)}` : ""}{o.Remarks ? ` — ${o.Remarks}` : ""}</p>}
         </div>

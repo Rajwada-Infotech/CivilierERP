@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { DueBadge, dueRow, dueLevel, DUE_BG } from "@/components/legal/DueBadge";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ClipboardTick } from "iconsax-react";
@@ -216,7 +217,8 @@ function ActivityEditor({ a, w, canEdit, onSaved }: { a: Activity; w: Workspace;
             <label><span className={lbl}>Priority</span>
               <select disabled={!workEditable} className={input} value={f.priority} onChange={(e) => set("priority", e.target.value)}>{(meta.data?.priorities ?? [f.priority]).map((s) => <option key={s}>{s}</option>)}</select></label>
             <label><span className={lbl}>Actual start</span><input disabled={!workEditable} type="date" className={input} value={f.startDate} onChange={(e) => set("startDate", e.target.value)} /></label>
-            <label><span className={lbl}>Internal target date{a.ExpectedDays != null ? ` (estimate ${a.ExpectedDays} d)` : ""}</span><input disabled={!workEditable} type="date" className={input} value={f.dueDate} onChange={(e) => set("dueDate", e.target.value)} /></label>
+            <label><span className={lbl}>Internal target date{a.ExpectedDays != null ? ` (estimate ${a.ExpectedDays} d)` : ""}</span><input disabled={!workEditable} type="date" className={`${input} ${workEditable ? DUE_BG[dueLevel(f.dueDate)] : ""}`} value={f.dueDate} onChange={(e) => set("dueDate", e.target.value)} />
+              {f.dueDate && workEditable && <span className="mt-0.5 block text-[0.6875rem]"><DueBadge date={f.dueDate} compact /></span>}</label>
             <div className="text-xs"><span className={lbl}>Actual completion</span>{a.CompletedDate ? fmt(a.CompletedDate) : "—"}</div>
             {GOV.map(([c, l]) => <label key={c}><span className={lbl}>{l} date</span><input disabled={!workEditable} type="date" className={input} value={f[govKey(c)]} onChange={(e) => set(govKey(c), e.target.value)} /></label>)}
             {f.status === "On Hold" && <>
@@ -265,7 +267,7 @@ function Header({ w, canEdit, onSaved }: { w: Workspace; canEdit: boolean; onSav
         {cell("Owner / contact", [w.ContactPerson, w.ContactNumber].filter(Boolean).join(" · ") || "—")}
         {cell("Dag / Khatian", dags.length ? dags.join(", ") : "—")}
         {cell("Started", fmt(w.StartDate))}
-        {cell("Target", fmt(w.TargetDate))}
+        {cell("Target", <DueBadge date={w.TargetDate} done={["Verified", "Closed", "Rejected"].includes(w.Status)} />)}
         {cell("Lead", w.LeadName ?? "—")}
         {cell("Not yet verified", w.Total - w.Completed - w.NotApplicable - (w.Rejected ?? 0))}
         {cell("Awaiting verification", w.AwaitingVerification ?? 0)}
@@ -337,7 +339,7 @@ export default function LegalVerificationWorkspacePage() {
                 return (
                   <div key={a.ActivityId} className="border-b border-border last:border-0">
                     <button onClick={() => setOpen(isOpen ? null : a.ActivityId)} aria-expanded={isOpen}
-                      className={`grid w-full grid-cols-[2.5rem_1fr] gap-x-2 gap-y-1 px-3 py-2 text-left hover:bg-primary/5 md:grid-cols-[2.5rem_2.2fr_1fr_1fr_1fr_1.1fr_1fr] md:items-center ${a.overdue ? "bg-destructive/5" : ""}`}>
+                      className={`grid w-full grid-cols-[2.5rem_1fr] gap-x-2 gap-y-1 px-3 py-2 text-left hover:bg-primary/5 md:grid-cols-[2.5rem_2.2fr_1fr_1fr_1fr_1.1fr_1fr] md:items-center ${dueRow(a.DueDate, a.Status === "Closed" || a.Status === "Submitted for Review")}`}>
                       <span className="font-mono text-xs text-muted-foreground">{a.ActivityRef}</span>
                       <span className="text-sm font-semibold">{a.ActivityName}{!a.IsMandatory && <span className="ml-1 text-[0.625rem] font-normal uppercase text-muted-foreground">optional</span>}
                         {a.blocked && <span className="ml-1 text-[0.625rem] font-normal uppercase text-amber-700">waiting</span>}
@@ -347,7 +349,7 @@ export default function LegalVerificationWorkspacePage() {
                       <span className={`col-start-2 text-xs font-semibold md:col-start-auto ${VERIFY_TONE[a.VerifyStatus] ?? ""}`}>{a.VerifyStatus}</span>
                       <span className={`col-start-2 text-xs md:col-start-auto ${a.Finding && BAD.includes(a.Finding) ? "font-semibold text-destructive" : ""}`}>{a.Finding ?? "—"}</span>
                       <span className="col-start-2 text-xs md:col-start-auto">{a.AssignedName ?? <span className="text-muted-foreground">Not assigned</span>}</span>
-                      <span className={`col-start-2 text-xs md:col-start-auto ${a.overdue ? "font-semibold text-destructive" : ""}`}>{a.DueDate ? fmt(a.DueDate) : "No target"}{a.overdue ? " · overdue" : ""}</span>
+                      <span className="col-start-2 text-xs md:col-start-auto"><DueBadge date={a.DueDate} done={a.Status === "Closed" || a.Status === "Submitted for Review"} empty="No target" /></span>
                     </button>
                     {isOpen && <ActivityEditor key={a.UpdatedAt ?? a.ActivityId} a={a} w={w} canEdit={(canEdit || (!!w.searchOnly && a.Department === "Search")) && !locked} onSaved={refresh} />}
                   </div>

@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Upload } from "lucide-react";
 import { LegalFileLink } from "@/components/legal/LegalDocumentPreview";
+import { DueBadge } from "@/components/legal/DueBadge";
 import { OwnershipFlowchart } from "@/components/legal/OwnershipFlowchart";
 import { askLegal } from "@/components/legal/LegalAsk";
 import { uploadLegalFile } from "@/api/legalMastersApi";
@@ -30,6 +31,12 @@ function Cell({ f, e, cfg, all }: { f: EntryField; e: ActivityEntry; cfg: EntryC
   const v = e.data[f.key];
   if (v == null || v === "") return <span className="text-muted-foreground">—</span>;
   if (f.type === "file") return <LegalFileLink id={v} name={e.files[f.key] ?? f.label} />;
+  // Deadlines inside entries (expected report / receipt, hearing) are highlighted until the entry is finished.
+  if (f.type === "date" && /expected|hearing|due/i.test(f.key)) {
+    const st = String(e.data.status ?? e.data.result ?? "");
+    const done = ["Report Received", "Verified", "Received", "Cleared", "Not Cleared", "Completed", "Approved", "Rejected"].includes(st);
+    return <DueBadge date={String(v)} done={done} kind={/hearing/i.test(f.key) ? "hearing" : "due"} compact />;
+  }
   if (f.type === "date") return <>{fmtDate(v)}</>;
   if (f.type === "entry") { const p = all.find((x) => x.EntryId === Number(v)); return <>{p ? entryName(cfg, p) : `#${v}`}</>; }
   if (f.type === "select") return <span className={BAD.includes(String(v)) ? "font-semibold text-destructive" : GOOD.includes(String(v)) ? "font-semibold text-emerald-700" : ""}>{String(v)}</span>;

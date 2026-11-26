@@ -1,4 +1,5 @@
 import { usePaged } from "@/components/legal/usePaged";
+import { DueBadge, dueRow, dueLevel, DUE_BG } from "@/components/legal/DueBadge";
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -19,7 +20,6 @@ import { InlineRecordEditor } from "@/components/legal/InlineRecordEditor";
 import type { PostRegApplication } from "@/api/legalLandApi";
 
 const fmt = (d: string | null) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—");
-const today = new Date().toISOString().slice(0, 10);
 const TONE: Record<string, string> = {
   Completed: "text-emerald-600", Rejected: "text-destructive", "Additional Documents Required": "text-amber-600",
   "Application Submitted": "text-sky-600", "Under Processing": "text-sky-600", "Not Started": "text-muted-foreground",
@@ -32,7 +32,6 @@ function TaskRow({ t, statuses, canEdit, onSaved }: { t: PostRegTask; statuses: 
   const [f, setF] = useState({ status: t.Status, refNo: t.RefNo ?? "", dueDate: t.DueDate ?? "", remarks: t.Remarks ?? "", fileId: null as number | null, fileName: "", assignedUserId: t.AssignedUserId ? String(t.AssignedUserId) : "" });
   const [busy, setBusy] = useState(false);
   const dirty = f.status !== t.Status || f.refNo !== (t.RefNo ?? "") || f.dueDate !== (t.DueDate ?? "") || f.remarks !== (t.Remarks ?? "") || !!f.fileId || f.assignedUserId !== (t.AssignedUserId ? String(t.AssignedUserId) : "");
-  const late = t.Status !== "Completed" && t.DueDate && t.DueDate < today;
   const attach = () => {
     const el = document.createElement("input");
     el.type = "file"; el.accept = "application/pdf,image/*";
@@ -48,7 +47,7 @@ function TaskRow({ t, statuses, canEdit, onSaved }: { t: PostRegTask; statuses: 
     try { toast.success((await updatePostRegTask(t.TaskId, { ...f, assignedUserId: f.assignedUserId ? Number(f.assignedUserId) : null })).message); onSaved(); } catch (e) { toast.error(e instanceof Error ? e.message : "Could not save"); } finally { setBusy(false); }
   };
   return (
-    <tr className={`border-t border-border/60 align-top ${late ? "bg-destructive/5" : ""}`}>
+    <tr className={`border-t border-border/60 align-top ${dueRow(t.DueDate, t.Status === "Completed" || t.Status === "Rejected")}`}>
       <td className="px-2 py-1.5 text-xs font-semibold">{t.TaskNo}. {t.Task}
         {canEdit ? (
           <select className={`${input} mt-1 font-normal`} value={f.assignedUserId} onChange={(e) => setF({ ...f, assignedUserId: e.target.value })} title="Assigned to">
@@ -62,8 +61,8 @@ function TaskRow({ t, statuses, canEdit, onSaved }: { t: PostRegTask; statuses: 
           : <span className={`text-xs font-semibold ${TONE[t.Status] ?? ""}`}>{t.Status}</span>}
       </td>
       <td className="px-2 py-1.5">{canEdit ? <input className={input} value={f.refNo} onChange={(e) => setF({ ...f, refNo: e.target.value })} placeholder="Application / order no." /> : <span className="text-xs">{t.RefNo ?? "—"}</span>}</td>
-      <td className="px-2 py-1.5">{canEdit ? <input type="date" className={input} value={f.dueDate} onChange={(e) => setF({ ...f, dueDate: e.target.value })} /> : <span className="text-xs">{fmt(t.DueDate)}</span>}
-        {late && <span className="block text-[0.6875rem] font-semibold text-destructive">Overdue</span>}</td>
+      <td className="px-2 py-1.5">{canEdit ? <input type="date" className={`${input} ${t.Status !== "Completed" ? DUE_BG[dueLevel(f.dueDate)] : ""}`} value={f.dueDate} onChange={(e) => setF({ ...f, dueDate: e.target.value })} /> : null}
+        <span className="mt-0.5 block text-xs"><DueBadge date={t.DueDate} done={t.Status === "Completed" || t.Status === "Rejected"} compact={canEdit} /></span></td>
       <td className="px-2 py-1.5">{canEdit ? <input className={input} value={f.remarks} onChange={(e) => setF({ ...f, remarks: e.target.value })} /> : <span className="text-xs">{t.Remarks ?? "—"}</span>}</td>
       <td className="px-2 py-1.5 text-xs">
         {f.fileId ? <LegalFileLink id={f.fileId} name={f.fileName} /> : t.FileId ? <LegalFileLink id={t.FileId} name={t.FileName ?? "Copy"} /> : null}
@@ -106,15 +105,14 @@ function ApplicationsPanel({ landId, apps, canEdit, onSaved }: { landId: number;
             </thead>
             <tbody>
               {apps.map((a) => {
-                const late = !a.CompletionDate && a.DueDate && a.DueDate < today && !["Approved", "Rejected"].includes(a.ApplicationStatus);
                 return (
-                  <tr key={a.MutationId} className={`border-t border-border/60 ${late ? "bg-destructive/5" : ""}`}>
+                  <tr key={a.MutationId} className={`border-t border-border/60 ${dueRow(a.DueDate, !!a.CompletionDate || ["Approved", "Rejected"].includes(a.ApplicationStatus))}`}>
                     <td className="px-2 py-1 font-semibold">{a.Kind}{a.RequestedClass ? <span className="block font-normal text-muted-foreground">to {a.RequestedClass}</span> : null}</td>
                     <td className="px-2 py-1">{a.ApplicationNo ?? "—"}<span className="block text-muted-foreground">{fmt(a.ApplicationDate)}</span></td>
                     <td className="px-2 py-1">{a.OfficeName ?? "—"}</td>
                     <td className="px-2 py-1">{a.AssignedName ?? "—"}</td>
-                    <td className="px-2 py-1">{fmt(a.DueDate)}{late && <span className="block font-semibold text-destructive">Overdue</span>}</td>
-                    <td className="px-2 py-1">{fmt(a.HearingDate)}</td>
+                    <td className="px-2 py-1"><DueBadge date={a.DueDate} done={!!a.CompletionDate || ["Approved", "Rejected"].includes(a.ApplicationStatus)} /></td>
+                    <td className="px-2 py-1"><DueBadge date={a.HearingDate} kind="hearing" done={!!a.CompletionDate || ["Approved", "Rejected"].includes(a.ApplicationStatus)} /></td>
                     <td className={`px-2 py-1 font-semibold ${APP_TONE[a.ApplicationStatus] ?? ""}`}>{a.ApplicationStatus}{a.CompletionDate && <span className="block font-normal text-emerald-700">Completed {fmt(a.CompletionDate)}</span>}</td>
                     <td className="px-2 py-1">{a.OpenQueries ? <span className="font-semibold text-amber-600">{a.OpenQueries} open</span> : "—"}</td>
                     <td className="px-2 py-1 text-right">{canEdit && <button className="underline" onClick={() => setEdit({ master: a.Kind === "Mutation" ? "mutation" : "conversion", id: a.MutationId })}>Edit</button>}</td>

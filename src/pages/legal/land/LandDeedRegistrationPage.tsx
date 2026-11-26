@@ -1,4 +1,5 @@
 import { usePaged } from "@/components/legal/usePaged";
+import { DueBadge, dueRow, dueLevel, DUE_BG } from "@/components/legal/DueBadge";
 import { useEffect, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
@@ -367,7 +368,7 @@ function Payments({ l, payments, schedule, editable, onSaved }: { l: DeedRegLand
         <div className={`flex flex-wrap items-center justify-between gap-3 border-l-4 px-3 py-2 ${next?.status === "Overdue" ? "border-destructive bg-destructive/10" : "border-sky-600 bg-sky-600/5"}`}>
           <div className="text-sm">
             {next ? (
-              <><b>{next.status === "Overdue" ? "Overdue" : "Next"}: {next.Label ?? next.Purpose ?? "Instalment"}</b> — {inr(next.short)} due {next.DueDate}
+              <><b>{next.status === "Overdue" ? "Overdue" : "Next"}: {next.Label ?? next.Purpose ?? "Instalment"}</b> — {inr(next.short)} <DueBadge date={next.DueDate} />
                 {overdue.length > 1 && <span className="text-destructive"> · {overdue.length} instalments overdue</span>}</>
             ) : <><b>{inr(due)} still to pay</b> — no instalment planned for it yet</>}
             <span className="block text-xs text-muted-foreground">Final Registration opens when the full consideration is paid.</span>
@@ -475,7 +476,7 @@ function Payments({ l, payments, schedule, editable, onSaved }: { l: DeedRegLand
                   <span className="w-5 shrink-0 text-xs text-muted-foreground">{k + 1}</span>
                   <span className="min-w-[10rem] flex-1">
                     <span className="block text-sm font-semibold">{r.Label ?? r.Purpose ?? "Instalment"}</span>
-                    <span className="block text-xs text-muted-foreground">Due {r.DueDate}{r.Label && r.Purpose ? ` · ${r.Purpose}` : ""}</span>
+                    <span className="block text-xs text-muted-foreground"><DueBadge date={r.DueDate} done={r.status === "Paid"} label="Due" />{r.Label && r.Purpose ? ` · ${r.Purpose}` : ""}</span>
                   </span>
                   <span className="text-right">
                     <span className="block text-sm font-bold tabular-nums">{inr(r.Amount)}</span>

@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { DueBadge, dueRow, dueLevel, DUE_BG } from "@/components/legal/DueBadge";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Upload } from "lucide-react";
@@ -84,7 +85,7 @@ function ClearanceRow({ c, landId, canEdit, mode, onSaved }: { c: LandClearance;
           <div className="mt-0.5 space-x-3 text-xs text-muted-foreground">
             {c.AppliedOn && <span>Applied {fmt(c.AppliedOn)}{c.ApplicationNo ? ` · No. ${c.ApplicationNo}` : ""}</span>}
             {c.ObtainedOn && <span>Approved {fmt(c.ObtainedOn)}{c.CertificateNo ? ` · Cert. ${c.CertificateNo}` : ""}</span>}
-            {c.ExpiryDate && <span>Valid till {fmt(c.ExpiryDate)}</span>}
+            {c.ExpiryDate && <span>Valid till <DueBadge date={c.ExpiryDate} kind="expires" soon={30} done={st !== "Approved"} /></span>}
             {c.Remarks && <span>“{c.Remarks}”</span>}
           </div>
         </div>

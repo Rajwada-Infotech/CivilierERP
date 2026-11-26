@@ -1,4 +1,5 @@
 import { askLegal } from "@/components/legal/LegalAsk";
+import { DueBadge, dueRow, dueLevel, DUE_BG } from "@/components/legal/DueBadge";
 import { setUserWhatsApp } from "@/api/legalLandApi";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApprovalControlPanel } from "@/components/legal/ApprovalControlPanel";
@@ -312,6 +313,13 @@ function mapRow(row: LegalRow, pk: string, fields: LegalFieldMeta[]): RecordWith
   return out;
 }
 
+/** Date fields that look ahead (deadlines, expiries, next hearings). */
+const DUE_FIELD = /(due|target|expiry|expires|nexthearing|nextdate|expected|appointmentdate|validtill|loanenddate)/i;
+const FINAL = new Set(["approved", "completed", "closed", "disposed", "rejected", "paid", "received", "cleared", "registered", "withdrawn", "loan closed", "release verified", "successfully registered", "resolved"]);
+/** A finished row (completed / approved / closed…) shows its dates without a warning. */
+const rowFinished = (row: Record<string, unknown>) => Object.entries(row).some(([k, v]) =>
+  (/status|result|decision/i.test(k) && typeof v === "string" && FINAL.has(v.toLowerCase())) || (/^(completiondate|completedon|clearancedate|receiveddate)$/i.test(k) && !!v));
+
 function toPayload(record: Record<string, unknown>, fields: LegalFieldMeta[]): LegalRow {
   const out: LegalRow = {};
   for (const f of fields) {
@@ -458,6 +466,9 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
       ...fields.filter((f) => f.type === "file").map((f) => [displayKey(f), (v: unknown, row: RecordWithId) => <LegalFileLink id={row[f.name]} name={String(v || "")} />]),
       ...fields.filter((f) => f.type === "url").map((f) => [displayKey(f), (v: unknown, row: RecordWithId) => <LegalLinkChip url={v} name={String(row[fields[0]?.name ? displayKey(fields[0]) : ""] ?? "")} />]),
       ...extras.filter((x) => x.whatsapp).map((x) => [`${x.name}__display`, (v: unknown, row: RecordWithId) => <WhatsAppName name={v} phone={row[`${x.name}__wa`]} userId={Number(row[`${x.name}__uid`]) || null} canSet={isAdminTier || String(row[`${x.name}__uid`]) === String(currentUser?.id ?? "")} onSaved={refresh} />]),
+      // Due / target / expiry / next-hearing dates: overdue red, today amber, within 7 days blue — unless the row is finished.
+      ...fields.filter((f) => f.type === "date" && DUE_FIELD.test(f.name)).map((f) => [displayKey(f), (_v: unknown, row: RecordWithId) =>
+        <DueBadge date={(row[f.name] as string) || null} done={rowFinished(row)} kind={/expir/i.test(f.name) ? "expires" : /hearing/i.test(f.name) ? "hearing" : "due"} />]),
       ...fields.filter((f) => f.type === "textarea").map((f) => [displayKey(f), (v: unknown) => (v
         ? <span className="block max-w-[260px] truncate" title={String(v)}>{String(v)}</span>
         : <span className="text-muted-foreground">—</span>)]),

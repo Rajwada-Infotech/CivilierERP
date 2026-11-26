@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { DueBadge, dueRow, dueLevel, DUE_BG } from "@/components/legal/DueBadge";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ClipboardTick } from "iconsax-react";
@@ -87,7 +88,8 @@ export default function LegalVerificationListPage() {
                   <span className={`text-xs font-semibold ${WS_TONE[w.Status] ?? ""}`}>{wsLabel(w.Status)}</span>
                 </div>
                 <p className="mt-1 truncate text-sm">{[w.MouzaName, w.LandLocation].filter(Boolean).join(" · ") || "—"}</p>
-                <p className="text-xs text-muted-foreground">{w.ProjectName ?? "No project"} · started {fmt(w.StartDate)}{w.TargetDate ? ` · target ${fmt(w.TargetDate)}` : ""}{w.LeadName ? ` · lead ${w.LeadName}` : ""}</p>
+                <p className="text-xs text-muted-foreground">{w.ProjectName ?? "No project"} · started {fmt(w.StartDate)}{w.LeadName ? ` · lead ${w.LeadName}` : ""}</p>
+                {w.TargetDate && <p className="mt-1 text-xs">Target <DueBadge date={w.TargetDate} done={["Verified", "Closed", "Rejected"].includes(w.Status)} /></p>}
                 <div className="mt-2 flex flex-wrap items-center gap-3">
                   <Progress w={w} />
                   {w.Overdue > 0 && <span className="text-xs font-semibold text-destructive">{w.Overdue} overdue</span>}

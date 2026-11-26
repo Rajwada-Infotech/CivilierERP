@@ -1,4 +1,5 @@
 import React from "react";
+import { DueBadge, dueRow, dueLevel, DUE_BG } from "@/components/legal/DueBadge";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { TaskSquare } from "iconsax-react";
@@ -17,14 +18,13 @@ function OtherWork({ items, today, onOpen }: { items: OtherTask[]; today: string
     <section className="mb-4 border border-border bg-card">
       <h2 className="border-b border-border px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em]">Other legal work assigned to me · {items.length}</h2>
       {sorted.map((t) => {
-        const late = !!t.dueDate && t.dueDate < today;
         return (
           <button key={t.key} onClick={() => onOpen(t.path)}
-            className={`grid w-full grid-cols-1 gap-1 border-b border-border px-3 py-2 text-left last:border-0 hover:bg-primary/5 sm:grid-cols-[1fr_2.5fr_1fr_1fr] sm:items-center ${late ? "bg-destructive/5" : ""}`}>
+            className={`grid w-full grid-cols-1 gap-1 border-b border-border px-3 py-2 text-left last:border-0 hover:bg-primary/5 sm:grid-cols-[1fr_2.5fr_1fr_1fr] sm:items-center ${dueRow(t.dueDate)}`}>
             <span className="text-xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">{t.kind}</span>
             <span className="text-sm"><b>{t.title}</b> <span className="text-xs text-muted-foreground">· {t.detail}</span></span>
             <span className="text-xs font-semibold">{t.status}</span>
-            <span className={`text-xs ${late ? "font-semibold text-destructive" : ""}`}>{t.dueDate ? `Due ${fmt(t.dueDate)}${late ? " · overdue" : ""}` : "No due date"}</span>
+            <span className="text-xs"><DueBadge date={t.dueDate} empty="No due date" /></span>
           </button>
         );
       })}
@@ -71,11 +71,11 @@ export default function LegalMyTasksPage() {
             <h2 className={`border-b border-border px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] ${g.tone ?? ""}`}>{g.title} · {g.items.length}</h2>
             {g.items.map((a) => (
               <button key={a.ActivityId} onClick={() => navigate(`/legal/land/verification/${a.VerificationId}`)}
-                className="grid w-full grid-cols-1 gap-1 border-b border-border px-3 py-2 text-left last:border-0 hover:bg-primary/5 sm:grid-cols-[2.5fr_1fr_1fr_1fr] sm:items-center">
+                className={`grid w-full grid-cols-1 gap-1 border-b border-border px-3 py-2 text-left last:border-0 hover:bg-primary/5 sm:grid-cols-[2.5fr_1fr_1fr_1fr] sm:items-center ${dueRow(a.DueDate, a.Status === "Closed" || a.Status === "Submitted for Review")}`}>
                 <span className="text-sm"><b>{a.ActivityRef ?? a.ActivityNo}. {a.ActivityName}</b> <span className="text-xs text-muted-foreground">· {a.VerificationNo} · {a.EnquiryNo}{!a.Mine && a.NaRequestedAt && a.Status !== "Submitted for Review" ? " · N/A request" : ""}</span></span>
                 <span className="text-xs font-semibold"><span className={STATUS_TONE[a.Status] ?? ""}>{a.Status}</span> · <span className={VERIFY_TONE[a.VerifyStatus] ?? ""}>{a.VerifyStatus}</span></span>
                 <span className="text-xs">{a.Priority}</span>
-                <span className="text-xs">{a.DueDate ? `Due ${fmt(a.DueDate)}` : "No due date"}</span>
+                <span className="text-xs"><DueBadge date={a.DueDate} done={a.Status === "Closed" || a.Status === "Submitted for Review"} empty="No due date" /></span>
               </button>
             ))}
           </section>
