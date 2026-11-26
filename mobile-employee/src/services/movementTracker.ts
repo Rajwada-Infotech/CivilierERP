@@ -16,9 +16,28 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(MOVEMENT_TASK, 
   }));
   try {
     const r = await api.sendLocation(points);
-    if (!r.tracking) await stopMovementTracking(); // punched out elsewhere (web / HR)
+    if (!r.tracking) { await stopMovementTracking(); return; } // punched out elsewhere (web / HR)
+    if (r.needFix) void confirmReadings();
   } catch { /* offline or signed out — the next move sends again */ }
 });
+
+// When the server cannot decide from a reading (poor accuracy, a GPS jump, near the office edge, or an exit not yet
+// confirmed by 3 readings) it asks for more: take up to 3 fresh high-accuracy fixes about 20 s apart. One run at a time.
+let confirming = false;
+const CONFIRM_FIXES = 3, CONFIRM_GAP_MS = 20_000;
+async function confirmReadings() {
+  if (confirming) return;
+  confirming = true;
+  try {
+    for (let i = 0; i < CONFIRM_FIXES; i++) {
+      await new Promise((ok) => setTimeout(ok, CONFIRM_GAP_MS));
+      const l = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
+      const r = await api.sendLocation([{ lat: l.coords.latitude, lng: l.coords.longitude, acc: l.coords.accuracy ?? null, at: new Date(l.timestamp).toISOString() }]);
+      if (!r.tracking) { await stopMovementTracking(); return; }
+      if (!r.needFix) return; // decided
+    }
+  } catch { /* no fix / offline — the next 100 m move sends again */ } finally { confirming = false; }
+}
 
 export async function isTracking() {
   try { return await Location.hasStartedLocationUpdatesAsync(MOVEMENT_TASK); } catch { return false; }

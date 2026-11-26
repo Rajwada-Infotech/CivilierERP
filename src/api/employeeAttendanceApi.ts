@@ -63,6 +63,11 @@ export interface AttendanceRecord {
 }
 
 /** One on-duty trip: left the own work locations (Outside) or was at another office (Visit). */
+/** One GPS point the app sent, as the server judged it (audit). */
+export interface LocationPointAudit {
+  pointId: number; lat: number; lng: number; accuracyM: number | null; at: string; locationName: string | null; distanceM: number | null; radiusM: number | null;
+  result: "Inside" | "Outside" | "Uncertain" | "Office" | "LowAccuracy" | "Jump" | "Ignored"; note: string | null; movementId: number | null;
+}
 export interface AttendanceMovement {
   movementId: number;
   kind: "Outside" | "Visit" | "LocationOff";
@@ -72,6 +77,11 @@ export interface AttendanceMovement {
   end: string | null;
   seconds: number | null;
   hasVisit: boolean;
+  /** Why the trip was confirmed (readings, distances, accuracy). */
+  confirmNote?: string | null;
+  /** A very short trip treated as GPS drift — not asked, not an alert. */
+  autoDismissed?: boolean;
+  dismissNote?: string | null;
   reason: string | null;
   skipped?: boolean;
   alert?: boolean;
@@ -175,7 +185,7 @@ export const getHrRecords = async (f: HrFilters) => parse<AttendanceRecord[]>(aw
 export const getHrSummary = async (f: HrFilters) => parse<AttendanceSummary>(await fetchWithAuth(`${BASE}/hr/summary?${qs(f)}`), "Failed to load summary");
 export const getNotMarked = async (f: HrFilters & { date: string }) => parse<NotMarkedEmployee[]>(await fetchWithAuth(`${BASE}/hr/not-marked?${qs(f)}`), "Failed to load employees");
 export const getHrRecord = async (id: number) =>
-  parse<{ record: AttendanceRecord; audit: AuditEntry[]; movements?: AttendanceMovement[] }>(await fetchWithAuth(`${BASE}/hr/records/${id}`), "Failed to load the record");
+  parse<{ record: AttendanceRecord; audit: AuditEntry[]; movements?: AttendanceMovement[]; points?: LocationPointAudit[] }>(await fetchWithAuth(`${BASE}/hr/records/${id}`), "Failed to load the record");
 
 export const getHrPunchPhoto = async (id: number, which: "in" | "out") =>
   parse<{ photo: string | null }>(await fetchWithAuth(`${BASE}/hr/records/${id}/photo/${which}`), "Failed to load the photo");
