@@ -84,7 +84,7 @@ export default function NewVisitorScreen() {
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1, backgroundColor: colors.background }}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={{ paddingBottom: 96 }} keyboardShouldPersistTaps="handled">
         <SheetFrame>
           <TitleBlock eyebrow={data?.gate ? `${data.gate.projectName} · ${data.gate.name}` : "Civilier Security · Guard"} title="New visitor" />
 

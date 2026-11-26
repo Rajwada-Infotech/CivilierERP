@@ -39,7 +39,8 @@ const PAGES_BY_VIEW: Record<string, NavLeaf[]> = {
   ],
 };
 /** Forms: the menu key steps aside so it doesn't sit on the form's own keys. */
-const FORM_ROUTES = new Set<string>(["NewVisitor", "VisitorDecision", "Call", "LiveMap"]);
+// Only the full-screen call hides it: its end-call keys sit where the menu key would, and leaving mid-call drops the call.
+const FORM_ROUTES = new Set<string>(["Call"]);
 
 export function NavSheet() {
   const insets = useSafeAreaInsets();
@@ -110,7 +111,7 @@ export function NavSheet() {
 
   return (
     <>
-      {/* The menu key: a filled ink key, square, at the bottom right (not on a form page). */}
+      {/* The menu key: a filled ink key, square, at the bottom right, on every page but the call. */}
       {!(activeRoute && FORM_ROUTES.has(activeRoute)) && (
       <View style={{ position: "absolute", right: 16, bottom: insets.bottom + 16 }}>
         <Press
