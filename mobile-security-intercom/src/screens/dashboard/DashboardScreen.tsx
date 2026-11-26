@@ -7,7 +7,7 @@
 import { useState } from "react";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { UserPlus, CloudOff } from "lucide-react-native";
+import { UserPlus, CloudOff, Truck } from "lucide-react-native";
 import type { MainStackParamList } from "@/navigation/MainStack";
 import { useVisitorQueue, refusedWhileQueued } from "@/visitors/offlineQueue";
 import { useVisitorEvents } from "@/visitors/useSecuritySocket";
@@ -308,6 +308,7 @@ export default function DashboardScreen() {
                   refusedWhileQueued.length = 0;
                   navigation.navigate("NewVisitor");
                 }} disabled={!loading && data !== null && !a} />
+              <Key label="Service entry" icon={<Truck size={15} color={S.ink} />} onPress={() => navigation.navigate("ServiceEntry")} disabled={!loading && data !== null && !a} />
               {queued > 0 && (
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                   <CloudOff size={14} color={S.red} />
