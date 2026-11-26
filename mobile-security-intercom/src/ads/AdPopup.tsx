@@ -27,11 +27,16 @@ function PopupPlayer({ source, onClose }: { source: { uri: string; headers?: Rec
   const [duration, setDuration] = useState(0); // seconds, once the video has loaded
   const [elapsed, setElapsed] = useState(0); // seconds the pop-up has been playing
   const [failed, setFailed] = useState(false);
-  const player = Video.useVideoPlayer(source, (p: { loop: boolean; muted: boolean; play: () => void }) => {
+  // iOS attaches the picture only to a video view made after the pop-up has finished appearing (made earlier, only the
+  // sound plays), so the view is added, and playback started, on the Modal's onShow.
+  const [shown, setShown] = useState(false);
+  const player = Video.useVideoPlayer(source, (p: { loop: boolean; muted: boolean }) => {
     p.loop = true; // repeats until the 15 seconds are up
     p.muted = true;
-    p.play();
   });
+  useEffect(() => {
+    if (shown) player.play();
+  }, [shown, player]);
 
   useEffect(() => {
     const subs = [
@@ -45,11 +50,12 @@ function PopupPlayer({ source, onClose }: { source: { uri: string; headers?: Rec
     player.muted = muted;
   }, [player, muted]);
 
-  // Count while playing; a video that won't load can be closed at once.
+  // Count from when the pop-up is on screen; a video that won't load can be closed at once.
   useEffect(() => {
+    if (!shown) return;
     const t = setInterval(() => setElapsed((n) => n + 1), 1000);
     return () => clearInterval(t);
-  }, []);
+  }, [shown]);
 
   const needed = Math.max(MIN_SECONDS, Math.ceil(duration));
   const left = failed ? 0 : Math.max(0, needed - elapsed);
@@ -59,7 +65,7 @@ function PopupPlayer({ source, onClose }: { source: { uri: string; headers?: Rec
   }, [left, player]);
 
   return (
-    <Modal visible transparent hardwareAccelerated statusBarTranslucent animationType="fade" onRequestClose={() => {
+    <Modal visible transparent hardwareAccelerated statusBarTranslucent animationType="fade" onShow={() => setShown(true)} onRequestClose={() => {
         if (!left) onClose();
       }}>
       <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.85)", justifyContent: "center", padding: 16 }}>
@@ -79,7 +85,11 @@ function PopupPlayer({ source, onClose }: { source: { uri: string; headers?: Rec
               )}
             </View>
           </View>
-          <Video.VideoView player={player} surfaceType="textureView" style={{ width: "100%", aspectRatio: 16 / 9 }} contentFit="contain" nativeControls={false} allowsFullscreen={false} allowsPictureInPicture={false} />
+          {shown ? (
+            <Video.VideoView player={player} surfaceType="textureView" style={{ width: "100%", aspectRatio: 16 / 9 }} contentFit="contain" nativeControls={false} allowsFullscreen={false} allowsPictureInPicture={false} />
+          ) : (
+            <View style={{ width: "100%", aspectRatio: 16 / 9 }} />
+          )}
           {failed && <Text style={{ color: "#fff", padding: 12, fontSize: 12 }}>The ad couldn't be played.</Text>}
         </View>
       </View>
