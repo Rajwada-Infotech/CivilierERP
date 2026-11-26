@@ -477,6 +477,13 @@ router.put("/:id", requirePageRight("crm-handover", "edit"), async (req, res) =>
       }
     }
 
+    // The Civilier Security app: a completed handover makes the owner (and co-applicants) residents of the flat.
+    if (b.Status === "Completed" && handoverBookingId) {
+      try { await require("../services/securityResidentSync").syncSecurityResidents(pool, { bookingId: handoverBookingId, byUserId: actorId(req) }); } catch (e) {
+        if (e.number !== 208) console.error("[crm-handover] security resident sync failed:", e.message);
+      }
+    }
+
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-handover] PUT error:", e.message);

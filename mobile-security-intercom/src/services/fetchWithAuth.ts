@@ -1,0 +1,113 @@
+// RN port of src/lib/fetchWithAuth.ts. Same contract (Bearer token, 401/403
+// handling, ApiError), adapted for two things the web version leans on that
+// don't exist here: localStorage/sessionStorage (-> expo-secure-store,
+// async) and window.location.href (-> sessionEvents, consumed by
+// AuthContext).
+import { fetch as expoFetch } from "expo/fetch";
+import { apiUrl, API_BASE_URL } from "@/utils/apiBase";
+import { getToken, clearAuthStorage } from "./authStorage";
+import { emitSessionExpired } from "./sessionEvents";
+import { APP_CLIENT, appSessionId } from "./appSession";
+
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+export interface FetchWithAuthOptions extends RequestInit {
+  skipActivityLog?: boolean;
+  /**
+   * Send through expo/fetch instead of React Native's fetch. Required for a
+   * multipart body that carries expo-file-system `File`s (photo uploads): RN's
+   * own fetch fails those on-device with a generic network error before the
+   * request ever leaves the phone.
+   */
+  useExpoFetch?: boolean;
+}
+
+// A Promise (not a boolean) so concurrent 401s share the same in-flight
+// clear+emit instead of racing: two requests can both observe the flag
+// unset before either sets it, but only the assignment below is
+// synchronous — the awaited work happens inside it, so the second request
+// always sees the first's in-progress promise, not a stale flag.
+let sessionExpiredFlow: Promise<void> | null = null;
+
+export async function fetchWithAuth(
+  url: string,
+  options: FetchWithAuthOptions = {},
+): Promise<Response> {
+  const { skipActivityLog, useExpoFetch, ...fetchOptions } = options;
+  const token = await getToken();
+
+  if (sessionExpiredFlow) {
+    if (token) {
+      sessionExpiredFlow = null;
+    } else {
+      throw new ApiError("Authentication redirect in progress.", 401);
+    }
+  }
+
+  const isFormData =
+    typeof FormData !== "undefined" && fetchOptions.body instanceof FormData;
+
+  let response: Response;
+  try {
+    const doFetch = useExpoFetch ? (expoFetch as unknown as typeof fetch) : fetch;
+    response = await doFetch(apiUrl(url), {
+      ...fetchOptions,
+      headers: {
+        ...(!isFormData ? { "Content-Type": "application/json" } : {}),
+        ...(fetchOptions.headers || {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(skipActivityLog ? { "X-Skip-Activity-Log": "1" } : {}),
+        // Which app and session this is, for the Activity Browser (see ./appSession).
+        "X-Client": APP_CLIENT,
+        ...(token ? { "X-Session-Id": appSessionId() } : {}),
+      },
+    });
+  } catch (err: unknown) {
+    if (err instanceof Error && err.name === "AbortError") throw err;
+    console.error(`Network error reaching ${API_BASE_URL}:`, err);
+    throw new Error(
+      __DEV__
+        ? `Can't reach the backend at ${API_BASE_URL}. Make sure it's running and, on a phone, that EXPO_PUBLIC_API_URL points to your computer's LAN IP.`
+        : "Network error. Please check your connection.",
+    );
+  }
+
+  // The login call's own 401 ("Invalid credentials") / 403 ("User inactive") are
+  // answers, not an expired session -- hand them back so AuthContext.login()
+  // can surface the server's real message.
+  if (/^\/?api\/users\/login(\?|$)/.test(url)) return response;
+
+  if (response.status === 401) {
+    if (!sessionExpiredFlow) {
+      sessionExpiredFlow = (async () => {
+        try {
+          await clearAuthStorage();
+          emitSessionExpired();
+        } finally {
+          sessionExpiredFlow = null;
+        }
+      })();
+    }
+    await sessionExpiredFlow;
+    throw new ApiError("Session expired. Please login again.", response.status);
+  }
+
+  if (response.status === 403) {
+    // The server's own reason when it gives one ("Only the person called can answer.", …), so a refusal can be told
+    // apart from a missing right.
+    const body = await response
+      .clone()
+      .json()
+      .catch(() => ({}) as { error?: string });
+    throw new ApiError(body?.error || "You do not have permission to perform this action.", response.status);
+  }
+
+  return response;
+}

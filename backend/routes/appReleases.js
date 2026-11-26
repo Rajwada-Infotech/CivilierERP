@@ -33,6 +33,8 @@ const APP_CATALOG = {
   cwd: { label: "Civilier Work DPR", packageName: "com.rajwadainfotech.civiliercwd", fileName: "CivilierERPWorkDPR.apk" },
   // The Employee Portal app (mobile-employee): listed before its first build, so its builds can be published here.
   employee: { label: "Civilier Employee Portal", packageName: "com.rajwadainfotech.civilieremployee", fileName: "CivilierERPEmployeePortal.apk" },
+  // The Security Intercom app (mobile-security-intercom): guards, security admins and residents. Listed before its first build.
+  "security-intercom": { label: "Civilier Security", packageName: "com.rajwadainfotech.civiliersecurity", fileName: "CivilierSecurity.apk" },
 };
 
 const upload = multer({

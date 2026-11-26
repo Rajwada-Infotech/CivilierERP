@@ -177,6 +177,11 @@ const MaintenanceDirectory = lazy(() => import("./pages/maintenance/MaintenanceD
 const CustomerMaintenanceProfile = lazy(() => import("./pages/maintenance/CustomerMaintenanceProfile"));
 const MaintenanceBills = lazy(() => import("./pages/maintenance/MaintenanceBills"));
 const SecurityAttendance = lazy(() => import("./pages/maintenance/SecurityAttendance"));
+const SecurityGates = lazy(() => import("./pages/maintenance/security/SecurityGates"));
+const SecurityGuards = lazy(() => import("./pages/maintenance/security/SecurityGuards"));
+const SecurityResidents = lazy(() => import("./pages/maintenance/security/SecurityResidents"));
+const SecurityLive = lazy(() => import("./pages/maintenance/security/SecurityLive"));
+const SecurityGeofences = lazy(() => import("./pages/maintenance/security/SecurityGeofences"));
 const ElectricityMaintenance = lazy(() => import("./pages/maintenance/ElectricityMaintenance"));
 const MaintenanceServiceRequests = lazy(() => import("./pages/maintenance/MaintenanceServiceRequests"));
 const KeyCustodian = lazy(() => import("./pages/maintenance/KeyCustodian"));
@@ -1361,6 +1366,46 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="maintenance-security-attendance">
             <SecurityAttendance />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/maintenance/security-gates"
+        element={
+          <ProtectedRoute pageKey="security-gates">
+            <SecurityGates />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/maintenance/security-guards"
+        element={
+          <ProtectedRoute pageKey="security-guards">
+            <SecurityGuards />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/maintenance/residents"
+        element={
+          <ProtectedRoute pageKey="security-residents">
+            <SecurityResidents />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/maintenance/security-live"
+        element={
+          <ProtectedRoute pageKey="security-live">
+            <SecurityLive />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/maintenance/geofences"
+        element={
+          <ProtectedRoute pageKey="security-geofences">
+            <SecurityGeofences />
           </ProtectedRoute>
         }
       />
