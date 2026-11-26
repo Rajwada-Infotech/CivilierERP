@@ -292,7 +292,7 @@ router.post("/start", requirePageRight(PAGE, "create"), async (req, res) => {
 router.get("/my-tasks", requirePageRight(PAGE, "view"), async (req, res) => {
   try {
     const pool = getPool();
-    if (!(await ready(pool))) return res.json([]);
+    if (!(await ready(pool))) return res.json({ activities: [], other: [] });
     const verifier = await canVerify(req);
     const rows = (await pool.request().input("U", sql.Int, userOf(req)).input("Vf", sql.Bit, verifier ? 1 : 0).query(`
       ${ACTIVITY_SELECT.replace("SELECT a.ActivityId", "SELECT v.VerificationNo, v.ProjectId, e.EnquiryNo, CASE WHEN a.AssignedUserId = @U THEN 1 ELSE 0 END AS Mine, a.ActivityId")}
@@ -302,10 +302,79 @@ router.get("/my-tasks", requirePageRight(PAGE, "view"), async (req, res) => {
         OR (a.Status = N'Submitted for Review' AND (a.VerifierUserId = @U OR (a.VerifierUserId IS NULL AND @Vf = 1)) AND ISNULL(a.SubmittedBy, 0) <> @U)
         OR (a.NaRequestedAt IS NOT NULL AND a.VerifyStatus <> N'N/A' AND @Vf = 1 AND ISNULL(a.NaRequestedBy, 0) <> @U))
       ORDER BY CASE WHEN a.Status = N'Closed' THEN 1 ELSE 0 END, ISNULL(a.DueDate, '9999-12-31'), t.SortOrder`)).recordset;
-    res.json(rows.filter((r) => inScope(req, r.ProjectId)));
+    // Other Legal work assigned to me: deed drafting, post-registration tasks, mutation / conversion.
+    const other = [];
+    const safe = async (q) => { try { return (await pool.request().input("U", sql.Int, userOf(req)).query(q)).recordset; } catch { return []; } };
+    for (const r of await safe(`SELECT LandId, LandCode, LandName, ProjectId, DeedStage, CONVERT(char(10), DeedTargetDate, 23) AS DueDate FROM dbo.LegalLand
+        WHERE IsActive = 1 AND DeedDrafterId = @U AND WorkflowStatus = N'Deed Process' AND DeedApprovalRequestedAt IS NULL`))
+      other.push({ kind: "Deed drafting", key: `d${r.LandId}`, title: `Deed drafting · ${r.LandCode}`, detail: `${r.LandName} · ${r.DeedStage ?? "Not Started"}`, status: r.DeedStage ?? "Not Started", dueDate: r.DueDate, path: `/legal/land/deed-process`, ProjectId: r.ProjectId });
+    for (const r of await safe(`SELECT t.TaskId, t.LandId, t.Task, t.Status, CONVERT(char(10), t.DueDate, 23) AS DueDate, l.LandCode, l.ProjectId FROM dbo.LegalPostRegTask t
+        JOIN dbo.LegalLand l ON l.LandId = t.LandId AND l.IsActive = 1 WHERE t.AssignedUserId = @U AND t.Status NOT IN (N'Completed', N'Rejected')`))
+      other.push({ kind: "Post-registration task", key: `t${r.TaskId}`, title: `${r.Task} · ${r.LandCode}`, detail: "Post-registration", status: r.Status, dueDate: r.DueDate, path: `/legal/land/post-registration/${r.LandId}`, ProjectId: r.ProjectId });
+    for (const r of await safe(`SELECT m.MutationId, m.LandId, m.Kind, m.ApplicationNo, m.ApplicationStatus, CONVERT(char(10), m.DueDate, 23) AS DueDate, l.LandCode, l.ProjectId FROM dbo.LegalMutation m
+        JOIN dbo.LegalLand l ON l.LandId = m.LandId AND l.IsActive = 1 WHERE m.IsActive = 1 AND m.AssignedUserId = @U AND m.ApplicationStatus NOT IN (N'Approved', N'Rejected') AND m.CompletionDate IS NULL`))
+      other.push({ kind: r.Kind, key: `m${r.MutationId}`, title: `${r.Kind} · ${r.LandCode}`, detail: r.ApplicationNo ? `Application ${r.ApplicationNo}` : "No application no. yet", status: r.ApplicationStatus, dueDate: r.DueDate, path: `/legal/land/post-registration`, ProjectId: r.ProjectId });
+    res.json({ activities: rows.filter((r) => inScope(req, r.ProjectId)), other: other.filter((r) => inScope(req, r.ProjectId)) });
   } catch (err) {
     console.error("[legal-verification] my-tasks:", err.message);
     res.status(500).json({ error: "Could not load your tasks" });
+  }
+});
+
+/**
+ * Assign many activities at once (the workspace's Assign view): employee, verifier and target date per activity.
+ * Same rules as one activity: verifier ≠ employee; moving an activity from one employee to another needs a handover
+ * note; verified / closed activities are left alone. Each row is checked against the version the user saw.
+ */
+router.put("/:id/assignments", requirePageRight(PAGE, "edit"), async (req, res) => {
+  const pool = getPool();
+  try {
+    const id = Number.parseInt(req.params.id, 10);
+    const w = (await pool.request().input("V", sql.Int, id).query("SELECT VerificationId, ProjectId, Status, VerificationNo, LeadUserId, CreatedBy FROM dbo.LegalVerification WHERE VerificationId = @V")).recordset[0];
+    if (!w) return res.status(404).json({ error: "Verification not found" });
+    if (!inScope(req, w.ProjectId)) return res.status(403).json({ error: "You don't have access to this project." });
+    if (["Closed", "Verified"].includes(w.Status)) return res.status(409).json({ error: "This verification is approved or closed" });
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    const handover = String(req.body?.handoverNote || "").trim().slice(0, 800);
+    if (!items.length) return res.status(400).json({ error: "Nothing to save" });
+    const acts = (await pool.request().input("V", sql.Int, id).query(`${ACTIVITY_SELECT} WHERE a.VerificationId = @V`)).recordset;
+    const errors = [];
+    const plan = [];
+    for (const it of items) {
+      const a = acts.find((x) => x.ActivityId === Number(it.activityId));
+      if (!a) { errors.push(`Activity ${it.activityId} is not in this verification`); continue; }
+      const next = { emp: it.assignedUserId === undefined ? a.AssignedUserId : Number(it.assignedUserId) || null,
+        ver: it.verifierUserId === undefined ? a.VerifierUserId : Number(it.verifierUserId) || null,
+        due: it.dueDate === undefined ? a.DueDate : day(it.dueDate) };
+      if (next.emp === a.AssignedUserId && next.ver === a.VerifierUserId && next.due === a.DueDate) continue;
+      const name = `${ref(a)}. ${a.ActivityName}`;
+      if (a.Status === "Closed") { errors.push(`${name} is ${a.VerifyStatus} — reopen it first`); continue; }
+      if ("updatedAt" in it && (it.updatedAt ? new Date(it.updatedAt).getTime() : null) !== (a.UpdatedAt ? new Date(a.UpdatedAt).getTime() : null)) { errors.push(`${name} was changed by ${a.UpdatedByName ?? "someone"} — reload`); continue; }
+      if (next.emp && next.emp === next.ver) { errors.push(`${name}: the verifier must be someone other than the employee`); continue; }
+      if (a.AssignedUserId && next.emp !== a.AssignedUserId && !handover) { errors.push(`${name}: write a handover note for the reassignment`); continue; }
+      if (next.due && a.StartDate && next.due < a.StartDate) { errors.push(`${name}: target date is before the start date`); continue; }
+      plan.push({ a, next });
+    }
+    if (errors.length) return res.status(400).json({ error: errors.join(" · ") });
+    const me = userOf(req);
+    for (const { a, next } of plan) {
+      const reassigned = next.emp !== a.AssignedUserId;
+      const ok = await writeActivity(pool, req, a, { AssignedUserId: [sql.Int, next.emp], VerifierUserId: [sql.Int, next.ver], DueDate: [sql.Date, next.due],
+        ...(next.due !== a.DueDate ? { EscalatedOn: [sql.Date, null] } : {}) },
+        { action: reassigned ? (a.AssignedUserId ? "Reassigned" : "Assigned") : "Updated", oldAssignee: a.AssignedUserId, newAssignee: next.emp,
+          remarks: [reassigned && a.AssignedUserId && handover ? `Handover: ${handover}` : null, next.ver !== a.VerifierUserId ? "Verifier changed" : null,
+            next.due !== a.DueDate ? `Target ${a.DueDate ?? "—"} → ${next.due ?? "—"}` : null, "Assign view"].filter(Boolean).join(" · ") });
+      if (!ok) return res.status(409).json({ error: `${ref(a)}. ${a.ActivityName} changed just now — reload; the rows before it were saved` });
+      if (reassigned && next.emp) await notify(pool, { users: [next.emp], except: me, type: a.AssignedUserId ? "legal_activity_reassigned" : "legal_activity_assigned",
+        title: `${a.AssignedUserId ? "Reassigned" : "Assigned"} to you: ${a.ActivityName}`, body: `${label(w, a)}${next.due ? ` · target ${next.due}` : ""}${handover && a.AssignedUserId ? ` — ${handover}` : ""}`.slice(0, 300), refId: id, refType: "legal_verification" });
+      if (reassigned && a.AssignedUserId) await notify(pool, { users: [a.AssignedUserId], except: me, type: "legal_activity_reassigned", title: `Reassigned: ${a.ActivityName}`, body: `${label(w, a)} moved to another employee`, refId: id, refType: "legal_verification" });
+      if (next.ver && next.ver !== a.VerifierUserId) await notify(pool, { users: [next.ver], except: me, type: "legal_activity_verifier", title: `You verify: ${a.ActivityName}`, body: label(w, a), refId: id, refType: "legal_verification" });
+    }
+    if (plan.length) await writeAudit(pool, req, { action: "Verification activities assigned", entityType: "LegalVerification", entityId: id, newValue: plan.map(({ a, next }) => ({ activity: a.ActivityId, ...next })) });
+    res.json({ message: plan.length ? `${plan.length} activit${plan.length === 1 ? "y" : "ies"} saved` : "Nothing changed" });
+  } catch (err) {
+    console.error("[legal-verification] assignments:", err.message);
+    res.status(500).json({ error: "Could not save the assignments" });
   }
 });
 

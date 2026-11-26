@@ -98,7 +98,11 @@ export const verifyDocument = async (docId: number, decision: "Verified" | "Reje
 export const addActivityDocument = async (activityId: number, body: { fileId: number; title?: string; verificationId: number; docType?: string }) =>
   addDocument(body.verificationId, { fileId: body.fileId, docType: body.docType ?? "Other supporting document", remarks: body.title, activityIds: [activityId] });
 export const getActivityHistory = async (activityId: number) => handle<HistoryRow[]>(await fetchWithAuth(`${BASE}/activity/${activityId}/history`));
-export const getMyTasks = async () => handle<Activity[]>(await fetchWithAuth(`${BASE}/my-tasks`));
+/** Other Legal work assigned to me (deed drafting, post-registration tasks, mutation / conversion). */
+export interface OtherTask { kind: string; key: string; title: string; detail: string; status: string; dueDate: string | null; path: string }
+export const getMyTasks = async () => handle<{ activities: Activity[]; other: OtherTask[] }>(await fetchWithAuth(`${BASE}/my-tasks`));
+export const saveAssignments = async (verificationId: number, items: { activityId: number; assignedUserId: number | null; verifierUserId: number | null; dueDate: string | null; updatedAt: string | null }[], handoverNote?: string) =>
+  handle<{ message: string }>(await fetchWithAuth(`${BASE}/${verificationId}/assignments`, json("PUT", { items, handoverNote })));
 
 // ── Detail entries (phase 2) ─────────────────────────────────────────────────────────────────────
 export interface EntryField {

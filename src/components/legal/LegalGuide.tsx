@@ -11,7 +11,7 @@ import { BodyPortal } from "@/components/ui/body-portal";
  * same change. The activity list, durations, dependencies, reminder days and the report list are read live from
  * Setup / the server, so they never go out of date.
  */
-const GUIDE_UPDATED = "26 Nov 2026 · Legal V2.1";
+const GUIDE_UPDATED = "26 Nov 2026 · Legal V2.1 (Assign tab, My tasks covers all Legal work)";
 
 type Step = { title: string; where?: string; points: string[] };
 const STEPS: Step[] = [
@@ -32,6 +32,7 @@ const STEPS: Step[] = [
   ] },
   { title: "Legal verification", where: "Pipeline → 3", points: [
     "Start a workspace for an enquiry: every active activity is created with a target date (internal, not a government timeline).",
+    "Assign: the workspace's Assign tab lists every activity with Employee, Verifier and Target date — set them all at once (or \"Apply to all open\"), then Save. Reassigning needs a handover note; everyone assigned is notified.",
     "Employee: assign employee and verifier (different people), set the work status (In Progress, Applied, Report Pending, On Hold with reason and next action), add the activity's entries, link documents in the register, record the finding and government dates.",
     "Submit for verification: needs the finding; open dependencies need an authorised override with a reason (recorded, not a verification); Mouza map needs the updated Dag sketch or an exception.",
     "Verifier: Verify, Return (remarks) or Reject (reason) — never their own work. N/A is requested with a reason and approved by another user. Reopen needs a reason; history is kept.",
@@ -65,7 +66,7 @@ const STEPS: Step[] = [
   ] },
   { title: "Amendments", where: "Land Profile → Amendments", points: ["Request with type and reason → Amendment Approver approves → new version → verified again."] },
   { title: "Every day", points: [
-    "My tasks: your work by due date, work returned to you, and work waiting for your verification.",
+    "My tasks: your verification activities by due date, work returned to you, work waiting for your verification, and your other Legal work — deed drafting, post-registration tasks, mutation and conversion.",
     "Reminders tab and notifications (assignment, due / overdue, report received, submitted, returned, final review and land approval pending). Overdue work escalates to the lead and Legal Admins.",
     "Dashboard counts and workload; Verification reports with dropdown filters and PDF / Excel export; Land Flowchart for each land's journey.",
     "Rules everywhere: you see only your projects; the maker is never the checker; a second save over someone's change is refused; history is never deleted; registered records are locked.",

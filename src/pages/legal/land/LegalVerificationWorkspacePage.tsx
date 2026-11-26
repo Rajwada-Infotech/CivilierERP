@@ -17,6 +17,7 @@ import { Progress, WS_TONE, wsLabel } from "./LegalVerificationListPage";
 import { ActivityEntriesPanel, useEntryConfig } from "@/components/legal/ActivityEntriesPanel";
 import { VerificationReviewPanel } from "@/components/legal/VerificationReviewPanel";
 import { VerificationDocumentsPanel } from "@/components/legal/VerificationDocumentsPanel";
+import { VerificationAssignPanel } from "@/components/legal/VerificationAssignPanel";
 
 const fmt = (d: string | null | undefined) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—");
 const fmtTime = (d: string) => new Date(d).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -296,7 +297,7 @@ export default function LegalVerificationWorkspacePage() {
   const canEdit = usePageRights("legal-land-enquiry").canEdit;
   const [open, setOpen] = useState<number | null>(null);
   const [filter, setFilter] = useState("All");
-  const [view, setView] = useState<"activities" | "documents">("activities");
+  const [view, setView] = useState<"activities" | "assign" | "documents">("activities");
   const ws = useQuery({ queryKey: ["legal-verification", Number(id)], queryFn: () => getWorkspace(Number(id)), enabled: !!id });
   const refresh = () => { qc.invalidateQueries({ queryKey: ["legal-verification"] }); qc.invalidateQueries({ queryKey: ["legal-verification-list"] });
     qc.invalidateQueries({ queryKey: ["legal-activity-history"] }); qc.invalidateQueries({ queryKey: ["legal-verification-reviews"] }); qc.invalidateQueries({ queryKey: ["legal-verification-docs"] }); };
@@ -315,12 +316,13 @@ export default function LegalVerificationWorkspacePage() {
           <>
             <Header key={w.UpdatedAt ?? ""} w={w} canEdit={canEdit && !locked} onSaved={refresh} />
             <div className="mb-3 flex flex-wrap gap-1.5">
-              {(["activities", "documents"] as const).map((v) => (
+              {(["activities", "assign", "documents"] as const).map((v) => (
                 <button key={v} aria-pressed={view === v} onClick={() => setView(v)} className={`h-8 border px-3 text-xs font-semibold uppercase tracking-[0.06em] ${view === v ? "border-foreground bg-foreground text-background" : "border-foreground/40"}`}>
-                  {v === "activities" ? `Activities (${w.activities.length})` : "Document register"}</button>
+                  {v === "activities" ? `Activities (${w.activities.length})` : v === "assign" ? "Assign" : "Document register"}</button>
               ))}
             </div>
-            {view === "documents" ? <section className="mb-4 border border-border bg-card p-3"><VerificationDocumentsPanel verificationId={w.VerificationId} activities={w.activities} canEdit={(canEdit || !!w.searchOnly) && !locked} /></section> : <>
+            {view === "assign" ? <section className="mb-4 border border-border bg-card p-3"><VerificationAssignPanel key={w.activities.map((a) => a.UpdatedAt ?? "").join("|")} w={w} canEdit={canEdit && !locked} onSaved={refresh} /></section>
+              : view === "documents" ? <section className="mb-4 border border-border bg-card p-3"><VerificationDocumentsPanel verificationId={w.VerificationId} activities={w.activities} canEdit={(canEdit || !!w.searchOnly) && !locked} /></section> : <>
             <div className="mb-2 flex flex-wrap gap-1.5">
               {["All", "Open", "To verify", "Returned", "Overdue", "On Hold", "Issues"].map((s) => (
                 <button key={s} aria-pressed={filter === s} onClick={() => setFilter(s)} className={`h-7 border px-2.5 text-xs font-semibold ${filter === s ? "border-foreground bg-foreground text-background" : "border-foreground/40 text-muted-foreground"}`}>{s}</button>
