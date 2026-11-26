@@ -5,4 +5,8 @@
 import Constants, { ExecutionEnvironment } from "expo-constants";
 import { isRunningInExpoGo } from "expo";
 
-export const nativeCallsAvailable = () => !isRunningInExpoGo() && Constants.executionEnvironment !== ExecutionEnvironment.StoreClient;
+/** True only inside Expo Go. The installed app (release or development build) is never Expo Go, so messages that blame
+ * Expo Go must check this first and otherwise show the real error. */
+export const inExpoGo = () => isRunningInExpoGo() || Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
+
+export const nativeCallsAvailable = () => !inExpoGo();

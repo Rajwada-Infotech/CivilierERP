@@ -13,7 +13,9 @@ import * as TaskManager from "expo-task-manager";
 import * as Battery from "expo-battery";
 import * as SecureStore from "expo-secure-store";
 import * as FileSystem from "expo-file-system/legacy";
+import { AppState } from "react-native";
 import { fetchWithAuth } from "@/services/fetchWithAuth";
+import { inExpoGo } from "@/screens/calls/callSupport";
 
 export const TRACKING_TASK = "civilier-security-guard-tracking";
 const QUEUE_FILE = `${FileSystem.documentDirectory ?? ""}ping-queue.json`;
@@ -131,12 +133,21 @@ export async function setConsent(yes: boolean) {
   }
 }
 
-export type StartResult = "started" | "no-permission" | "no-background-permission" | "unavailable";
+export type StartResult = "started" | "no-permission" | "no-background-permission" | "unavailable" | "background" | "failed";
+
+let lastError: string | null = null;
+/** Why the last start failed ("failed" result): the phone's own error text. */
+export const lastTrackingError = () => lastError;
 
 /** Asks for location "all the time" and starts the shift tracking. */
 export async function startTracking(): Promise<StartResult> {
+  lastError = null;
+  // Only Expo Go lacks background location; the installed app has it.
+  if (inExpoGo()) return "unavailable";
   try {
     if (await isTracking()) return "started";
+    // Android won't start the "On shift" service while the app is in the background; it is retried on return.
+    if (AppState.currentState !== "active") return "background";
     const fg = await Location.requestForegroundPermissionsAsync();
     if (fg.status !== "granted") return "no-permission";
     const bg = await Location.requestBackgroundPermissionsAsync();
@@ -157,9 +168,10 @@ export async function startTracking(): Promise<StartResult> {
       },
     });
     return "started";
-  } catch {
-    // Expo Go has no background location; it needs the installed app (a development or release build).
-    return "unavailable";
+  } catch (e) {
+    lastError = (e as Error)?.message ?? String(e);
+    console.warn("[tracking] start failed:", lastError);
+    return "failed";
   }
 }
 
