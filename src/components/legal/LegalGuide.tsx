@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { BookOpen, X } from "lucide-react";
 import { getLegalRows } from "@/api/legalMastersApi";
 import { getReportList } from "@/api/legalVerificationApi";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 /**
  * "How it works" — the Legal module's working flow, opened from the Legal dashboard.
@@ -124,7 +125,9 @@ export function LegalGuideButton() {
         <BookOpen size={14} /> <span className="hidden sm:inline">How it works</span>
       </button>
       {open && (
-        <div className="fixed inset-0 z-[60] flex justify-end bg-black/30" onClick={() => setOpen(false)}>
+        <BodyPortal>
+        {/* Drawn on <body>: inside the page card a fixed panel is clipped to the card. */}
+        <div className="fixed inset-0 z-[1000] flex justify-end bg-black/30 text-foreground" onClick={() => setOpen(false)}>
           <aside role="dialog" aria-label="How the Legal module works" onClick={(e) => e.stopPropagation()}
             className="h-full w-full max-w-2xl overflow-y-auto border-l-2 border-foreground bg-card p-5 shadow-xl">
             <div className="mb-3 flex items-start justify-between gap-3">
@@ -148,6 +151,7 @@ export function LegalGuideButton() {
             <LiveSetup />
           </aside>
         </div>
+        </BodyPortal>
       )}
     </>
   );
