@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Animated, Easing, Modal, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Grip, X, User, LogOut, LayoutDashboard, UserPlus, Users, Ticket, Clock, Map, ScrollText, ShieldCheck, Phone, MessageSquareWarning, Route } from "lucide-react-native";
+import { Grip, X, User, LogOut, LayoutDashboard, UserPlus, Users, Ticket, Clock, Map, ScrollText, ShieldCheck, Phone, MessageSquareWarning, Route, Truck } from "lucide-react-native";
 import { useAuth } from "@/auth/AuthContext";
 import { sheet as S } from "@/theme/colors";
 import { Press } from "@/components/sheet/Sheet";
@@ -20,6 +20,7 @@ const PAGES_BY_VIEW: Record<string, NavLeaf[]> = {
     DASHBOARD,
     { label: "New visitor", icon: UserPlus, nav: "NewVisitor" },
     { label: "Visitors today", icon: Users, nav: "VisitorsList" },
+    { label: "Service entries", icon: Truck, nav: "ServiceEntries" },
     { label: "Expected guests", icon: Ticket, nav: "ExpectedGuests" },
     { label: "My shift", icon: Clock, nav: "MyShift" },
   ],
