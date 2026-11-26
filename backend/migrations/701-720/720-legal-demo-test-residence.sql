@@ -362,7 +362,11 @@ FROM @lands WHERE k <> 6;
 INSERT INTO dbo.LegalLandDecision (LandId, Stage, Action, VersionNo, Reason, DecidedBy, DecidedAt)
 SELECT LandId, v.s, v.a, 1, v.r, v.u, DATEADD(day, v.d, SYSUTCDATETIME()) FROM @lands x
 CROSS JOIN (VALUES (N'Verification', N'Verified', N'Every field checked', @uVer, -15), (N'Land approval', N'Approve', N'Final legal review approved', @uApp, -14)) v(s, a, r, u, d) WHERE x.k <> 6;
-UPDATE dbo.LegalLand SET FinalVerifiedBy = @uVer, FinalVerifiedAt = DATEADD(day, -15, SYSUTCDATETIME()), FinalRemarks = N'All sections verified', DeedFileId = @fPdf WHERE LandId IN (@l2, @l3, @l4);
+UPDATE dbo.LegalLand SET FinalVerifiedBy = @uVer, FinalVerifiedAt = DATEADD(day, -15, SYSUTCDATETIME()), DeedFileId = @fPdf WHERE LandId IN (@l2, @l3, @l4);
+-- FinalRemarks exists only on the dev server (no migration adds it). Naming it directly makes the whole batch fail to
+-- compile elsewhere, before the dev-only guard above can return, so it is set through dynamic SQL when it exists.
+IF COL_LENGTH('dbo.LegalLand', 'FinalRemarks') IS NOT NULL
+  EXEC sp_executesql N'UPDATE dbo.LegalLand SET FinalRemarks = N''All sections verified'' WHERE LandId IN (@a, @b, @c);', N'@a INT, @b INT, @c INT', @l2, @l3, @l4;
 INSERT INTO dbo.LegalFinalCheck (LandId, CheckItem, Result, CheckedBy, CheckedAt, Remarks, CreatedBy)
 SELECT x.LandId, v.c, CASE WHEN x.k = 9 THEN N'Confirmed' ELSE N'Pending' END, @uVer, SYSUTCDATETIME(), N'Final check', @uEntry FROM @lands x
 CROSS JOIN (VALUES (N'Registered deed uploaded and approved'), (N'Ownership transfer recorded'), (N'Mutation application status recorded'), (N'Final checklist completed')) v(c) WHERE x.k <> 6;
