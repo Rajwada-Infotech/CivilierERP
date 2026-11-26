@@ -1,20 +1,37 @@
-// The ad space on the resident's dashboard: the switched-on dashboard ads play one after another, muted, round and
-// round. Takes no room when there are none (or the phone's app build has no video player).
-import { useEffect, useState } from "react";
+// The ad space on the resident's dashboard: the switched-on dashboard ads play one after another in random order,
+// muted; after each full round the order is shuffled again (and never starts with the ad that just played). Takes no
+// room when there are none (or the phone's app build has no video player).
+import { useEffect, useMemo, useState } from "react";
 import { View, Text } from "react-native";
 import { sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
-import { Video, useAds } from "./ads";
+import { Video, shuffled, useAds, type Ad } from "./ads";
 
 export function AdBanner({ enabled }: { enabled: boolean }) {
   const { ready, banners, sourceOf } = useAds(enabled);
+  const ids = banners.map((b) => b.id).join(",");
+  const [order, setOrder] = useState<Ad[]>([]);
   const [i, setI] = useState(0);
-  if (!Video || !ready || !banners.length) return null;
-  const ad = banners[i % banners.length];
+  // A fresh shuffle when the list of ads changes.
+  const list = useMemo(() => banners, [ids]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    setOrder(shuffled(list));
+    setI(0);
+  }, [list]);
+  const next = () => {
+    if (i + 1 < order.length) return setI(i + 1);
+    // End of a round: shuffle again, not starting with the one that just played.
+    let o = shuffled(list);
+    if (o.length > 1 && o[0].id === order[i]?.id) o = [...o.slice(1), o[0]];
+    setOrder(o);
+    setI(0);
+  };
+  if (!Video || !ready || !order.length) return null;
+  const ad = order[i] ?? order[0];
   return (
     <View style={{ borderTopWidth: 1, borderTopColor: S.rule, padding: 16, gap: 6 }}>
       <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 9.5, letterSpacing: 1.2, textTransform: "uppercase", color: S.graphite }}>Advertisement</Text>
-      <BannerPlayer key={ad.id} source={sourceOf(ad)} single={banners.length === 1} onEnd={() => setI((n) => n + 1)} />
+      <BannerPlayer key={`${ad.id}-${i}`} source={sourceOf(ad)} single={order.length === 1} onEnd={next} />
     </View>
   );
 }

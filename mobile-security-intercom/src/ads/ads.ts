@@ -9,6 +9,7 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/services/fetchWithAuth";
 import { getToken } from "@/services/authStorage";
 import { apiUrl } from "@/utils/apiBase";
+import * as SecureStore from "expo-secure-store";
 
 export type AdKind = "POPUP" | "BANNER";
 export interface Ad {
@@ -47,10 +48,33 @@ export function useAds(enabled: boolean) {
   };
 }
 
-// Pop-ups take turns: each opening of the dashboard (once per app launch) shows the next one.
-let popupTurn = 0;
+// Pop-ups are picked at random (once per app launch), never the same one as last time when there are several. The
+// last one shown is kept on the phone, so this holds across app launches.
+const LAST_POPUP_KEY = "security-ads-last-popup";
 let popupShownThisLaunch = false;
-export const nextPopupIndex = (count: number) => (count ? popupTurn++ % count : 0);
+export async function pickPopup(popups: Ad[]): Promise<Ad | null> {
+  if (!popups.length) return null;
+  let last: number | null = null;
+  try {
+    last = Number(await SecureStore.getItemAsync(LAST_POPUP_KEY)) || null;
+  } catch {
+    /* first time, or storage unavailable */
+  }
+  const pool = popups.length > 1 ? popups.filter((p) => p.id !== last) : popups;
+  const ad = pool[Math.floor(Math.random() * pool.length)] ?? popups[0];
+  SecureStore.setItemAsync(LAST_POPUP_KEY, String(ad.id)).catch(() => {});
+  return ad;
+}
+
+/** A shuffled copy (Fisher–Yates). */
+export function shuffled<T>(list: T[]): T[] {
+  const a = [...list];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
 export const popupAlreadyShown = () => popupShownThisLaunch;
 export const markPopupShown = () => {
   popupShownThisLaunch = true;

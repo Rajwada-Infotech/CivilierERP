@@ -1,4 +1,5 @@
-// The resident's pop-up video ad: shown once per app launch when the dashboard opens (if any pop-up ad is switched on).
+// The resident's pop-up video ad: shown once per app launch when the dashboard opens (if any pop-up ad is switched on),
+// picked at random — not the one shown last time.
 // It plays for 15 seconds or the whole video, whichever is longer — a shorter video repeats until 15 seconds — and
 // only then can it be closed. Starts muted; the speaker key turns the sound on.
 import { useEffect, useState } from "react";
@@ -6,7 +7,7 @@ import { Modal, View, Text, Pressable } from "react-native";
 import { X, Volume2, VolumeX } from "lucide-react-native";
 import { sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
-import { Video, markPopupShown, nextPopupIndex, popupAlreadyShown, useAds, type Ad } from "./ads";
+import { Video, markPopupShown, pickPopup, popupAlreadyShown, useAds, type Ad } from "./ads";
 
 const MIN_SECONDS = 15;
 
@@ -16,7 +17,7 @@ export function AdPopup({ enabled }: { enabled: boolean }) {
   useEffect(() => {
     if (!ready || !popups.length || popupAlreadyShown()) return;
     markPopupShown();
-    setAd(popups[nextPopupIndex(popups.length)]);
+    void pickPopup(popups).then(setAd);
   }, [ready, popups]);
   if (!Video || !ad) return null;
   return <PopupPlayer source={sourceOf(ad)} onClose={() => setAd(null)} />;
