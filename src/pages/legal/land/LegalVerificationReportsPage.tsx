@@ -17,7 +17,10 @@ export default function LegalVerificationReportsPage() {
   const rights = usePageRights("legal-land-enquiry");
   const project = String(scope);
   const list = useQuery({ queryKey: ["legal-report-list"], queryFn: getReportList, staleTime: 3600_000 });
-  const [key, setKey] = useState("verification-register");
+  const [picked, setPicked] = useState("");
+  // The chosen report, or the first one the server offers (never a key it does not know).
+  const key = list.data?.some((r) => r.key === picked) ? picked : list.data?.[0]?.key ?? "";
+  const setKey = setPicked;
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [vid, setVid] = useState("");
@@ -26,7 +29,7 @@ export default function LegalVerificationReportsPage() {
   const meta = list.data?.find((r) => r.key === key);
   const ws = useQuery({ queryKey: ["legal-verification-list", "all-for-report", project], queryFn: () => getVerifications(`project=${project}`), enabled: !!meta?.needsVerification });
   const rep = useQuery({ queryKey: ["legal-report", key, project, from, to, vid, applied], queryFn: () => getReport(key, { project, from, to, verificationId: vid ? Number(vid) : null, ...applied }),
-    enabled: !meta?.needsVerification || !!vid });
+    enabled: !!key && (!meta?.needsVerification || !!vid) });
   const data = rep.data;
   const fmt = (v: unknown) => (v == null || v === "" ? "—" : typeof v === "number" ? v.toLocaleString("en-IN") : String(v));
   return (
