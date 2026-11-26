@@ -13,7 +13,8 @@ import { SHEET_CSS, Detail, Dimension, Skel } from "@/components/sheet/Sheet";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface FinanceDashboardData {
-  paymentsMade: { totalCount: number; todayCount: number; totalAmount: number; todayAmount: number };
+  paymentsMade: { totalCount: number; todayCount: number; totalAmount: number; todayAmount: number; pendingApprovalCount?: number };
+  invoices: { totalCount: number; paidCount: number; pendingApprovalCount: number };
   receivedPayments: { totalCount: number; todayCount: number; totalAmount: number; todayAmount: number; approvedCount: number; draftCount: number };
   cheques: { totalCount: number; activeCount: number; inactiveCount: number };
   cards: { totalCount: number; activeCount: number; inactiveCount: number };
@@ -56,6 +57,7 @@ interface MonthlyIncomePoint {
 
 const EMPTY_DATA: FinanceDashboardData = {
   paymentsMade: { totalCount: 0, todayCount: 0, totalAmount: 0, todayAmount: 0 },
+  invoices: { totalCount: 0, paidCount: 0, pendingApprovalCount: 0 },
   receivedPayments: { totalCount: 0, todayCount: 0, totalAmount: 0, todayAmount: 0, approvedCount: 0, draftCount: 0 },
   cheques: { totalCount: 0, activeCount: 0, inactiveCount: 0 },
   cards: { totalCount: 0, activeCount: 0, inactiveCount: 0 },
@@ -77,6 +79,7 @@ function normalise(raw: any): FinanceDashboardData {
   };
   return {
     paymentsMade,
+    invoices: raw.invoices ?? EMPTY_DATA.invoices,
     receivedPayments: raw.receivedPayments ?? EMPTY_DATA.receivedPayments,
     cheques: raw.cheques ?? EMPTY_DATA.cheques,
     cards: raw.cards ?? EMPTY_DATA.cards,
@@ -371,6 +374,21 @@ const FinanceDashboard = () => {
                     <span className="figure" style={{ fontSize: 28, whiteSpace: "nowrap", color: s.color }}>{s.value}</span>
                   </button>
                 ))}
+                {/* Invoices and approvals waiting: all time, not only today. */}
+                <div style={{ marginTop: 6, border: "1px solid var(--ink)", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))" }}>
+                  {[
+                    { label: "Invoices", value: data.invoices.totalCount, sub: "booked", path: "/finance/invoice", red: false },
+                    { label: "Invoices paid", value: data.invoices.paidCount, sub: `of ${fmtInt(data.invoices.totalCount)}`, path: "/finance/invoice", red: false },
+                    { label: "Invoices to approve", value: data.invoices.pendingApprovalCount, sub: "waiting for approval", path: "/finance/invoice", red: n0(data.invoices.pendingApprovalCount) > 0 },
+                    { label: "Payments to approve", value: n0(data.paymentsMade.pendingApprovalCount), sub: "waiting for approval", path: "/payments", red: n0(data.paymentsMade.pendingApprovalCount) > 0 },
+                  ].map((b, i) => (
+                    <button key={b.label} onClick={() => navigate(b.path)} style={{ textAlign: "left", padding: "12px 14px", borderLeft: i ? "1px solid var(--rule-soft)" : 0 }}>
+                      <span className="label link" style={{ color: "var(--ink)" }}>{b.label}</span>
+                      <span className="figure" style={{ display: "block", fontSize: 24, marginTop: 6, color: b.red ? "var(--red)" : undefined }}>{fmtInt(b.value)}</span>
+                      <span style={{ display: "block", fontSize: 12, color: "var(--graphite)", marginTop: 2 }}>{b.sub}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </Detail>
