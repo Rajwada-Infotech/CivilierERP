@@ -100,7 +100,7 @@ export default function LandDeedProcessPage() {
                   const done = l.WorkflowStatus === "Deed Completed";
                   const left = l.DeedTargetDate ? daysLeft(l.DeedTargetDate) : null;
                   return (
-                    <tr key={l.LandId} title="Open all details" onClick={(e) => { if (!(e.target as HTMLElement).closest("button, input, a, [role=dialog]")) navigate(`/legal/land/deed-process/${l.LandId}`); }}
+                    <tr key={l.LandId} title="Open all details" onClick={(e) => { if (!(e.target as HTMLElement).closest("button, input, select, textarea, label, a, [role=dialog]")) navigate(`/legal/land/deed-process/${l.LandId}`); }}
                       className={`cursor-pointer border-t border-border align-top hover:bg-muted/40 ${!done && left != null && left < 0 ? "bg-destructive/10" : ""}`}>
                       <td className="px-3 py-2 font-mono font-semibold">{l.LandCode}</td>
                       <td className="px-3 py-2">{l.LandName}</td>
