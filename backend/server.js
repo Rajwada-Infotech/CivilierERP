@@ -15,6 +15,7 @@ const { startSiteVisitReminderEngine } = require("./services/saSiteVisitReminder
 const { startAutoDepreciationEngine } = require("./services/fixedAssetAutoDepreciation");
 const { startPoPaymentReminderEngine } = require("./services/poPaymentReminders");
 const { startDueDemandEngine } = require("./services/crmDemandScheduler");
+const { startCrmReminderEngine, stopCrmReminderEngine } = require("./services/crmReminderEngine");
 const authMiddleware = require("./middleware/auth");
 const { attachRateLimitUser, rateLimitKey, loginRateLimitKey } = require("./middleware/rateLimitIdentity");
 const { attachProjectScope } = require("./services/projectScope");
@@ -418,6 +419,7 @@ const ALL_ROUTES = [
   { path: "/api/crm/extra-charges",        file: "./routes/crmExtraCharges"        },
   { path: "/api/crm/booking-amendments",   file: "./routes/crmBookingAmendments"   },
   { path: "/api/crm/sla-engine",           file: "./routes/crmSlaEngine"           },
+  { path: "/api/crm/reminders",            file: "./routes/crmReminders"           },
   // /api/crm-portal is registered earlier, before the blanket authMiddleware
   // wall (see above) — it must NOT also be registered here.
 ];
@@ -786,6 +788,7 @@ async function startServer() {
       startAutoDepreciationEngine();
       startPoPaymentReminderEngine();
       startDueDemandEngine();
+      startCrmReminderEngine();
     });
 
     setupGracefulShutdown(server, worker);
@@ -831,6 +834,7 @@ function setupGracefulShutdown(server, worker) {
       }
 
       try {
+        stopCrmReminderEngine();
         worker?.stopWorker?.();
         await closeRedis();
         await closeDB();

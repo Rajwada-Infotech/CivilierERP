@@ -203,7 +203,9 @@ async function sendToBookingCustomers(bookingId, message = {}) {
  * CustomerStack). Each takes the facts its message names.
  */
 const inr = (n) => `₹${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
-const day = (d) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "Asia/Kolkata" }) : "");
+// The business's own time zone: dates in messages and the reminder engine's calendar days use it.
+const BUSINESS_TZ = "Asia/Kolkata";
+const day = (d) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: BUSINESS_TZ }) : "");
 const CUSTOMER_EVENTS = {
   agreementShared: (v) => ({ title: "Your agreement is waiting for your review", body: `${v.no || "Your agreement"} — approve or request a recheck.`, screen: "CustomerDocuments" }),
   agreementDateProposed: (v) => ({ title: "Agreement date proposed", body: `We proposed ${day(v.date)} — accept it, or suggest a different date.`, screen: "CustomerDocuments" }),
@@ -286,4 +288,4 @@ async function sendAppUpdate({ appKey, appLabel, versionCode, versionName, manda
   }
 }
 
-module.exports = { inr, day, isExpoPushToken, registerToken, unregisterToken, tokensForUsers, sendToUsers, sendToTokens, sendAppUpdate, sendToBookingCustomers, notifyBookingCustomers, sendToCustomers, notifyCustomers };
+module.exports = { BUSINESS_TZ, inr, day, isExpoPushToken, registerToken, unregisterToken, tokensForUsers, sendToUsers, sendToTokens, sendAppUpdate, sendToBookingCustomers, notifyBookingCustomers, sendToCustomers, notifyCustomers };

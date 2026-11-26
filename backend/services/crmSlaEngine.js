@@ -61,29 +61,8 @@ const REGISTRY = [
       return true;
     },
   },
-  {
-    entityType: "crm-payment-milestone",
-    async fetch(pool) {
-      const r = await pool.request().query(`
-        SELECT m.Id, m.MilestoneName, m.AmountDue, m.AmountPaid, m.DueDate, b.BookingNo, b.AssignedTo, a.ApplicantName
-        FROM dbo.CrmPaymentMilestone m
-        JOIN dbo.CrmBooking b ON b.Id = m.BookingId
-        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-        WHERE m.Status = 'Pending' AND m.DueDate < CAST(SYSDATETIME() AS DATE)
-          AND ${NOT_RECENTLY_ESCALATED("'crm-payment-milestone'", "m.Id")}
-      `);
-      return r.recordset;
-    },
-    async notify(pool, row) {
-      if (!row.AssignedTo) return false;
-      const balance = (row.AmountDue || 0) - (row.AmountPaid || 0);
-      await emitNotification(pool, row.AssignedTo, "sla_payment_overdue",
-        "Payment Overdue",
-        `${row.ApplicantName} · ${row.BookingNo} — ${row.MilestoneName} overdue (₹${balance.toLocaleString("en-IN")} pending)`,
-        row.Id, "payment_milestone", SLA_PUSH);
-      return true;
-    },
-  },
+  // The overdue-instalment reminder moved to Reminder Setup (migration 700, services/crmReminderEngine.js): who is told,
+  // when and how is now a database rule, and "unpaid" reads the money stages (paid money held On Account counts).
   {
     entityType: "crm-welcome-call-followup",
     async fetch(pool) {
@@ -220,4 +199,4 @@ function stopCrmSlaEngine() {
   timer = null;
 }
 
-module.exports = { runCrmSlaCheck, startCrmSlaEngine, stopCrmSlaEngine, REGISTRY };
+module.exports = { runCrmSlaCheck, startCrmSlaEngine, stopCrmSlaEngine, REGISTRY, SLA_PUSH };

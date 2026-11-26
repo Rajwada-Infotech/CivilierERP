@@ -172,7 +172,7 @@ function MoneyBlock({ s, onOpen }: { s: MoneyStatement; onOpen: () => void }) {
       {v.verifying > 0 ? <Muted>{money(v.verifying)} more is being verified and will count once confirmed.</Muted> : null}
       {v.overPrice > 0 ? <Muted>You have paid {money(v.overPrice)} more than your price. Please contact us about it.</Muted> : null}
       <Tap onPress={onOpen} style={{ alignSelf: "flex-start", paddingVertical: 2 }}>
-        <Text style={{ fontSize: 13.5, fontFamily: fonts.heading.semibold, color: brand.gold }}>See instalments and payments ›</Text>
+        <Text style={{ fontSize: 13.5, fontFamily: fonts.heading.semibold, color: brand.gold }}>See payment milestones and payments ›</Text>
       </Tap>
     </Block>
   );

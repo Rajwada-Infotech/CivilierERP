@@ -26,6 +26,7 @@ import {
   type DeskTab, type LedgerRow,
   pendingWaiverIds, planCoverage,
 } from "./payments/config";
+import { BookingReminders } from "./CrmReminderSetup";
 import { BAND_DOT, BAND_KEY, BAND_KEY_MAIN, CollectionBar, EntryTable, LEDGER_COLS, LedgerMobileCard, MilestoneTable, MoneyBand, MoneyTrail, OnAccountPanel, WaiverNotes, WaiverSection, PlanRibbon, PriceTable, TokenNote } from "./payments/parts";
 
 const { INP, KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT, TEXTAREA } = GRID_SHEET_KEYS;
@@ -508,6 +509,8 @@ const CrmPaymentMilestones: React.FC = () => {
           { label: unitChanged ? "Old schedule" : "Balance to collect", dot: BAND_DOT.notDue, value: fmtShort(unitChanged ? summary.totalDue : money?.toCollect), note: unitChanged ? "Historical · not collectible" : "Yet to be received", exact: fmt(unitChanged ? summary.totalDue : money?.toCollect) },
         ]}
         footer={<>{nextSentence}<WaiverNotes agreed={Number(booking.GrandTotal) || 0} waived={Number(summary.waivedDue) || 0} net={Number(summary.totalDue) || 0} excess={Number(money?.excess) || 0} bookingId={selectedBookingId} /></>} />
+      {/* Its reminders (Reminder Setup): number so far, last send, pause / resume — nothing when none run. */}
+      <BookingReminders bookingId={Number(selectedBookingId)} canEdit={rights.canEdit} />
       {unitChanged && (
         <GridRelated icon={Wallet} title="One payment · movement across bookings">
           <div className="px-4 py-3 border-b border-border/70 text-xs text-muted-foreground">

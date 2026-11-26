@@ -5,6 +5,7 @@
 import type React from "react";
 import {
   Activity,
+  BellRing,
   BookOpen,
   Calendar,
   CalendarClock,
@@ -569,6 +570,13 @@ export const crmSetupItems: SetupItem[] = [
     path: "/crm/setup/gst-rules",
     color: "text-amber-500",
     pageKey: "crm-gst-rule-master",
+  },
+  {
+    icon: BellRing,
+    label: "Reminder Setup",
+    path: "/crm/setup/reminders",
+    color: "text-violet-500",
+    pageKey: "crm-reminder-setup",
   },
   {
     icon: Car,

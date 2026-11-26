@@ -10,9 +10,9 @@ const path = require("path");
 const dir = path.join(__dirname, "..", "routes");
 // Params that are not records of a project (a document inside a record already
 // guarded by its parent id, a workflow step name, a portal-only route).
-// invoiceId / attId / itemKey only appear nested under a guarded /:id and are
+// invoiceId / attId / itemKey / auditId (a reminder plan's history entry) only appear nested under a guarded /:id and are
 // matched against that parent (e.g. WHERE Id = @iid AND BookingId = @bid).
-const NOT_A_RECORD = new Set(["step", "docId", "snagId", "attachId", "holdId", "invoiceId", "attId", "itemKey"]);
+const NOT_A_RECORD = new Set(["step", "docId", "snagId", "attachId", "holdId", "invoiceId", "attId", "itemKey", "auditId"]);
 // Routers that are not project data, or are guarded differently.
 const EXEMPT = new Set(["crmPortal.js", "crmGstRule.js", "crmMilestoneMaster.js", "crmNamingPattern.js",
   "crmPaymentPlans.js", "crmProjectBanks.js", "crmProjectAutoSetup.js", "crmBrokerageRateTiers.js", "crmSlaEngine.js"]);

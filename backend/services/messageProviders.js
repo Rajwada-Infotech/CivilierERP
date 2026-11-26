@@ -83,12 +83,25 @@ async function sendSms(config, { to, text }) {
   return { id: null, response: res.data };
 }
 
-/** WhatsApp Cloud API text message. Meta only delivers free-form text inside a 24-hour customer-service window. */
-async function sendWhatsApp(config, { to, text }) {
+/**
+ * WhatsApp Cloud API message. Meta only delivers free-form text inside a 24-hour customer-service window; outside it
+ * (reminders) a provider-approved template is sent: template = { name, language, params } with the body parameters
+ * in order.
+ */
+async function sendWhatsApp(config, { to, text, template }) {
   const base = config.apiUrl.endsWith("/") ? config.apiUrl : `${config.apiUrl}/`;
+  const body = template?.name
+    ? {
+        messaging_product: "whatsapp", to: toIntlNumber(to), type: "template",
+        template: {
+          name: template.name, language: { code: template.language },
+          ...(template.params?.length ? { components: [{ type: "body", parameters: template.params.map((v) => ({ type: "text", text: String(v ?? "") })) }] } : {}),
+        },
+      }
+    : { messaging_product: "whatsapp", to: toIntlNumber(to), type: "text", text: { body: text } };
   const res = await axios.post(
     `${base}${config.phoneNumberId}/messages`,
-    { messaging_product: "whatsapp", to: toIntlNumber(to), type: "text", text: { body: text } },
+    body,
     { timeout: TIMEOUT_MS, headers: { Authorization: `Bearer ${config.accessToken}` } },
   );
   return { id: res.data?.messages?.[0]?.id || null };

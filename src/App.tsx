@@ -526,6 +526,7 @@ const CrmPlotMaster        = lazy(() => import("./pages/CRM/CrmPlotMaster"));
 const CrmMilestoneMaster   = lazy(() => import("./pages/CRM/CrmMilestoneMaster"));
 const CrmBrokerageRateTiers = lazy(() => import("./pages/CRM/CrmBrokerageRateTiers"));
 const CrmGstRuleMaster = lazy(() => import("./pages/CRM/CrmGstRuleMaster"));
+const CrmReminderSetup = lazy(() => import("./pages/CRM/CrmReminderSetup"));
 const CrmBrokerMaster      = lazy(() => import("./pages/CRM/CrmBrokerMaster"));
 const CrmBrokerPayments    = lazy(() => import("./pages/CRM/CrmBrokerPayments"));
 const PortalLogin          = lazy(() => import("./pages/CrmCustomerPortal/PortalLogin"));
@@ -2898,6 +2899,7 @@ function AppRoutes() {
       <Route path="/crm/milestone-master"      element={<ProtectedRoute pageKey="crm-milestone-master"><CrmMilestoneMaster /></ProtectedRoute>} />
       <Route path="/crm/brokerage-rate-tiers"  element={<ProtectedRoute pageKey="crm-brokerage-rate-tiers"><CrmBrokerageRateTiers /></ProtectedRoute>} />
       <Route path="/crm/setup/gst-rules"       element={<ProtectedRoute pageKey="crm-gst-rule-master"><CrmGstRuleMaster /></ProtectedRoute>} />
+      <Route path="/crm/setup/reminders"       element={<ProtectedRoute pageKey="crm-reminder-setup"><CrmReminderSetup /></ProtectedRoute>} />
       <Route path="/masters/brokers"           element={<ProtectedRoute pageKey="broker-master"><CrmBrokerMaster /></ProtectedRoute>} />
       <Route path="/crm/broker-payments"       element={<ProtectedRoute pageKey="crm-brokerage"><CrmBrokerPayments /></ProtectedRoute>} />
       <Route path="/crm/parking-booking"       element={<ProtectedRoute pageKey="crm-parking-booking"><CrmParkingBookingPage /></ProtectedRoute>} />

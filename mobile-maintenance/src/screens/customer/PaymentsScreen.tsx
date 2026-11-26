@@ -141,7 +141,7 @@ export default function CustomerPaymentsScreen() {
       <Panel title="How your balance is worked out" icon={Scale}>
         <Sum label="Your payment plan" value={plan.total} sub={plan.waived > 0 ? `After ${money(plan.waived)} waived` : undefined} />
         <Sum label="Paid so far" value={-totals.paid} color={brand.success}
-          sub={totals.held > 0 ? `${money(totals.settled)} matched to instalments + ${money(totals.held)} waiting to be matched` : undefined} />
+          sub={totals.held > 0 ? `${money(totals.settled)} matched to payment milestones + ${money(totals.held)} waiting to be matched` : undefined} />
         <Divider />
         <Sum label={totals.extra > 0 ? "Paid more than the plan" : "Still to pay"} value={totals.extra > 0 ? totals.extra : totals.balance} color={totals.extra > 0 ? brand.gold : brand.textPrimary} />
         {totals.verifying > 0 ? (
@@ -187,7 +187,7 @@ export default function CustomerPaymentsScreen() {
 
       {/* 3 — instalments */}
       {plan.instalments.length ? (
-        <Panel title="Instalments" icon={CalendarClock}
+        <Panel title="Payment milestones" icon={CalendarClock}
           right={<Text style={{ fontSize: 13, fontFamily: fonts.body.medium, color: brand.textSecondary }}>{plan.instalments.length - openPlan.length} of {plan.instalments.length} done</Text>}>
           {planRows.map((m, i) => {
             const st = instState(m, m === next);
