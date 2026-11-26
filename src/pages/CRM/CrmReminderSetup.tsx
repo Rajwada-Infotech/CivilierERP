@@ -567,7 +567,11 @@ const CrmReminderSetup: React.FC = () => {
               return <article key={r.Id} className="bg-background p-4" style={{ border: RULE }}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0"><p className="text-sm font-semibold">{r.Name}</p><p className="mt-0.5 text-xs text-muted-foreground">{r.SituationLabel} · {r.ProjectName || "All projects"}</p></div>
-                  {rights.canEdit ? <button type="button" onClick={() => toggle(r)} className="shrink-0" title={r.IsActive ? "Turn off" : "Turn on"}><SheetMark text={r.IsActive ? "On" : "Off"} tone={r.IsActive ? "done" : "draft"} /></button> : <SheetMark text={r.IsActive ? "On" : "Off"} tone={r.IsActive ? "done" : "draft"} />}
+                  {/* The state, and a plain key to change it: the mark alone was not seen as a button. */}
+                  <div className="flex shrink-0 items-center gap-2">
+                    <SheetMark text={r.IsActive ? "On" : "Off"} tone={r.IsActive ? "done" : "draft"} />
+                    {rights.canEdit && <button type="button" onClick={() => toggle(r)} className={r.IsActive ? `${KEY_LINE} h-8 px-2.5 text-xs` : GRID_BTN_BRAND}>{r.IsActive ? <><Pause size={12} className="mr-1" />Switch Off</> : <><Play size={12} className="mr-1" />Switch On</>}</button>}
+                  </div>
                 </div>
                 <PlanStatus rule={r} issues={issues} />
                 <div className="mt-4 grid gap-3 text-xs sm:grid-cols-3">

@@ -223,6 +223,34 @@ const addDays = (d, n) => { const x = new Date(d); x.setUTCDate(x.getUTCDate() +
     check("Paid (back to as it was): no Reminder 4, and its reminders are cleared", !(await mainLog("AND Occurrence = 4")).length && !(await mainLog("AND ClearedAt IS NULL")).length);
     check("…and it leaves the list", !((await call("GET", `/r/live?ruleId=${mainId}`)).json.rows || []).some((x) => x.BookingId === zz.Id));
 
+    section("Payment milestones overdue: one reminder per booking");
+    const ms = await q(`SELECT TOP 3 Id, MilestoneNo, MilestoneName FROM dbo.CrmPaymentMilestone
+      WHERE BookingId = ${zz.Id} AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL ORDER BY MilestoneNo, Id`);
+    const isoDay = (n) => addDays(zz.BookingDate, n).toISOString().slice(0, 10);
+    // The first two overdue and unpaid (due 10 and 20 days after booking), the third due far ahead.
+    await q(`UPDATE dbo.CrmPaymentMilestone SET AmountDue = AmountDue + 100000000, Status = N'Pending', DueDate = '${isoDay(10)}' WHERE Id = ${ms[0].Id}`);
+    await q(`UPDATE dbo.CrmPaymentMilestone SET Status = N'Pending', DueDate = '${isoDay(20)}' WHERE Id = ${ms[1].Id}`);
+    await q(`UPDATE dbo.CrmPaymentMilestone SET Status = N'Pending', DueDate = '${isoDay(400)}' WHERE Id = ${ms[2].Id}`);
+    const od = await call("POST", "/r/rules", { Name: "E2E overdue per booking", Situation: "instalmentDue", StartFrom: "DueDate", OffsetDays: 1, RepeatEveryDays: 1,
+      NotifyBookingOwner: false, IsActive: true, Recipients: [{ Stage: "Remind", UserId: me }],
+      Channels: [{ Audience: "Staff", Channel: "Bell", Title: "Payment Overdue", Body: "Reminder {ReminderNo}: {BookingNo} — {Milestone} overdue ({Amount} pending, {MilestoneCount})" }] });
+    check("Saved", od.status === 201, `${od.status} ${od.json?.error}`);
+    expectCall("Checked and switched on", await previewAndEnable(od.json.id), 200);
+    const odLog = async (extra = "") => q(`SELECT * FROM dbo.CrmReminderLog WHERE RuleId = ${od.json.id} AND BookingId = ${zz.Id} ${extra} ORDER BY Id`);
+    await engine.runReminders({ today: bDay(30), ruleId: od.json.id });
+    let ol = await odLog();
+    check("Two payment milestones overdue: ONE bell for the booking, naming both", ol.length === 1 && ol[0].Body.includes(ms[0].MilestoneName) && ol[0].Body.includes(ms[1].MilestoneName) && /, 2\)$/.test(ol[0].Body), JSON.stringify(ol.map((l) => l.Body)));
+    check("…numbered from the oldest (due day 10, reminded from day 11: day 30 = Reminder 20)", ol[0].Occurrence === 20 && ol[0].Body.startsWith("Reminder 20:"), ol[0]?.Body);
+    check("…not the one due far ahead", !ol[0].Body.includes(ms[2].MilestoneName) || ms[2].MilestoneName === ms[0].MilestoneName || ms[2].MilestoneName === ms[1].MilestoneName);
+    await engine.runReminders({ today: bDay(30), ruleId: od.json.id });
+    check("Same day again: nothing more", (await odLog()).length === 1);
+    await q(`UPDATE dbo.CrmPaymentMilestone SET AmountDue = AmountDue - 100000000 WHERE Id = ${ms[0].Id}`);
+    await engine.runReminders({ today: bDay(31), ruleId: od.json.id });
+    ol = await odLog();
+    const next = ol.filter((l) => l.EntityKey === `milestones:${zz.Id}:${ms[1].Id}`);
+    check("The oldest paid: the next one counts on its own (due day 20 → day 31 = Reminder 11), the old one cleared",
+      next.length === 1 && next[0].Occurrence === 11 && ol.filter((l) => l.EntityKey !== next[0].EntityKey).every((l) => l.ClearedAt), JSON.stringify(ol.map((l) => [l.EntityKey, l.Occurrence, !!l.ClearedAt])));
+
     section("Saved changes need a fresh check before going live");
     expectCall("Edit the live plan", await call("PUT", `/r/rules/${mainId}`, { ...mainBody, RepeatEveryDays: 2 }), 200);
     check("After an edit it is off until checked again", (await q(`SELECT IsActive FROM dbo.CrmReminderRule WHERE Id = ${mainId}`))[0].IsActive === false);
