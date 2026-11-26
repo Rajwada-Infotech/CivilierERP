@@ -86,7 +86,7 @@ export function LoginRemindersPopup() {
             </button>
           </div>
 
-          <div className="max-h-[50vh] overflow-y-auto">
+          <div className="max-h-[50vh] overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {reminders.slice(0, 8).map((r, i) => {
               const Icon = TYPE_ICON[r.type] ?? Package;
               const overdue = r.urgency === "overdue";
