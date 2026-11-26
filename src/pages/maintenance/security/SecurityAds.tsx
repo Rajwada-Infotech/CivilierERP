@@ -75,7 +75,7 @@ export default function SecurityAds() {
         <SheetTabs
           tabs={(["POPUP", "BANNER"] as AdKind[]).map((k) => ({ value: k, label: KIND_LABEL[k], count: ads.filter((a) => a.kind === k).length }))}
           value={kind}
-          onChange={setKind}
+          onChange={(v) => setKind(v as AdKind)}
         />
         <SheetBox title={KIND_LABEL[kind]} note={shown.length} flush>
           <p className="px-4 py-2.5 text-xs text-muted-foreground border-b border-foreground/15">{KIND_NOTE[kind]}</p>
