@@ -1,0 +1,35 @@
+diff --git a/node_modules/react-native-gesture-handler/android/src/main/java/com/swmansion/gesturehandler/react/RNGestureHandlerButtonViewManager.kt b/node_modules/react-native-gesture-handler/android/src/main/java/com/swmansion/gesturehandler/react/RNGestureHandlerButtonViewManager.kt
+index f964945..a4d9736 100644
+--- a/node_modules/react-native-gesture-handler/android/src/main/java/com/swmansion/gesturehandler/react/RNGestureHandlerButtonViewManager.kt
++++ b/node_modules/react-native-gesture-handler/android/src/main/java/com/swmansion/gesturehandler/react/RNGestureHandlerButtonViewManager.kt
+@@ -796,7 +796,7 @@ class RNGestureHandlerButtonViewManager :
+     private fun dispatchJSEvent(type: EventType, handler: NativeViewGestureHandler) {
+       val reactContext = context as? ReactContext ?: return
+       // TODO: deprecated, but its replacement is unavailable before RN 0.85 — drop when possible
+-      val eventDispatcher = UIManagerHelper.getEventDispatcherForReactTag(reactContext, this.id) ?: return
++      val eventDispatcher = UIManagerHelper.getEventDispatcher(reactContext) ?: return
+       eventDispatcher.dispatchEvent(RNGestureHandlerButtonEvent.obtain(this, handler, type))
+ 
+       if (type == EventType.PressIn) {
+@@ -1184,7 +1184,7 @@ class RNGestureHandlerButtonViewManager :
+       val sample = lastHoverSample ?: return
+       val reactContext = context as? ReactContext ?: return
+       // TODO: deprecated, but its replacement is unavailable before RN 0.85 — drop when possible
+-      val eventDispatcher = UIManagerHelper.getEventDispatcherForReactTag(reactContext, this.id) ?: return
++      val eventDispatcher = UIManagerHelper.getEventDispatcher(reactContext) ?: return
+ 
+       eventDispatcher.dispatchEvent(RNGestureHandlerButtonEvent.obtain(this, sample, type))
+     }
+diff --git a/node_modules/react-native-gesture-handler/android/src/main/java/com/swmansion/gesturehandler/react/RNGestureHandlerDetectorView.kt b/node_modules/react-native-gesture-handler/android/src/main/java/com/swmansion/gesturehandler/react/RNGestureHandlerDetectorView.kt
+index c4a8199..78d74d7 100644
+--- a/node_modules/react-native-gesture-handler/android/src/main/java/com/swmansion/gesturehandler/react/RNGestureHandlerDetectorView.kt
++++ b/node_modules/react-native-gesture-handler/android/src/main/java/com/swmansion/gesturehandler/react/RNGestureHandlerDetectorView.kt
+@@ -237,7 +237,7 @@ class RNGestureHandlerDetectorView(context: Context) : ReactViewGroup(context) {
+   }
+ 
+   fun dispatchEvent(event: Event<*>) {
+-    val eventDispatcher = UIManagerHelper.getEventDispatcherForReactTag(reactContext, id)
++    val eventDispatcher = UIManagerHelper.getEventDispatcher(reactContext)
+     eventDispatcher?.dispatchEvent(event)
+   }
+ 

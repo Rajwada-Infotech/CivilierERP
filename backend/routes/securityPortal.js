@@ -15,6 +15,7 @@
  *   GET  /gates                        the gates of their projects (and whether a guard is on duty)
  *   GET  /calls/available   POST /calls { gateId }   GET /calls/incoming   GET /calls/:id   POST /calls/:id/answer|decline|end
  *   GET  /complaints/options   GET /complaints   POST /complaints     complaints about security guards
+ *   GET  /ads   GET /ads/:id/video           the switched-on video ads (pop-up and dashboard), and one ad's video
  *   GET  /patrol?from&to   GET /patrol/:id   patrol rounds at their project(s), and one round's route (replay)
  */
 const express = require("express");
@@ -274,6 +275,29 @@ router.get("/patrol/:id", async (req, res) => {
     const patrol = projects.length ? await patrols.patrolAt(pool, id, projects) : null;
     if (!patrol || new Date(patrol.startedAt) < new Date(Date.now() - PATROL_DAYS * 86400000)) return res.status(404).json({ error: "Patrol not found." });
     res.json(await patrols.patrolTrail(pool, patrol));
+  } catch (err) {
+    failed(req, res, err);
+  }
+});
+
+// ── Ads: the switched-on video ads (uploaded by super admins in Maintenance → Ads). Only residents see ads.
+const securityAds = require("../services/securityAds");
+
+router.get("/ads", async (req, res) => {
+  try {
+    const list = await securityAds.listAds(getPool(), { activeOnly: true });
+    res.json(list.map((a) => ({ id: a.id, kind: a.kind, title: a.title, mimeType: a.mimeType, videoPath: `/api/security-portal/ads/${a.id}/video` })));
+  } catch (err) {
+    if (err.number === 208) return res.json([]); // ads not set up on this server yet: none to show
+    failed(req, res, err);
+  }
+});
+
+router.get("/ads/:id/video", async (req, res) => {
+  const id = idOf(req);
+  if (!id) return res.status(400).json({ error: "Invalid ad." });
+  try {
+    await securityAds.streamAd(getPool(), id, req, res, { activeOnly: true });
   } catch (err) {
     failed(req, res, err);
   }

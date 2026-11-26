@@ -181,6 +181,7 @@ const SecurityGates = lazy(() => import("./pages/maintenance/security/SecurityGa
 const SecurityGuards = lazy(() => import("./pages/maintenance/security/SecurityGuards"));
 const SecurityResidents = lazy(() => import("./pages/maintenance/security/SecurityResidents"));
 const SecurityLive = lazy(() => import("./pages/maintenance/security/SecurityLive"));
+const SecurityAds = lazy(() => import("./pages/maintenance/security/SecurityAds"));
 const SecurityGeofences = lazy(() => import("./pages/maintenance/security/SecurityGeofences"));
 const ElectricityMaintenance = lazy(() => import("./pages/maintenance/ElectricityMaintenance"));
 const MaintenanceServiceRequests = lazy(() => import("./pages/maintenance/MaintenanceServiceRequests"));
@@ -1391,6 +1392,14 @@ function AppRoutes() {
           <ProtectedRoute pageKey="security-residents">
             <SecurityResidents />
           </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/maintenance/ads"
+        element={
+          <SuperAdminRoute>
+            <SecurityAds />
+          </SuperAdminRoute>
         }
       />
       <Route

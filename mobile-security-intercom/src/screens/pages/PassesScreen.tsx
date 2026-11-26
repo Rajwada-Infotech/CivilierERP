@@ -17,6 +17,7 @@ const DURATIONS = [
   { value: "today", label: "Today", ms: 0 },
   { value: "2d", label: "2 days", ms: 2 * 86400000 },
   { value: "7d", label: "7 days", ms: 7 * 86400000 },
+  { value: "30d", label: "30 days", ms: 30 * 86400000 },
 ] as const;
 type Duration = (typeof DURATIONS)[number]["value"];
 
@@ -149,7 +150,9 @@ export default function PassesScreen() {
               <Input value={vehicle} onChangeText={setVehicle} autoCapitalize="characters" maxLength={30} placeholder="Optional" />
             </Field>
             <Field label="Valid for">
-              <Seg options={DURATIONS.map((d) => ({ value: d.value, label: d.label }))} value={duration} onChange={setDuration} />
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <Seg options={DURATIONS.map((d) => ({ value: d.value, label: d.label }))} value={duration} onChange={setDuration} />
+              </ScrollView>
             </Field>
             <Field label="Entries allowed">
               <Input value={uses} onChangeText={(t) => setUses(t.replace(/\D/g, "").slice(0, 2))} keyboardType="number-pad" maxLength={2} />

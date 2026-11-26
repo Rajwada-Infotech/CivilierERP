@@ -18,6 +18,7 @@
  * Tracking (doc phase 3):
  *   POST /pings                          guard's phone: { pings: [{ at, lat, lng, accuracy?, battery? }] } -> { stored, onShift }
  *   (guard)             GET /patrols/current   POST /patrols/start   POST /patrols/end     patrol rounds
+ *   (guard)             GET /service-entries   POST /service-entries   POST /service-entries/:id/out   vehicles / workers in for work (no resident asked)
  *   security-live       GET /live  GET /guards/tracked  GET /guards/:id/trail?from&to  GET /alerts?open=1
  *                       POST /alerts/:id/acknowledge  GET /visitor-log?from&to&gateId&status&q&page
  *   security-geofences  GET /geofences  POST /geofences/preview  POST /geofences  PUT /geofences/:id  DELETE /geofences/:id
@@ -596,6 +597,57 @@ router.post("/patrols/end", async (req, res) => {
     res.json({ patrol: null });
   } catch (err) {
     visitorFail(req, res, err);
+  }
+});
+
+// ── Service entries (guard): vehicles and workers in for maintenance or other official work, logged in and out at the
+// gate. No resident is asked or notified. A guard sees and logs entries at the project of their current gate.
+const serviceEntries = require("../services/securityServiceEntries");
+const guardGate = async (req, res) => {
+  if (!isGuard(req)) {
+    bad(res, "Only a guard logs service entries.", 403);
+    return null;
+  }
+  const cur = await guardAssignmentNow(getPool(), me(req));
+  if (!cur) {
+    bad(res, "You aren't posted at a gate today.", 409);
+    return null;
+  }
+  return cur;
+};
+const serviceFail = (req, res, err) => (err.status ? bad(res, err.message, err.status) : visitorFail(req, res, err));
+
+router.get("/service-entries", async (req, res) => {
+  try {
+    const cur = await guardGate(req, res);
+    if (!cur) return;
+    // Still inside (any day), and today's (IST) log.
+    const since = new Date(new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10) + "T00:00:00+05:30");
+    res.json(await serviceEntries.listAt(getPool(), cur.projectId, since));
+  } catch (err) {
+    serviceFail(req, res, err);
+  }
+});
+
+router.post("/service-entries", async (req, res) => {
+  try {
+    const cur = await guardGate(req, res);
+    if (!cur) return;
+    res.json(await serviceEntries.logIn(getPool(), me(req), cur, req.body));
+  } catch (err) {
+    serviceFail(req, res, err);
+  }
+});
+
+router.post("/service-entries/:id/out", async (req, res) => {
+  const id = int(req.params.id);
+  if (!id) return bad(res, "Invalid entry.");
+  try {
+    const cur = await guardGate(req, res);
+    if (!cur) return;
+    res.json(await serviceEntries.logOut(getPool(), me(req), cur.projectId, id));
+  } catch (err) {
+    serviceFail(req, res, err);
   }
 });
 

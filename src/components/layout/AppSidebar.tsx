@@ -48,7 +48,7 @@ import { salesAutomationNavItems } from "./sidebars/SalesAutomationSidebar";
 import { crmNavItems, withSentBackBadges } from "./sidebars/CrmSidebar";
 import { loanNavItems } from "./sidebars/LoanSidebar";
 import { fixedAssetNavItems } from "./sidebars/FixedAssetSidebar";
-import { maintenanceNavItems } from "./sidebars/MaintenanceSidebar";
+import { maintenanceNavFor } from "./sidebars/MaintenanceSidebar";
 
 import { hrPayrollNavItems } from "./sidebars/HrPayrollSidebar";
 import { legalNavItems } from "./sidebars/LegalSidebar";
@@ -390,7 +390,7 @@ export const AppSidebar = () => {
         raw = fixedAssetNavItems;
         break;
       case "maintenance":
-        raw = maintenanceNavItems;
+        raw = maintenanceNavFor(isSuperAdminRole(role));
         break;
       case "hr-payroll":
         raw = hrPayrollNavItems;

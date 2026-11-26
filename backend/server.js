@@ -228,6 +228,8 @@ const ALL_ROUTES = [
   { path: "/api/security-attendance", file: "./routes/securityAttendance" },
   // Civilier Security app (mobile-security-intercom): guard / security admin / resident, by role name.
   { path: "/api/security", file: "./routes/securityIntercom" },
+  // Maintenance → Ads (super admins only): video ads for the Civilier Security app's residents.
+  { path: "/api/security-ads", file: "./routes/securityAds" },
   { path: "/api/electricity-maintenance", file: "./routes/electricityMaintenance" },
   { path: "/api/item-groups", file: "./routes/itemGroup" },
   { path: "/api/item-master", file: "./routes/itemMaster" },
