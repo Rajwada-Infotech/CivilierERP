@@ -164,7 +164,7 @@ export const CIVIL_WORK_DPR_REPORTS: ReportDef[] = [
   {
     id: "cwd-user-daily-work",
     label: "User-Wise Daily Work Report",
-    description: "Which work was reported for each allocated user on a chosen date — Auto Name, status, progress, QC and attempt (shows only the selected day; today when no date is picked)",
+    description: "Which work was reported for each allocated user in a chosen date range (or one day) — Auto Name, status, progress, QC and attempt (today when no dates are picked)",
     icon: UserCog,
     color: "#14b8a6",
     apiPath: "/api/civilworkdpr-reports/user-daily-work",
@@ -212,7 +212,7 @@ export const CIVIL_WORK_DPR_REPORTS: ReportDef[] = [
   {
     id: "cwd-tag-wise",
     label: "Tag-Wise Civil Work DPR Report",
-    description: "Civil Work DPR records grouped by the activity's tag — filter by project, tag, user and date (shows only the selected day); Auto Name, progress, QC and attempt included",
+    description: "Civil Work DPR records grouped by the activity's tag — filter by project, tag, user and a date range (or one day); Auto Name, progress, QC and attempt included",
     icon: Tag,
     color: "#0ea5e9",
     apiPath: "/api/civilworkdpr-reports/tag-wise",
