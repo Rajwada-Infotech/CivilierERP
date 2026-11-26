@@ -36,7 +36,7 @@ function BannerPlayer({ source, single, onEnd }: { source: { uri: string; header
   }, [player, single, onEnd]);
   return (
     <View style={{ borderWidth: 1, borderColor: S.ink, backgroundColor: "#000" }}>
-      <Video.VideoView player={player} style={{ width: "100%", aspectRatio: 16 / 9 }} contentFit="cover" nativeControls={false} allowsFullscreen={false} allowsPictureInPicture={false} />
+      <Video.VideoView player={player} surfaceType="textureView" style={{ width: "100%", aspectRatio: 16 / 9 }} contentFit="cover" nativeControls={false} allowsFullscreen={false} allowsPictureInPicture={false} />
     </View>
   );
 }

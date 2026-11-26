@@ -59,7 +59,7 @@ function PopupPlayer({ source, onClose }: { source: { uri: string; headers?: Rec
   }, [left, player]);
 
   return (
-    <Modal visible transparent animationType="fade" onRequestClose={() => {
+    <Modal visible transparent hardwareAccelerated statusBarTranslucent animationType="fade" onRequestClose={() => {
         if (!left) onClose();
       }}>
       <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.85)", justifyContent: "center", padding: 16 }}>
@@ -79,7 +79,7 @@ function PopupPlayer({ source, onClose }: { source: { uri: string; headers?: Rec
               )}
             </View>
           </View>
-          <Video.VideoView player={player} style={{ width: "100%", aspectRatio: 16 / 9 }} contentFit="contain" nativeControls={false} allowsFullscreen={false} allowsPictureInPicture={false} />
+          <Video.VideoView player={player} surfaceType="textureView" style={{ width: "100%", aspectRatio: 16 / 9 }} contentFit="contain" nativeControls={false} allowsFullscreen={false} allowsPictureInPicture={false} />
           {failed && <Text style={{ color: "#fff", padding: 12, fontSize: 12 }}>The ad couldn't be played.</Text>}
         </View>
       </View>
