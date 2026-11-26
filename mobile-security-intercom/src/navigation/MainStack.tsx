@@ -16,6 +16,7 @@ import PassesScreen from "@/screens/pages/PassesScreen";
 import CallGateScreen from "@/screens/pages/CallGateScreen";
 import ComplaintsScreen from "@/screens/pages/ComplaintsScreen";
 import AdminComplaintsScreen from "@/screens/pages/AdminComplaintsScreen";
+import PatrolScreen from "@/screens/pages/PatrolScreen";
 import type { CallInfo } from "@/api/securityMoreApi";
 import { TopHeader } from "./TopHeader";
 
@@ -43,6 +44,7 @@ export type MainStackParamList = {
   Complaints: undefined;
   /** Security admin: residents' complaints about guards. */
   AdminComplaints: undefined;
+  Patrol: undefined;
 };
 
 const Stack = createNativeStackNavigator<MainStackParamList>();
@@ -68,6 +70,7 @@ export default function MainStack() {
       <Stack.Screen name="CallGate" component={CallGateScreen} options={{ title: "Call the gate" }} />
       <Stack.Screen name="Complaints" component={ComplaintsScreen} options={{ title: "Complain about a guard" }} />
       <Stack.Screen name="AdminComplaints" component={AdminComplaintsScreen} options={{ title: "Complaints" }} />
+      <Stack.Screen name="Patrol" component={PatrolScreen} options={{ title: "Patrol" }} />
     </Stack.Navigator>
   );
 }
