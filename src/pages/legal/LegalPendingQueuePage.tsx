@@ -1,4 +1,5 @@
 import React from "react";
+import { DueBadge, dueRow, dueLevel, DUE_BG } from "@/components/legal/DueBadge";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Clock, AlertTriangle, FileWarning, ExternalLink } from "lucide-react";
@@ -131,7 +132,7 @@ export default function LegalPendingQueuePage() {
                             </span>
                           </td>
                           <td className="px-4 py-3 text-foreground">{doc.ResponsibleUserName || "Unassigned"}</td>
-                          <td className="px-4 py-3 text-muted-foreground">{doc.DueDate || "Immediate"}</td>
+                          <td className="px-4 py-3"><DueBadge date={doc.DueDate || null} empty="Immediate" /></td>
                         </tr>
                       ))}
                     </tbody>

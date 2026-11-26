@@ -54,6 +54,8 @@ export interface LegalMasterMeta {
   superAdminDelete?: boolean;
   /** Approval setup: only an administrator can change it; everyone else sees it read-only. */
   adminOnly?: boolean;
+  /** The signed-in user is a Legal Admin and may change this setup list. */
+  legalAdminEdit?: boolean;
   /** Read-only computed columns shown in the table and details (e.g. "Used by land"). */
   /** `whatsapp`: the row also carries `<name>__wa`, a WhatsApp number shown as a chat link beside the value */
   extras?: { name: string; label: string; whatsapp?: boolean; after?: string }[];

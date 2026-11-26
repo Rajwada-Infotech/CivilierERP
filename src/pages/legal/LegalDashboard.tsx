@@ -1,4 +1,6 @@
 import { WaitingForMe } from "@/components/legal/WaitingForMe";
+import { LegalGuideButton } from "@/components/legal/LegalGuide";
+import { VerificationDashboardSection } from "@/components/legal/VerificationDashboardSection";
 import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getOverdueSearches } from "@/api/legalEnquirySearchApi";
@@ -90,9 +92,10 @@ export default function LegalDashboard() {
   return (
     <>
       <Breadcrumbs items={[{ label: "Dashboard", path: "/home" }, { label: "Legal" }]} />
-      <LegalShell title="Company Land Records" subtitle="Centralized property registers, ownership history, and document archive" icon={Judge}>
+      <LegalShell title="Company Land Records" subtitle="Centralized property registers, ownership history, and document archive" icon={Judge} action={<LegalGuideButton />}>
         <div className="space-y-5">
           <WaitingForMe />
+          {enquiryRights.canView && <VerificationDashboardSection project={String(dashProject)} />}
           {error && <div className={`${card} p-4 text-sm text-destructive`}>Could not load the Legal summary: {(error as Error).message}</div>}
 
           {/* ── Hero ── */}

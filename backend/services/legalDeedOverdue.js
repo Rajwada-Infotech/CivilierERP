@@ -95,4 +95,45 @@ async function runDeedSearchDueSoonJob() {
   return due.length;
 }
 
-module.exports = { runDeedOverdueJob, runDeedSearchOverdueJob, runPostRegOverdueJob, runDeedSearchDueSoonJob };
+/**
+ * Legal verification activities: the assignee is reminded on the reminder days set in Setup (LegalActivityReminderRule,
+ * e.g. 7 / 3 / 1 days before and on the due date), then daily once overdue. LegalActivityReminderLog stops repeats.
+ */
+async function runActivityDueJob() {
+  const pool = getPool();
+  if (!(await pool.request().query("SELECT OBJECT_ID('dbo.LegalActivityReminderLog','U') AS t")).recordset[0].t) return 0;
+  const rows = (await pool.request().query(`
+    SELECT a.ActivityId, a.ActivityNo, a.ActivityName, a.AssignedUserId, a.DueDate, a.VerificationId, v.VerificationNo, v.LeadUserId, a.EscalatedOn,
+           ISNULL(t.EscalateAfterDays, 3) AS EscalateAfterDays,
+           DATEDIFF(DAY, CAST(GETDATE() AS DATE), a.DueDate) AS DaysLeft
+    FROM dbo.LegalVerificationActivity a JOIN dbo.LegalActivityTemplate t ON t.TemplateId = a.TemplateId
+    JOIN dbo.LegalVerification v ON v.VerificationId = a.VerificationId AND v.Status NOT IN (N'Closed', N'Verified', N'Rejected')
+    WHERE a.AssignedUserId IS NOT NULL AND a.DueDate IS NOT NULL AND a.Status NOT IN (N'Submitted for Review', N'Closed', N'On Hold')
+      AND (a.DueDate < CAST(GETDATE() AS DATE)
+           OR DATEDIFF(DAY, CAST(GETDATE() AS DATE), a.DueDate) IN (SELECT DaysBefore FROM dbo.LegalActivityReminderRule WHERE IsActive = 1))`)).recordset;
+  let sent = 0;
+  for (const r of rows) {
+    const kind = r.DaysLeft < 0 ? "overdue" : `D${r.DaysLeft}`;
+    const done = (await pool.request().input("A", r.ActivityId).input("D", r.DueDate).input("K", kind).query(`
+      SELECT 1 AS x FROM dbo.LegalActivityReminderLog WHERE ActivityId = @A AND DueDate = @D AND Kind = @K
+        AND (@K <> 'overdue' OR SentOn = CAST(GETDATE() AS DATE))`)).recordset.length;
+    if (done) continue;
+    const due = new Date(r.DueDate).toISOString().slice(0, 10);
+    const title = r.DaysLeft < 0 ? `Overdue ${-r.DaysLeft} day${r.DaysLeft === -1 ? "" : "s"}: ${r.ActivityName}` : r.DaysLeft === 0 ? `Due today: ${r.ActivityName}` : `Due in ${r.DaysLeft} day${r.DaysLeft === 1 ? "" : "s"}: ${r.ActivityName}`;
+    await emitNotification(pool, r.AssignedUserId, r.DaysLeft < 0 ? "legal_activity_overdue" : "legal_activity_due", title,
+      `${r.VerificationNo} · ${r.ActivityNo}. ${r.ActivityName} · due ${due}. Open Legal → My tasks.`, r.VerificationId, "legal_verification", { push: true }).catch(() => {});
+    await pool.request().input("A", r.ActivityId).input("D", r.DueDate).input("K", kind)
+      .query("INSERT INTO dbo.LegalActivityReminderLog (ActivityId, DueDate, Kind) VALUES (@A, @D, @K)");
+    sent++;
+    // Escalation: overdue for EscalateAfterDays (Setup → Verification Activities) → the lead and Legal Admins, once per due date.
+    if (r.DaysLeft < 0 && -r.DaysLeft >= r.EscalateAfterDays && !r.EscalatedOn) {
+      const { notify } = require("./legalNotify");
+      await notify(pool, { users: [r.LeadUserId], roles: ["Legal Admin"], except: r.AssignedUserId, type: "legal_activity_escalated",
+        title: `Escalated — overdue ${-r.DaysLeft} days: ${r.ActivityName}`, body: `${r.VerificationNo} · due ${due}. Reassign or follow up.`, refId: r.VerificationId, refType: "legal_verification" });
+      await pool.request().input("A", r.ActivityId).query("UPDATE dbo.LegalVerificationActivity SET EscalatedOn = CAST(GETDATE() AS DATE) WHERE ActivityId = @A");
+    }
+  }
+  return sent;
+}
+
+module.exports = { runDeedOverdueJob, runDeedSearchOverdueJob, runPostRegOverdueJob, runDeedSearchDueSoonJob, runActivityDueJob };

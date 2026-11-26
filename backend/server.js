@@ -192,6 +192,8 @@ const ALL_ROUTES = [
   { path: "/api/legal/deed-reg", file: "./routes/legal/deedRegistration" },
   { path: "/api/legal/flow", file: "./routes/legal/landFlow" },
   { path: "/api/legal/reminders", file: "./routes/legal/legalReminders" },
+  { path: "/api/legal/verification-reports", file: "./routes/legal/verificationReports" },
+  { path: "/api/legal/verification", file: "./routes/legal/verification" },
   { path: "/api/legal/amendments", file: "./routes/legal/landAmendment" },
   { path: "/api/legal", file: "./routes/legal/legalOperations" },
   { path: "/api/grace-time-master", file: "./routes/graceTimeMaster" },

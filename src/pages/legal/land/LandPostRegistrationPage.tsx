@@ -1,4 +1,5 @@
 import { usePaged } from "@/components/legal/usePaged";
+import { DueBadge, dueRow, dueLevel, DUE_BG } from "@/components/legal/DueBadge";
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -15,9 +16,10 @@ import { useQuery as useQ } from "@tanstack/react-query";
 import { uploadLegalFile } from "@/api/legalMastersApi";
 import { LandClearancePanel } from "@/components/legal/LandClearancePanel";
 import { askLegal } from "@/components/legal/LegalAsk";
+import { InlineRecordEditor } from "@/components/legal/InlineRecordEditor";
+import type { PostRegApplication } from "@/api/legalLandApi";
 
 const fmt = (d: string | null) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—");
-const today = new Date().toISOString().slice(0, 10);
 const TONE: Record<string, string> = {
   Completed: "text-emerald-600", Rejected: "text-destructive", "Additional Documents Required": "text-amber-600",
   "Application Submitted": "text-sky-600", "Under Processing": "text-sky-600", "Not Started": "text-muted-foreground",
@@ -30,7 +32,6 @@ function TaskRow({ t, statuses, canEdit, onSaved }: { t: PostRegTask; statuses: 
   const [f, setF] = useState({ status: t.Status, refNo: t.RefNo ?? "", dueDate: t.DueDate ?? "", remarks: t.Remarks ?? "", fileId: null as number | null, fileName: "", assignedUserId: t.AssignedUserId ? String(t.AssignedUserId) : "" });
   const [busy, setBusy] = useState(false);
   const dirty = f.status !== t.Status || f.refNo !== (t.RefNo ?? "") || f.dueDate !== (t.DueDate ?? "") || f.remarks !== (t.Remarks ?? "") || !!f.fileId || f.assignedUserId !== (t.AssignedUserId ? String(t.AssignedUserId) : "");
-  const late = t.Status !== "Completed" && t.DueDate && t.DueDate < today;
   const attach = () => {
     const el = document.createElement("input");
     el.type = "file"; el.accept = "application/pdf,image/*";
@@ -46,7 +47,7 @@ function TaskRow({ t, statuses, canEdit, onSaved }: { t: PostRegTask; statuses: 
     try { toast.success((await updatePostRegTask(t.TaskId, { ...f, assignedUserId: f.assignedUserId ? Number(f.assignedUserId) : null })).message); onSaved(); } catch (e) { toast.error(e instanceof Error ? e.message : "Could not save"); } finally { setBusy(false); }
   };
   return (
-    <tr className={`border-t border-border/60 align-top ${late ? "bg-destructive/5" : ""}`}>
+    <tr className={`border-t border-border/60 align-top ${dueRow(t.DueDate, t.Status === "Completed" || t.Status === "Rejected")}`}>
       <td className="px-2 py-1.5 text-xs font-semibold">{t.TaskNo}. {t.Task}
         {canEdit ? (
           <select className={`${input} mt-1 font-normal`} value={f.assignedUserId} onChange={(e) => setF({ ...f, assignedUserId: e.target.value })} title="Assigned to">
@@ -60,8 +61,8 @@ function TaskRow({ t, statuses, canEdit, onSaved }: { t: PostRegTask; statuses: 
           : <span className={`text-xs font-semibold ${TONE[t.Status] ?? ""}`}>{t.Status}</span>}
       </td>
       <td className="px-2 py-1.5">{canEdit ? <input className={input} value={f.refNo} onChange={(e) => setF({ ...f, refNo: e.target.value })} placeholder="Application / order no." /> : <span className="text-xs">{t.RefNo ?? "—"}</span>}</td>
-      <td className="px-2 py-1.5">{canEdit ? <input type="date" className={input} value={f.dueDate} onChange={(e) => setF({ ...f, dueDate: e.target.value })} /> : <span className="text-xs">{fmt(t.DueDate)}</span>}
-        {late && <span className="block text-[0.6875rem] font-semibold text-destructive">Overdue</span>}</td>
+      <td className="px-2 py-1.5">{canEdit ? <input type="date" className={`${input} ${t.Status !== "Completed" ? DUE_BG[dueLevel(f.dueDate)] : ""}`} value={f.dueDate} onChange={(e) => setF({ ...f, dueDate: e.target.value })} /> : null}
+        <span className="mt-0.5 block text-xs"><DueBadge date={t.DueDate} done={t.Status === "Completed" || t.Status === "Rejected"} compact={canEdit} /></span></td>
       <td className="px-2 py-1.5">{canEdit ? <input className={input} value={f.remarks} onChange={(e) => setF({ ...f, remarks: e.target.value })} /> : <span className="text-xs">{t.Remarks ?? "—"}</span>}</td>
       <td className="px-2 py-1.5 text-xs">
         {f.fileId ? <LegalFileLink id={f.fileId} name={f.fileName} /> : t.FileId ? <LegalFileLink id={t.FileId} name={t.FileName ?? "Copy"} /> : null}
@@ -72,6 +73,57 @@ function TaskRow({ t, statuses, canEdit, onSaved }: { t: PostRegTask; statuses: 
         {t.UpdatedAt && <span className="block text-[0.6875rem] text-muted-foreground">{t.UpdatedByName ?? ""} · {fmt(t.UpdatedAt)}</span>}
       </td>
     </tr>
+  );
+}
+
+
+const APP_TONE: Record<string, string> = { Approved: "text-emerald-600", Rejected: "text-destructive", "Objection Raised": "text-amber-600", "Correction Required": "text-amber-600" };
+/**
+ * Mutation and conversion after registration (V2.1): two separate applications, each with its own employee, target
+ * date, documents, queries and status. Target dates are internal; government processing times are not guaranteed.
+ */
+function ApplicationsPanel({ landId, apps, canEdit, onSaved }: { landId: number; apps: PostRegApplication[]; canEdit: boolean; onSaved: () => void }) {
+  const [edit, setEdit] = useState<{ master: "mutation" | "conversion" | "application-query"; id: number | null } | null>(null);
+  const done = () => { setEdit(null); onSaved(); };
+  return (
+    <div className="border-t border-border p-3">
+      <div className="mb-1.5 flex flex-wrap items-center gap-2">
+        <p className="text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground">Mutation &amp; conversion</p>
+        {canEdit && !edit && <span className="ml-auto flex gap-2 text-xs">
+          <button className="border border-foreground px-2 py-0.5 font-semibold" onClick={() => setEdit({ master: "mutation", id: null })}>+ Mutation</button>
+          <button className="border border-foreground px-2 py-0.5 font-semibold" onClick={() => setEdit({ master: "conversion", id: null })}>+ Conversion</button>
+          {apps.length > 0 && <button className="border border-foreground/40 px-2 py-0.5 font-semibold" onClick={() => setEdit({ master: "application-query", id: null })}>+ Query</button>}
+        </span>}
+      </div>
+      {edit && <div className="mb-2"><InlineRecordEditor master={edit.master} id={edit.id} landId={landId} onDone={done} /></div>}
+      {!apps.length ? <p className="text-xs text-muted-foreground">No mutation or conversion application yet.</p> : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-left text-xs">
+            <thead className="text-[0.625rem] uppercase tracking-wider text-muted-foreground">
+              <tr><th className="px-2 py-1">Type</th><th className="px-2 py-1">Application</th><th className="px-2 py-1">Office</th><th className="px-2 py-1">Employee</th>
+                <th className="px-2 py-1">Target</th><th className="px-2 py-1">Hearing</th><th className="px-2 py-1">Status</th><th className="px-2 py-1">Queries</th><th /></tr>
+            </thead>
+            <tbody>
+              {apps.map((a) => {
+                return (
+                  <tr key={a.MutationId} className={`border-t border-border/60 ${dueRow(a.DueDate, !!a.CompletionDate || ["Approved", "Rejected"].includes(a.ApplicationStatus))}`}>
+                    <td className="px-2 py-1 font-semibold">{a.Kind}{a.RequestedClass ? <span className="block font-normal text-muted-foreground">to {a.RequestedClass}</span> : null}</td>
+                    <td className="px-2 py-1">{a.ApplicationNo ?? "—"}<span className="block text-muted-foreground">{fmt(a.ApplicationDate)}</span></td>
+                    <td className="px-2 py-1">{a.OfficeName ?? "—"}</td>
+                    <td className="px-2 py-1">{a.AssignedName ?? "—"}</td>
+                    <td className="px-2 py-1"><DueBadge date={a.DueDate} done={!!a.CompletionDate || ["Approved", "Rejected"].includes(a.ApplicationStatus)} /></td>
+                    <td className="px-2 py-1"><DueBadge date={a.HearingDate} kind="hearing" done={!!a.CompletionDate || ["Approved", "Rejected"].includes(a.ApplicationStatus)} /></td>
+                    <td className={`px-2 py-1 font-semibold ${APP_TONE[a.ApplicationStatus] ?? ""}`}>{a.ApplicationStatus}{a.CompletionDate && <span className="block font-normal text-emerald-700">Completed {fmt(a.CompletionDate)}</span>}</td>
+                    <td className="px-2 py-1">{a.OpenQueries ? <span className="font-semibold text-amber-600">{a.OpenQueries} open</span> : "—"}</td>
+                    <td className="px-2 py-1 text-right">{canEdit && <button className="underline" onClick={() => setEdit({ master: a.Kind === "Mutation" ? "mutation" : "conversion", id: a.MutationId })}>Edit</button>}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -123,6 +175,7 @@ export default function LandPostRegistrationPage() {
                       <tbody>{l.tasks.map((t) => <TaskRow key={`${t.TaskId}-${t.UpdatedAt ?? ""}`} t={t} statuses={data!.statuses} canEdit={canEdit} onSaved={refresh} />)}</tbody>
                     </table>
                   </div>
+                  <ApplicationsPanel landId={l.LandId} apps={l.applications ?? []} canEdit={canEdit} onSaved={refresh} />
                   {l.clearances?.length ? (
                     <div className="border-t border-border p-3">
                       <p className="mb-1.5 text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground">LA &amp; ULC clearance certificate</p>

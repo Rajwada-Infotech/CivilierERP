@@ -232,6 +232,7 @@ export interface DeedProcessLand {
   ProjectId?: number | null;
   LandId: number; LandCode: string; LandName: string; WorkflowStatus: string; DistrictName: string | null; MouzaName: string | null;
   FinalVerifiedAt: string | null; VerifiedBy: string | null; DeedTargetDate: string | null; DeedCompletedAt: string | null;
+  DeedStage?: string | null; DeedDrafterId?: number | null; DeedDrafterName?: string | null;
   DeedFileId?: number | null; DeedFileName?: string | null;
   DeedChangedAt?: string | null; DeedChangedByName?: string | null;
   L1Status?: string; L1By?: string | null; L2Status?: string; DeedApprovalNote?: string | null;
@@ -243,8 +244,8 @@ export const approveDeedProcess = async (id: number, action: "Approve" | "Reject
   handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/deed-process/approve`, post({ action, remarks })));
 export const deedRegistrationAction = async (id: number, action: "apply" | "submit", fileId?: number) =>
   handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/deed-registration`, post({ action, fileId })));
-export const getDeedProcessLands = async (qs = "") => handle<{ lands: DeedProcessLand[]; canEditTimeline: boolean; canApprove?: boolean; canRequest?: boolean } & { total?: number; page?: number; pageSize?: number }>(await fetchWithAuth(`${BASE}/deed-process/list${qs ? `?${qs}` : ""}`));
-export const updateDeedProcess = async (id: number, body: { targetDate?: string; completed?: boolean; deedFileId?: number | null }) =>
+export const getDeedProcessLands = async (qs = "") => handle<{ lands: DeedProcessLand[]; deedStages?: string[]; canEditTimeline: boolean; canApprove?: boolean; canRequest?: boolean } & { total?: number; page?: number; pageSize?: number }>(await fetchWithAuth(`${BASE}/deed-process/list${qs ? `?${qs}` : ""}`));
+export const updateDeedProcess = async (id: number, body: { targetDate?: string; completed?: boolean; deedFileId?: number | null; deedStage?: string | null; drafterId?: number | null }) =>
   handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/deed-process`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));
 
 export const getLandPendingQueue = async () =>
@@ -304,7 +305,12 @@ export interface PostRegTask { TaskId: number; LandId: number; TaskNo: number; T
   FileId: number | null; FileName: string | null; UpdatedAt: string | null; UpdatedByName: string | null;
   AssignedUserId?: number | null; AssignedName?: string | null; CompletedAt?: string | null; CompletedByName?: string | null }
 export interface PostRegLand { LandId: number; ProjectId?: number | null; LandCode: string; LandName: string; DistrictName: string | null; MouzaName: string | null; RegCompletedAt: string | null;
-  RegDeedFileId: number | null; RegDeedFileName: string | null; tasks: PostRegTask[]; clearances?: LandClearance[] }
+  RegDeedFileId: number | null; RegDeedFileName: string | null; tasks: PostRegTask[]; clearances?: LandClearance[]; applications?: PostRegApplication[] }
+/** V2.1: post-registration mutation / conversion application (LegalMutation, Kind). */
+export interface PostRegApplication {
+  MutationId: number; LandId: number; Kind: "Mutation" | "Conversion"; ApplicationNo: string | null; ApplicationDate: string | null; OfficeName: string | null; ApplicationStatus: string;
+  AssignedUserId: number | null; AssignedName: string | null; DueDate: string | null; HearingDate: string | null; CompletionDate: string | null; RequestedClass: string | null; OpenQueries: number;
+}
 export const getPostRegistration = async (qs = "") => handle<{ lands: PostRegLand[]; statuses: string[] } & { total?: number; page?: number; pageSize?: number }>(await fetchWithAuth(`${BASE}/post-registration/list${qs ? `?${qs}` : ""}`));
 /** Another post-registration task (repeat work: yearly tax, a new survey, the next mutation step). */
 export const addPostRegTask = async (landId: number, body: { task: string; dueDate?: string; assignedUserId?: number | null }) =>

@@ -17,7 +17,8 @@ export type ReminderType =
   | "legal_approval"
   | "legal_deed"
   | "legal_search"
-  | "legal_postreg";
+  | "legal_postreg"
+  | "legal_activity";
 
 // Which module owns each reminder type — drives the bell's "only this
 // module's reminders" scoping everywhere except the Home dashboard, which
@@ -37,6 +38,7 @@ export const REMINDER_TYPE_MODULE: Record<ReminderType, string> = {
   legal_deed: "legal",
   legal_search: "legal",
   legal_postreg: "legal",
+  legal_activity: "legal",
 };
 
 export interface ReminderItem {

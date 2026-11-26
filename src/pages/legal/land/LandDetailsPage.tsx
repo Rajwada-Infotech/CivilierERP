@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { LandVerificationCard } from "@/components/legal/LandVerificationCard";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -193,6 +194,7 @@ export default function LandDetailsPage({ verify = false, from }: { verify?: boo
               <span className="text-xs text-muted-foreground">Printed {fmtDate(new Date().toISOString())} · CivilierERP Legal</span>
             </div>
 
+            <div className="print:hidden"><LandVerificationCard landId={id} /></div>
             <Section title="Property" {...at("basic")}>
               <dl className="grid gap-3 sm:grid-cols-3">
                 {kv("Mouza (J.L.)", L.MouzaName ? `${L.MouzaName} (${L.JLNo ?? "-"})` : null)}

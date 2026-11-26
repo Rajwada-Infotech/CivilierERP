@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { DueBadge, dueRow, dueLevel, DUE_BG } from "@/components/legal/DueBadge";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -189,7 +190,7 @@ export default function LegalApprovalsInboxPage() {
 
           {tab === "approve" && (deedRows.length ? deedRows.map((l) => (
             <Card key={l.LandId} landId={l.LandId} code={l.LandCode} name={l.LandName} place={place(l)} since={l.FinalVerifiedAt} onOpen={() => open(l.LandId)}
-              note={<>Deed target {when(l.DeedTargetDate)}{l.DeedFileId ? <> · deed copy: <LegalFileLink id={l.DeedFileId} name={l.DeedFileName ?? "Deed copy"} /></> : " · deed copy not uploaded yet"}
+              note={<>Deed target <DueBadge date={l.DeedTargetDate} compact />{l.DeedFileId ? <> · deed copy: <LegalFileLink id={l.DeedFileId} name={l.DeedFileName ?? "Deed copy"} /></> : " · deed copy not uploaded yet"}
                 {l.DeedApprovalNote ? ` · note: ${l.DeedApprovalNote}` : ""}{l.L1Status && l.L1Status !== "Pending" ? ` · now ${l.L1Status}` : ""}</>}>
               {deedQ.data?.canApprove ? <DeedDecision land={l} /> : <p className="text-xs text-muted-foreground">Only an Approver (Setup → Approval Control) can decide.</p>}
             </Card>
