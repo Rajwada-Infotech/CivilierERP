@@ -9,13 +9,20 @@ import { MapPin, MapPinOff } from "lucide-react-native";
 import { sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { Body, Key, Label, Notice } from "@/components/sheet/Sheet";
-import { hasConsent, isTracking, queuedPings, setConsent, startTracking, stopTracking, uploadPings, type StartResult } from "./guardTracking";
+import { hasConsent, isTracking, lastTrackingError, queuedPings, setConsent, startTracking, stopTracking, uploadPings, type StartResult } from "./guardTracking";
 
-const PROBLEM: Record<Exclude<StartResult, "started">, string> = {
+const PROBLEM: Record<Exclude<StartResult, "started" | "background" | "failed">, string> = {
   "no-permission": "Location isn't allowed. Allow it for Civilier Security in the phone's settings.",
   "no-background-permission": "Choose \"Allow all the time\" for location, so your shift is tracked with the screen off.",
   unavailable: "Shift tracking needs the installed Civilier Security app. It doesn't run inside Expo Go.",
 };
+
+/** What to tell the guard for a start result; null when there's nothing wrong (started, or waiting for the app to be open). */
+function problemOf(r: StartResult): string | null {
+  if (r === "started" || r === "background") return null;
+  if (r === "failed") return `Couldn't start shift tracking: ${lastTrackingError() ?? "unknown error"}. Check that location is on and allowed "all the time".`;
+  return PROBLEM[r];
+}
 
 export function TrackingCard({ onDuty, shiftEnd }: { onDuty: boolean; shiftEnd: string | null }) {
   const [consent, setConsentState] = useState<boolean | null>(null);
@@ -23,6 +30,8 @@ export function TrackingCard({ onDuty, shiftEnd }: { onDuty: boolean; shiftEnd: 
   const [queued, setQueued] = useState(0);
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Bumped when the app comes back to the front, so a start that had to wait for it is tried again.
+  const [appActiveAt, setAppActiveAt] = useState(0);
 
   const refresh = useCallback(async () => {
     setConsentState(await hasConsent());
@@ -33,7 +42,11 @@ export function TrackingCard({ onDuty, shiftEnd }: { onDuty: boolean; shiftEnd: 
   useEffect(() => {
     void refresh();
     const t = setInterval(() => void refresh(), 15000);
-    const sub = AppState.addEventListener("change", (s) => s === "active" && void refresh());
+    const sub = AppState.addEventListener("change", (s) => {
+      if (s !== "active") return;
+      void refresh();
+      setAppActiveAt(Date.now());
+    });
     return () => {
       clearInterval(t);
       sub.remove();
@@ -46,13 +59,13 @@ export function TrackingCard({ onDuty, shiftEnd }: { onDuty: boolean; shiftEnd: 
     void (async () => {
       if (onDuty && consent && !(await isTracking())) {
         const r = await startTracking();
-        setProblem(r === "started" ? null : PROBLEM[r]);
+        setProblem(problemOf(r));
       } else if (!onDuty && (await isTracking())) {
         await stopTracking();
       }
       await refresh();
     })();
-  }, [onDuty, consent, refresh]);
+  }, [onDuty, consent, refresh, appActiveAt]);
 
   const agree = async () => {
     setBusy(true);
@@ -60,7 +73,7 @@ export function TrackingCard({ onDuty, shiftEnd }: { onDuty: boolean; shiftEnd: 
     setConsentState(true);
     if (onDuty) {
       const r = await startTracking();
-      setProblem(r === "started" ? null : PROBLEM[r]);
+      setProblem(problemOf(r));
     }
     await refresh();
     setBusy(false);

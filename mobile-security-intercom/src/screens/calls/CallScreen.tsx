@@ -3,7 +3,7 @@
 // LiveKit's native audio isn't inside Expo Go; there the screen says so and offers the phone dialler instead.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { View, Text, Linking, Animated, Easing, Platform, PermissionsAndroid } from "react-native";
-import { nativeCallsAvailable } from "./callSupport";
+import { inExpoGo, nativeCallsAvailable } from "./callSupport";
 import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import { Mic, MicOff, Phone, PhoneOff, Volume2, Ear } from "lucide-react-native";
 import type { MainStackParamList } from "@/navigation/MainStack";
@@ -17,19 +17,23 @@ import { useSocketEvent } from "@/visitors/useSecuritySocket";
 const GREEN = "#1f9d55";
 
 type LiveKit = { Room: any; RoomEvent: any; AudioSession: any };
+let loadError: string | null = null;
 /** LiveKit, loaded only when a call opens (its native module is missing in Expo Go: then null). */
 function loadLiveKit(): LiveKit | null {
   // Expo Go has no WebRTC native module: LiveKit loads there but every call fails with "WebRTC native module not
   // found". Check first, so the person gets a clear message and the phone option instead.
   if (!nativeCallsAvailable()) return null;
   try {
+    loadError = null;
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const rn = require("@livekit/react-native");
     rn.registerGlobals();
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const client = require("livekit-client");
     return { Room: client.Room, RoomEvent: client.RoomEvent, AudioSession: rn.AudioSession };
-  } catch {
+  } catch (e) {
+    loadError = (e as Error)?.message ?? String(e);
+    console.warn("[call] LiveKit failed to load:", loadError);
     return null;
   }
 }
@@ -103,7 +107,11 @@ export default function CallScreen() {
     if (!url || !token) return;
     if (lk.current === undefined) lk.current = loadLiveKit();
     if (!lk.current) {
-      setError("In-app calls need the installed Civilier Security app — they can't run inside Expo Go. Use the phone for now.");
+      setError(
+        inExpoGo()
+          ? "In-app calls need the installed Civilier Security app — they can't run inside Expo Go. Use the phone for now."
+          : `The call couldn't start on this phone${loadError ? ` (${loadError})` : ""}. Use the phone for now.`,
+      );
       return;
     }
     // The microphone needs the person's permission first (Android asks at run time; without it joining the call fails
