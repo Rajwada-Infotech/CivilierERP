@@ -12,7 +12,7 @@ import { fetchSecurityDashboard, type VisitorRow } from "@/api/securityDashboard
 import { getPendingForMe } from "@/api/visitorsApi";
 import { useSocketEvent, useVisitorEvents } from "@/visitors/useSecuritySocket";
 import { allComplaints, myComplaints, type Complaint } from "@/api/securityMoreApi";
-import { useNotificationsSeenAt } from "./seenStore";
+import { useNotificationsSeenAt, useSeenRequests } from "./seenStore";
 
 export interface OpenAlert {
   id: number;
@@ -71,9 +71,13 @@ export function useSecurityNotifications() {
   });
 
   const seenAt = useNotificationsSeenAt();
+  const seenRequests = useSeenRequests();
   // Residents: visitors waiting for them. Guards: the answers they haven't seen yet (their own waiting requests are on
   // the home page, not news).
-  const guardAnswers = (guard.data?.recent ?? []).filter((r) => r.status !== "PENDING" && new Date(r.decidedAt ?? r.requestedAt).getTime() > seenAt);
+  // An answer the guard already saw on the request's screen isn't news either.
+  const guardAnswers = (guard.data?.recent ?? []).filter(
+    (r) => r.status !== "PENDING" && !seenRequests.has(r.id) && new Date(r.decidedAt ?? r.requestedAt).getTime() > seenAt,
+  );
   const visitors: VisitorRow[] = view === "customer" ? resident.data ?? [] : view === "guard" ? guardAnswers : [];
   const open: OpenAlert[] = view === "admin" ? alerts.data ?? [] : [];
   const loading = (view === "customer" && resident.isLoading) || (view === "guard" && guard.isLoading) || (view === "admin" && alerts.isLoading);
