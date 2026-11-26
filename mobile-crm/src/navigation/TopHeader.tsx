@@ -78,8 +78,8 @@ export const SETUP_THEMES: Record<string, { tint: string; bgLight: string; bgDar
   "setup-parking-rates": { tint: "#2563EB", bgLight: "#EFF6FF", bgDark: "rgba(37,99,235,0.18)" },
   "setup-parking-slots": { tint: "#0284C7", bgLight: "#E0F2FE", bgDark: "rgba(2,132,199,0.18)" },
   "setup-brokerage-tiers": { tint: "#BE185D", bgLight: "#FCE7F3", bgDark: "rgba(190,24,93,0.18)" },
-  "/crm/setup/auto-project-setup": { tint: "#A855F7", bgLight: "#F3E8FF", bgDark: "rgba(168,85,247,0.18)" },
-  "/masters/brokers":   { tint: "#B45309", bgLight: "#FEF3C7", bgDark: "rgba(180,83,9,0.18)" },
+  "CrmAutoProjectSetup": { tint: "#A855F7", bgLight: "#F3E8FF", bgDark: "rgba(168,85,247,0.18)" },
+  "brokers":            { tint: "#B45309", bgLight: "#FEF3C7", bgDark: "rgba(180,83,9,0.18)" },
 };
 
 /** The setup items this person has a right on, by section (crmRegisters.ts SETUP_SECTIONS); empty sections left out. */
@@ -88,6 +88,10 @@ export function useSetupSections() {
   return SETUP_SECTIONS.map((s) => ({
     title: s.title,
     rows: s.items.flatMap((it): SetupRow[] => {
+      if ("nav" in it) {
+        return it.pages.some((p) => canAccessPage(p))
+          ? [{ key: it.nav, label: it.label, about: it.about, icon: it.icon, open: () => navigate(it.nav as never) }] : [];
+      }
       if ("web" in it) {
         return it.pages.some((p) => canAccessPage(p))
           ? [{ key: it.web, label: it.label, about: it.about, icon: it.icon, web: true, open: () => { void Linking.openURL(`${API_BASE_URL}${it.web}`); } }] : [];

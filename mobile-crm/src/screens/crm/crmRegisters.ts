@@ -1,11 +1,11 @@
-// Every CRM list the app shows, in one place: its name and group as the web's CRM menu has them
+﻿// Every CRM list the app shows, in one place: its name and group as the web's CRM menu has them
 // (src/components/layout/sidebars/CrmSidebar.ts), the page rights that show it (the same keys the server route
 // checks), the route the web page reads, and how one row reads on a card. CrmRegisterScreen draws any of them;
 // CrmHubScreen lists the ones the signed-in person may open. Add a list here and it appears in both.
 import type { Row } from "@/api/crmApi";
 import { useAuth } from "@/auth/AuthContext";
 import {
-  ArrowRightLeft, Award, Ban, Building2, CalendarClock, Car, ClipboardList, FileCheck2, FileMinus, FilePenLine, FileText,
+  ArrowRightLeft, Award, Ban, BellRing, Building2, CalendarClock, Car, ClipboardList, FileCheck2, FileMinus, FilePenLine, FileText,
   Flag, Grid3x3, Handshake, HardHat, Hash, KeyRound, Layers, LayoutGrid, ListChecks, Map, Percent, PhoneCall, PhoneIncoming, PlusCircle,
   Receipt, ReceiptIndianRupee, Repeat2, Ruler, ScrollText, ShieldCheck, Ticket, Undo2, UserCog, UserRound, Users, Wallet, Wand2, type LucideIcon,
 } from "lucide-react-native";
@@ -215,6 +215,16 @@ const amendProposed = (r: Row): [string, unknown][] => {
 /** What a demand still asks for (the web's balanceOf): due less paid. */
 const demandBalance = (r: Row) => Math.max(0, Number(r.AmountDue || 0) - Number(r.AmountPaid || 0));
 const plural = (n: unknown, word: string) => `${Number(n) || 0} ${word}${Number(n) === 1 ? "" : "s"}`;
+// Reminder Setup's words, as the web page has them (CrmReminderSetup.tsx START_LABEL, CHANNEL_LABEL, describeWhen).
+const REMINDER_START: Record<string, string> = { BookingDate: "booking date", DueDate: "due date", DemandDate: "demand date" };
+const REMINDER_CHANNEL: Record<string, string> = { App: "Customer app", Portal: "Customer portal", SMS: "SMS", WhatsApp: "WhatsApp", Email: "E-mail" };
+function reminderWhen(r: Row) {
+  const start = REMINDER_START[r.StartFrom] || r.StartFrom;
+  const off = Number(r.OffsetDays) || 0;
+  const first = off === 0 ? `On the ${start}` : `${Math.abs(off)} day${Math.abs(off) === 1 ? "" : "s"} ${off > 0 ? "after" : "before"} the ${start}`;
+  const every = r.RepeatEveryDays === 1 ? "every day" : `every ${r.RepeatEveryDays} days`;
+  return first + (r.RepeatEveryDays ? `, then ${every}${r.MaxTimes ? ` (at most ${r.MaxTimes} times)` : " while pending"}` : ", once");
+}
 const stepName = (s: any) => (s == null ? "" : typeof s === "string" ? s : s.label ?? s.name ?? s.title ?? "");
 
 export const CRM_REGISTERS: CrmRegister[] = [
@@ -289,7 +299,7 @@ export const CRM_REGISTERS: CrmRegister[] = [
     title: (r) => r.BookingNo, sub: unitOf,
     status: (r) => r.Status,
     amount: (r) => ({ label: "Total", value: money(r.GrandTotal ?? r.TotalValue) }),
-    lines: (r) => [joinDot(r.UnitType, r.AreaSqFt && `${r.AreaSqFt} sq ft`, r.BookingDate && `Booked ${fmtDate(r.BookingDate)}`)],
+    lines: (r) => [joinDot(r.UnitType, r.AreaSqFt && `${r.AreaSqFt} sq ft`, r.BookingDate && `Booked ${fmtDate(r.BookingDate)}`), r.IsFrozen && (r.FreezeReason ? `Frozen: ${r.FreezeReason}` : "Frozen")],
     searchIn: (r) => [r.BookingNo, r.UnitNo, r.BlockName, r.ProjectName, r.Status],
     open: (r) => ({ to: "booking", bookingId: Number(r.Id), title: r.BookingNo }),
     dateOf: (r) => r.BookingDate, amountOf: (r) => r.GrandTotal ?? r.TotalValue,
@@ -1229,6 +1239,36 @@ export const CRM_REGISTERS: CrmRegister[] = [
     ],
     searchIn: (r) => [r.Name, r.AppliesTo, r.HsnCode], projectOf: () => null, empty: "No GST rules.",
   },
+  // The web's Reminder Setup (src/pages/CRM/CrmReminderSetup.tsx, /api/crm/reminders): its plans, and the bookings being
+  // reminded with each one's reminder number. Read on the phone; plans are set up and switched on on the web.
+  {
+    key: "setup-reminders", webPath: "/crm/setup/reminders", about: "Who is reminded about what, and when", icon: BellRing, label: "Reminder Setup", group: "Setup",
+    pages: ["crm-reminder-setup"], path: "/api/crm/reminders/rules",
+    rows: (b) => (Array.isArray(b?.rules) ? b.rules : []), id: (r) => String(r.Id), title: (r) => r.Name,
+    sub: (r) => joinDot(r.SituationLabel, r.ProjectName || "All projects"),
+    status: (r) => (r.IsActive ? "On" : "Off"),
+    lines: (r) => [
+      reminderWhen(r),
+      joinDot(r.NotifyBookingOwner && "Salesperson", ...(r.Recipients || []).filter((x: Row) => x.Stage === "Remind").map((x: Row) => (x.RoleName ? `${x.RoleName} role` : x.UserName))),
+      joinDot(...(r.Channels || []).filter((c: Row) => c.Audience === "Customer" && c.IsActive).map((c: Row) => REMINDER_CHANNEL[c.Channel] || c.Channel)),
+      r.Activity && `${plural(r.Activity.Sent30, "reminder")} sent in 30 days`,
+    ],
+    searchIn: (r) => [r.Name, r.SituationLabel, r.ProjectName], projectOf: (r) => r.ProjectName || null, empty: "No reminder plans.",
+  },
+  {
+    key: "setup-reminders-live", webPath: "/crm/setup/reminders", about: "Each booking being reminded and its reminder number", icon: BellRing, label: "Bookings Being Reminded", group: "Setup",
+    pages: ["crm-reminder-setup"], path: "/api/crm/reminders/live?pageSize=200",
+    rows: (b) => (Array.isArray(b?.rows) ? b.rows : []), id: (r) => `${r.RuleId}-${r.EntityKey}`, title: (r) => r.BookingNo,
+    sub: (r) => joinDot(r.ApplicantName, r.ProjectName, r.UnitNo),
+    status: (r) => (r.Escalated ? "Escalated" : r.SentToday ? "Sent today" : "Not yet today"),
+    lines: (r) => [
+      joinDot(r.RuleName, r.ReminderNo != null && `Reminder ${r.ReminderNo}`, `${plural(r.RemindersSent, "reminder")} sent`),
+      joinDot(r.FirstAt && `Started ${fmtDate(r.FirstAt)}`, r.LastAt && `Last ${fmtDate(r.LastAt)}`),
+      Number(r.Problems) > 0 && `${r.Problems} not sent`,
+    ],
+    open: (r) => ({ to: "payment-plan", bookingId: Number(r.BookingId), title: String(r.BookingNo) }),
+    dateOf: (r) => r.LastAt, searchIn: (r) => [r.BookingNo, r.ApplicantName, r.RuleName], empty: "No booking is being reminded.",
+  },
   {
     key: "setup-extra-charges", about: "Extra charges added to bookings", icon: PlusCircle, label: "Extra Charge Master", group: "Setup",
     pages: ["followup-extra-charge-master"], path: "/api/extra-charge-master",
@@ -1294,15 +1334,16 @@ export const webPathOf = (r: CrmRegister) => r.webPath ?? `/crm/${r.key}`;
 
 /** The header drawer's setup items on the CRM tab, in the web Setup menu's order, by section. `web` items are set up on
  * civiliererp.in (a wizard / an account-head form, not a list) and open there. */
-export const SETUP_SECTIONS: { title: string; items: ({ register: string } | { web: string; label: string; about: string; icon: LucideIcon; pages: string[] })[] }[] = [
+export const SETUP_SECTIONS: { title: string; items: ({ register: string } | { web: string; label: string; about: string; icon: LucideIcon; pages: string[] } | { nav: string; label: string; about: string; icon: LucideIcon; pages: string[] })[] }[] = [
   { title: "Projects & units", items: [
-    { web: "/crm/setup/auto-project-setup", label: "Auto Project Setup", about: "Create a project's blocks, units and plots", icon: Wand2, pages: ["crm-auto-project-setup"] },
+    { nav: "CrmAutoProjectSetup", label: "Auto Project Setup", about: "Create a project's blocks, units and plots", icon: Wand2, pages: ["crm-auto-project-setup"] },
     { register: "setup-project-types" }, { register: "setup-blocks" }, { register: "setup-units" }, { register: "setup-plots" },
   ] },
   { title: "Payments & tax", items: [{ register: "setup-payment-plans" }, { register: "setup-milestones" }, { register: "setup-gst-rules" }, { register: "setup-extra-charges" }] },
   { title: "Parking", items: [{ register: "setup-parking-rates" }, { register: "setup-parking-slots" }] },
+  { title: "Reminders", items: [{ register: "setup-reminders" }, { register: "setup-reminders-live" }] },
   { title: "Brokers", items: [
-    { web: "/masters/brokers", label: "Broker Master", about: "Brokers and their account details", icon: HardHat, pages: ["broker-master"] },
+    { register: "brokers" },
     { register: "setup-brokerage-tiers" },
   ] },
 ];

@@ -1,4 +1,4 @@
-// Any CRM list (crmRegisters.ts) on the phone: a search box, the statuses present as quick filters, a Filter & sort
+﻿// Any CRM list (crmRegisters.ts) on the phone: a search box, the statuses present as quick filters, a Filter & sort
 // sheet (project, period, order), and one card per row with the buyer's Call / WhatsApp keys and the list's own job
 // (Log call). Tap a card for the booking, customer, ticket or document. The same rows the web page shows.
 import { useEffect, useMemo, useState } from "react";

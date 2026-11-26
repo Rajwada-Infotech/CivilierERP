@@ -52,7 +52,7 @@ import CrmBookingAmendmentScreen from "@/screens/crm/CrmBookingAmendmentScreen";
 import CrmDemandDetailScreen from "@/screens/crm/CrmDemandDetailScreen";
 import Customer360Screen from "@/screens/crm/Customer360Screen";
 import TicketScreen from "@/screens/crm/TicketScreen";
-import { NewTicketScreen, CustomerFormScreen, ApplicationFormScreen, WelcomeChecklistScreen, PossessionScreen, PaymentScreen, WelcomeCallScreen, BankDetailsScreen, OnAccountAdjustScreen, BookingChargesScreen, ParkingAllotmentScreen, ParkingSaleScreen, OcCcCertificateScreen, AfsQueryPaymentScreen, AfsStartScreen, CustomerImportScreen } from "@/screens/crm/CrmForms";
+import { NewTicketScreen, CustomerFormScreen, ApplicationFormScreen, WelcomeChecklistScreen, PossessionScreen, PaymentScreen, WelcomeCallScreen, BankDetailsScreen, OnAccountAdjustScreen, BookingChargesScreen, ParkingAllotmentScreen, ParkingSaleScreen, OcCcCertificateScreen, AfsQueryPaymentScreen, AfsStartScreen, CustomerImportScreen, CrmAutoProjectSetupScreen } from "@/screens/crm/CrmForms";
 import { pairParent, registerByKey, useHasCrm } from "@/screens/crm/crmRegisters";
 import { Tap } from "@/screens/crm/ui";
 import { ShellMenusProvider, TopHeader, useMenuCount, useShellMenus } from "./TopHeader";
@@ -128,6 +128,7 @@ export type MainStackParamList = {
   CrmLoanTracking: { bookingId: number; title?: string };
   CrmBookingAmendment: { amendmentId: number; title?: string; amendment?: Record<string, any> };
   CrmDemandDetail: { milestoneId: number; title?: string; demand?: Record<string, any> };
+  CrmAutoProjectSetup: undefined;
 };
 
 const Stack = createNativeStackNavigator<MainStackParamList>();
@@ -271,6 +272,7 @@ export default function MainStack() {
         <Stack.Screen name="CrmLoanTracking" component={CrmLoanTrackingScreen} options={({ route }) => ({ title: route.params.title || "Home Loan Tracking" })} />
         <Stack.Screen name="CrmBookingAmendment" component={CrmBookingAmendmentScreen} options={({ route }) => ({ title: route.params.title || "Booking Amendment" })} />
         <Stack.Screen name="CrmDemandDetail" component={CrmDemandDetailScreen} options={({ route }) => ({ title: route.params.title || "Milestone Demand" })} />
+        <Stack.Screen name="CrmAutoProjectSetup" component={CrmAutoProjectSetupScreen} options={{ title: "Auto Project Setup" }} />
       </Stack.Navigator>
     </ShellMenusProvider>
   );

@@ -3415,3 +3415,87 @@ export function ResaleDealDialog({ bookingId, sellerId, onClose }: {
     </Modal>
   );
 }
+
+// ── Auto Project Setup ────────────────────────────────────────────────────────
+// The web's Auto Project Setup page: company picker, project picker, then the status of blocks/units/plots.
+// Navigation buttons go into the relevant setup registers so the user can create or fix items in-app.
+// GET /api/business/dropdown, GET /api/crm/project-auto-setup/status?projectId=X.
+export function CrmAutoProjectSetupScreen() {
+  const nav = useNavigation<Nav>();
+  const { canAccessPage } = useAuth();
+  const bizQ = useQuery({ queryKey: ["business-dropdown"], staleTime: 5 * 60_000,
+    queryFn: () => crmGet<{ companies: { id: number; name: string }[]; projects: { id: number; name: string; companyId: number }[] }>("/api/business/dropdown") });
+  const companies: { id: number; name: string }[] = bizQ.data?.companies ?? [];
+  const allProjects: { id: number; name: string; companyId: number }[] = bizQ.data?.projects ?? [];
+  const [companyId, setCompanyId] = useState<string>("");
+  const [projectId, setProjectId] = useState<string>("");
+  const [compPick, setCompPick] = useState(false);
+  const [projPick, setProjPick] = useState(false);
+  const projects = allProjects.filter((p) => !companyId || String(p.companyId) === companyId);
+  const statusQ = useQuery({ queryKey: ["auto-setup-status", projectId], enabled: !!projectId,
+    queryFn: () => crmGet<{ blocks: number; units: number; plots: number; blocksSetUp: number; unitsSetUp: number; plotsSetUp: number }>(`/api/crm/project-auto-setup/status?projectId=${projectId}`) });
+  const st = statusQ.data;
+  const goSetup = (register: string) => () => nav.navigate("CrmRegister", { register });
+  const canManage = canAccessPage("crm-auto-project-setup");
+
+  const statRow = (label: string, done: number | undefined, total: number | undefined, register: string) => (
+    <View key={label} style={{ flexDirection: "row", alignItems: "center", paddingVertical: 12, borderTopWidth: 1, borderTopColor: colors.border, gap: 10 }}>
+      <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+        <Text style={{ fontSize: 14.5, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{label}</Text>
+        {done != null && total != null ? (
+          <Text style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>{done} of {total} set up</Text>
+        ) : null}
+      </View>
+      {canManage ? (
+        <TouchableOpacity onPress={goSetup(register)} style={{ paddingHorizontal: 14, paddingVertical: 7, borderRadius: 10, backgroundColor: `${CRM}18`, borderWidth: 1, borderColor: `${CRM}40` }}>
+          <Text style={{ fontSize: 12.5, fontFamily: fonts.heading.semibold, color: CRM }}>Manage</Text>
+        </TouchableOpacity>
+      ) : null}
+    </View>
+  );
+
+  return (
+    <ScrollView contentContainerStyle={{ padding: 16 }} keyboardShouldPersistTaps="handled">
+      <Section title="Company & Project">
+        <PickerRow label="Company" value={companies.find((c) => String(c.id) === companyId)?.name ?? ""}
+          placeholder={bizQ.isLoading ? "Loading…" : "Select company (optional)"}
+          onPress={() => setCompPick(true)} />
+        <PickerRow label="Project" required value={allProjects.find((p) => String(p.id) === projectId)?.name ?? ""}
+          placeholder={bizQ.isLoading ? "Loading…" : projects.length === 0 && companyId ? "No projects for this company" : "Select project"}
+          onPress={() => setProjPick(true)} />
+      </Section>
+
+      {projectId ? (
+        <Section title="Setup status">
+          {statusQ.isLoading ? (
+            <ActivityIndicator color={colors.mutedForeground} style={{ paddingVertical: 16 }} />
+          ) : statusQ.isError ? (
+            <Text style={{ fontSize: 12.5, color: colors.destructive }}>{(statusQ.error as Error).message || "Could not load status"}</Text>
+          ) : st ? (
+            <View style={{ borderRadius: 12, borderWidth: 1, borderColor: colors.border, overflow: "hidden" }}>
+              {statRow("Blocks", st.blocksSetUp, st.blocks, "setup-blocks")}
+              {statRow("Units", st.unitsSetUp, st.units, "setup-units")}
+              {statRow("Plots", st.plotsSetUp, st.plots, "setup-plots")}
+            </View>
+          ) : null}
+        </Section>
+      ) : (
+        <View style={{ alignItems: "center", paddingVertical: 32, gap: 8 }}>
+          <Text style={{ fontSize: 14.5, fontFamily: fonts.heading.semibold, color: colors.foreground }}>Select a project to view its setup status</Text>
+          <Text style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: colors.mutedForeground, textAlign: "center", maxWidth: 300 }}>
+            Then use the Manage buttons to open the setup registers for Blocks, Units, and Plots directly in the app.
+          </Text>
+        </View>
+      )}
+
+      <OptionPickerModal visible={compPick} searchable title="Company"
+        options={[{ key: "", label: "All companies" }, ...companies.map((c) => ({ key: String(c.id), label: c.name }))]}
+        selectedKey={companyId} onSelect={(k) => { setCompanyId(k ?? ""); setProjectId(""); setCompPick(false); }}
+        onClose={() => setCompPick(false)} />
+      <OptionPickerModal visible={projPick} searchable title="Project"
+        options={projects.map((p) => ({ key: String(p.id), label: p.name }))}
+        selectedKey={projectId} onSelect={(k) => { setProjectId(k ?? ""); setProjPick(false); }}
+        onClose={() => setProjPick(false)} />
+    </ScrollView>
+  );
+}

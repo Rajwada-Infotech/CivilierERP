@@ -13,7 +13,7 @@ import { fetchWithAuth } from "@/services/fetchWithAuth";
 import { useRoute, type RouteProp } from "@react-navigation/native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { ArrowLeftRight, Banknote, Car, Check, CheckCircle2, ChevronRight, FileText, Handshake, KeyRound, Landmark, PhoneCall, RefreshCw, Scale, Smartphone, Ticket, UserCheck, Wallet, XCircle } from "lucide-react-native";
+import { ArrowLeftRight, Banknote, Car, Check, CheckCircle2, ChevronRight, FileText, Handshake, KeyRound, Landmark, Lock, PhoneCall, RefreshCw, Scale, Smartphone, Ticket, UserCheck, Wallet, XCircle } from "lucide-react-native";
 import { useAuth } from "@/auth/AuthContext";
 import { crmGet, crmSend, getBooking, getBookingLifecycle, getBookingPayments, type Row } from "@/api/crmApi";
 import { toast } from "@/components/Toast";
@@ -538,6 +538,17 @@ export default function BookingDetailScreen() {
               <View style={{ marginTop: 14 }}><ContactKeys mobile={customer?.Mobile || head.Mobile} /></View>
             </HeroSurface>
           </View>
+
+          {head.IsFrozen ? (
+            <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10, borderRadius: 12, borderWidth: 1, borderColor: `${colors.destructive}4d`, backgroundColor: `${colors.destructive}0d`, padding: 14, marginBottom: 12 }}>
+              <Lock size={14} color={colors.destructive} style={{ marginTop: 1 }} />
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 13, fontFamily: fonts.heading.semibold, color: colors.destructive }}>{"Booking Frozen"}{head.FreezeReason ? ` — ${head.FreezeReason}` : ""}</Text>
+                {head.FreezeExpiresAt ? <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: colors.destructive, marginTop: 2 }}>{`Freeze expires ${fmtDate(head.FreezeExpiresAt)}`}</Text> : null}
+                <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 2 }}>{"All changes are blocked — contact an admin to unfreeze."}</Text>
+              </View>
+            </View>
+          ) : null}
 
           {!moneyOnly ? <>
           {/* 2. Where it stands: the journey's current step, in the server's own words, with its key */}
