@@ -12,7 +12,8 @@ const { sql } = require("../db");
 
 const ADS_DIR = process.env.SECURITY_ADS_DIR || path.join(__dirname, "..", "uploads", "security-ads");
 const KINDS = ["POPUP", "BANNER"];
-const TYPES = { "video/mp4": ".mp4", "video/webm": ".webm", "video/quicktime": ".mov" };
+// MP4 / MOV only: iPhones can't play WebM at all.
+const TYPES = { "video/mp4": ".mp4", "video/quicktime": ".mov" };
 const MAX_BYTES = 200 * 1024 * 1024;
 
 const toAd = (r) => ({
@@ -34,6 +35,31 @@ async function listAds(pool, { activeOnly = false } = {}) {
   ).recordset.map(toAd);
 }
 
+/**
+ * The video codec named in the file's header (the moov box sits at the start or the end of the file, so both ends are
+ * read). Every phone plays H.264; HEVC plays on iPhones and most Android phones. AV1 and VP9 play only on a few of the
+ * newest phones (on most iPhones: sound only, no picture), so they are refused.
+ */
+function videoCodec(filePath) {
+  const fd = fs.openSync(filePath, "r");
+  try {
+    const size = fs.fstatSync(fd).size;
+    const n = Math.min(size, 8 * 1024 * 1024);
+    const head = Buffer.alloc(n);
+    fs.readSync(fd, head, 0, n, 0);
+    const tail = Buffer.alloc(n);
+    fs.readSync(fd, tail, 0, n, Math.max(0, size - n));
+    const has = (c) => head.includes(c) || tail.includes(c);
+    if (has("avc1") || has("avc3")) return "H264";
+    if (has("hvc1") || has("hev1")) return "HEVC";
+    if (has("av01")) return "AV1";
+    if (has("vp09") || has("vp08")) return "VP9";
+    return null;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 /** Stores an uploaded video (the temp file multer wrote) and records it. */
 async function addAd(pool, userId, { kind, title }, file) {
   const fail = (m) => Object.assign(new Error(m), { status: 400 });
@@ -42,7 +68,11 @@ async function addAd(pool, userId, { kind, title }, file) {
     const k = String(kind || "").toUpperCase();
     if (!KINDS.includes(k)) throw fail("Choose pop-up or dashboard video.");
     const ext = TYPES[file.mimetype];
-    if (!ext) throw fail("Upload an MP4, WebM or MOV video.");
+    if (!ext) throw fail("Upload an MP4 or MOV video.");
+    const codec = videoCodec(file.path);
+    if (codec === "AV1" || codec === "VP9")
+      throw fail(`This video is encoded in ${codec}, which most iPhones can't show (only the sound plays). Export it again as MP4 with H.264 video and upload that.`);
+    if (!codec) throw fail("This file has no H.264 or HEVC video in it. Export it as MP4 with H.264 video and upload that.");
     const t = String(title || "").trim().slice(0, 120) || path.parse(file.originalname || "").name.slice(0, 120) || "Ad";
     fs.mkdirSync(ADS_DIR, { recursive: true });
     const name = `${crypto.randomUUID()}${ext}`;
@@ -122,4 +152,4 @@ async function streamAd(pool, id, req, res, { activeOnly }) {
   return fs.createReadStream(file).pipe(res);
 }
 
-module.exports = { ADS_DIR, KINDS, TYPES, MAX_BYTES, listAds, addAd, updateAd, deleteAd, streamAd };
+module.exports = { ADS_DIR, KINDS, TYPES, MAX_BYTES, videoCodec, listAds, addAd, updateAd, deleteAd, streamAd };

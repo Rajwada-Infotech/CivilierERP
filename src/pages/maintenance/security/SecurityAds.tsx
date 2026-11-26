@@ -150,7 +150,7 @@ function UploadDialog({ initialKind, onClose, onSaved }: { initialKind: AdKind; 
 
   const submit = async () => {
     if (!file) return toast.error("Choose a video file.");
-    if (!["video/mp4", "video/webm", "video/quicktime"].includes(file.type)) return toast.error("Upload an MP4, WebM or MOV video.");
+    if (!["video/mp4", "video/quicktime"].includes(file.type)) return toast.error("Upload an MP4 or MOV video.");
     if (file.size > 200 * 1024 * 1024) return toast.error("The video is larger than 200 MB.");
     setSaving(true);
     try {
@@ -175,8 +175,8 @@ function UploadDialog({ initialKind, onClose, onSaved }: { initialKind: AdKind; 
       <Field label="Title" hint="For your list only; residents don't see it. Left empty: the file name.">
         <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120} className={fieldCls} placeholder="e.g. Diwali offer" />
       </Field>
-      <Field label="Video" hint="MP4, WebM or MOV, up to 200 MB. MP4 plays on every phone.">
-        <input type="file" accept="video/mp4,video/webm,video/quicktime" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className={`${fieldCls} py-1.5`} />
+      <Field label="Video" hint="MP4 or MOV with H.264 video, up to 200 MB — plays on every phone. AV1 / VP9 videos (common in YouTube downloads) are refused: iPhones play only their sound.">
+        <input type="file" accept="video/mp4,video/quicktime" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className={`${fieldCls} py-1.5`} />
       </Field>
     </SheetDialog>
   );
