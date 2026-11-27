@@ -6,7 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  ArrowLeft, CalendarDays, CheckCircle2, Clock, Download, ExternalLink, FileText, FolderCheck, FolderClock, History, Landmark, Lock, Pencil,
+  ArrowLeft, ArrowRight, CalendarDays, Check, CheckCircle2, Clock, Download, ExternalLink, FileText, FolderCheck, FolderClock, History, Landmark, Lock, Pencil,
   Plus, ReceiptIndianRupee, RefreshCw, ScrollText, Send, ShieldAlert, Upload, UserCircle2, XCircle,
 } from "lucide-react";
 import { CrmStatus } from "@/constants/crmStatuses";
@@ -22,8 +22,8 @@ import { FinancialStatusBar, fmtRupees } from "@/components/crm/FinancialStatusB
 import { ProxyActionDialog, type ProxyMethod } from "@/components/crm/ProxyActionDialog";
 import { CrmCompanyProjectBlockFilter } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import {
-  CrmGrid, GridDateFilter, GridDialog, GridFacts, GridFormField, GridFormSection, GridRelated, GridSearch, GridTabs, GridToneMark,
-  exportGrid, resolveGridDateRange, useGridPrefs, GRID_ANY_DATE, GRID_BTN, GRID_BTN_BRAND, GRID_CARD, GRID_INPUT, GRID_PAGE_SIZES, GRID_SHEET_KEYS,
+  CrmGrid, GridColumnChooser, GridDateFilter, GridDialog, GridFacts, GridFormField, GridFormSection, GridGuidance, GridRelated, GridSearch, GridStatusPill, GridTabs, GridToneMark,
+  exportGrid, resolveGridDateRange, useGridPrefs, GRID_ANY_DATE, GRID_BTN, GRID_BTN_BRAND, GRID_CARD, GRID_INPUT, GRID_KEY, GRID_KEY_BRAND, GRID_PAGE_SIZES, GRID_SHEET_KEYS,
   type GridCol, type GridDateRange,
 } from "@/components/crm/CrmDataTable";
 import { useCrmListState, useSticky, listParams, type CrmSort } from "@/hooks/useCrmListState";
@@ -39,11 +39,12 @@ import {
 import { EMPTY_AGR_FORM, fetchUsers, EMPTY_DOC_FORM, EMPTY_DOC_REQUEST_FORM } from "./agreement/forms";
 import { DocumentCentre, FilePicker, StepBox, auditToHistory } from "./salesDeed/parts";
 import { fetchAgreementsList, fetchAllAgreements, fetchAgreementDetail, fetchAgreementIdByBooking, fetchDateHistory, fetchRevisions, fetchBookings, fetchWelcomeCallsForBooking } from "./agreement/api";
-import { BAND_DOT, BAND_KEY, BAND_KEY_MAIN, BandNext, CollectionBar, MoneyBand, StepBar, personName, type StepState } from "./payments/parts";
+import { Initials, StepBar, personName, type StepState } from "./payments/parts";
+import { MATRIX_BTN, MATRIX_BTN_BRAND, MATRIX_BTN_DANGER } from "./matrix/shared";
 import { fmtShort } from "./payments/config";
 import { fmtDate } from "./salesDeed/config";
 
-const { KEY_INK, KEY_LINE, KEY_RED, LBL, RULE_SOFT } = GRID_SHEET_KEYS;
+const { LBL } = GRID_SHEET_KEYS;
 const ALL = "All";
 const AGR_STATUSES = [CrmStatus.DRAFT, CrmStatus.EXECUTED, CrmStatus.REGISTERED, CrmStatus.CANCELLED];
 const STATUS_LABEL: Record<string, string> = { Draft: "In preparation", Executed: "Executed, to register", Registered: "Registered", Cancelled: "Cancelled" };
@@ -55,10 +56,15 @@ const PAGE_PAPERS = "crm-documents";
 const SECTION_OF: Record<AgrTab, string> = { Timeline: "details", Overview: "details", "Legal & Approval": "legal", Documents: "documents", "AFS Payment": "afsPayment", "AFS Registry": "afsRegistry" };
 const SECTION_TITLE: Record<string, string> = { details: "Agreement Details", legal: "Legal Work", documents: "Documents", afsPayment: "Registration Fees", afsRegistry: "Registry" };
 
+const TONE_EMERALD_TEXT = "text-emerald-400 [[data-theme]_&]:text-emerald-700";
+const TONE_AMBER_TEXT = "text-amber-300 [[data-theme]_&]:text-amber-700";
+const TONE_ROSE_TEXT = "text-rose-400 [[data-theme]_&]:text-rose-700";
+const TONE_SKY_TEXT = "text-sky-400 [[data-theme]_&]:text-sky-700";
+
 const ALERT_INK: Record<AgreementAlertTone, string> = {
-  stopped: "bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/25",
-  waiting: "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30",
-  moving: "bg-sky-500/10 text-sky-700 dark:text-sky-300 border-sky-500/25",
+  stopped: "bg-rose-500/15 text-rose-300 border-rose-500/30 [[data-theme]_&]:bg-rose-500/10 [[data-theme]_&]:text-rose-700 [[data-theme]_&]:border-rose-500/25",
+  waiting: "bg-amber-500/15 text-amber-300 border-amber-500/30 [[data-theme]_&]:bg-amber-500/10 [[data-theme]_&]:text-amber-700 [[data-theme]_&]:border-amber-500/30",
+  moving: "bg-sky-500/15 text-sky-300 border-sky-500/30 [[data-theme]_&]:bg-sky-500/10 [[data-theme]_&]:text-sky-700 [[data-theme]_&]:border-sky-500/25",
 };
 const AlertPill: React.FC<{ tone: AgreementAlertTone; label: string }> = ({ tone, label }) => (
   <span className={cn("inline-flex items-center h-5 px-2 rounded-full border text-[0.6875rem] font-medium whitespace-nowrap", ALERT_INK[tone])}>{label}</span>
@@ -77,15 +83,18 @@ export function agreementBar(a: any, progress: Parameters<typeof agreementStepSt
 
 const COLS: GridCol<any>[] = [
   { id: "customer", label: "Customer", locked: true, sortKey: "ApplicantName", csv: (a) => personName(a.ApplicantName), cell: (a) => (
-    <span className="block py-1.5 min-w-0">
-      <span className="block font-semibold text-foreground capitalize truncate" title={a.ApplicantName}>{personName(a.ApplicantName)}</span>
-      <span className="block text-xs text-muted-foreground tabular-nums">{a.AgreementNo}{a.VersionNo > 1 ? ` v${a.VersionNo}` : ""} · {a.BookingNo}</span>
+    <span className="flex items-center gap-2.5 py-1.5 min-w-0">
+      <Initials name={a.ApplicantName} small />
+      <span className="min-w-0 flex-1">
+        <span className="block font-semibold text-foreground capitalize truncate" title={a.ApplicantName}>{personName(a.ApplicantName)}</span>
+        <span className="block text-xs text-muted-foreground tabular-nums">{a.AgreementNo}{a.VersionNo > 1 ? ` v${a.VersionNo}` : ""} · {a.BookingNo}</span>
+      </span>
     </span>
   ) },
   { id: "unit", label: "Unit and legal executive", sortKey: "LegalExecutiveName", csv: (a) => [a.ProjectName, a.UnitNo].filter(Boolean).join(" / "), cell: (a) => (
     <span className="block py-1.5 min-w-0">
-      <span className="block font-medium truncate">{[a.ProjectName, a.UnitNo].filter(Boolean).join(" · ") || "—"}</span>
-      <span className={cn("block text-xs truncate", a.LegalExecutiveName ? "text-muted-foreground" : "text-amber-700 dark:text-amber-300 font-medium")}>{a.LegalExecutiveName || "No legal executive"}</span>
+      <span className="block font-medium text-foreground truncate">{[a.ProjectName, a.UnitNo].filter(Boolean).join(" · ") || "—"}</span>
+      <span className={cn("block text-xs truncate", a.LegalExecutiveName ? "text-muted-foreground" : cn(TONE_AMBER_TEXT, "font-medium"))}>{a.LegalExecutiveName || "No legal executive"}</span>
     </span>
   ) },
   { id: "progress", label: "Progress", csv: (a) => agreementBar(a, rowFollowupProgress(a)).caption, cell: (a) => { const b = agreementBar(a, rowFollowupProgress(a)); return <span className="block min-w-[15rem] py-1.5"><StepBar steps={b.steps} caption={b.caption} /></span>; } },
@@ -93,15 +102,19 @@ const COLS: GridCol<any>[] = [
     const al = agreementAlerts(a);
     return al.length ? <span className="flex flex-wrap gap-1 py-1">{al.map((x) => <AlertPill key={x.key} tone={x.tone} label={x.label} />)}</span> : <span className="text-muted-foreground">—</span>;
   } },
-  { id: "days", label: "Days at step", align: "right", csv: (a) => agreementDaysAtStep(a, rowFollowupProgress(a)), cell: (a) => <span className="tabular-nums">{agreementDaysAtStep(a, rowFollowupProgress(a)) ?? "—"}</span> },
-  { id: "value", label: "Value", sortKey: "GrandTotal", align: "right", csv: (a) => a.GrandTotal, cell: (a) => <span className="tabular-nums">{a.GrandTotal ? fmtShort(a.GrandTotal) : "—"}</span> },
-  // In the export only.
-  { id: "status", label: "Status", hiddenByDefault: true, csv: (a) => a.Status, cell: () => null },
-  { id: "signing", label: "Signing date", hiddenByDefault: true, csv: (a) => fmtDate(a.AgreementDate), cell: () => null },
-  { id: "papers", label: "Papers uploaded", hiddenByDefault: true, csv: (a) => `${rowFollowupProgress(a).uploaded}/${rowFollowupProgress(a).required}`, cell: () => null },
-  { id: "senior", label: "Senior approval", hiddenByDefault: true, csv: (a) => a.SeniorApprovalStatus, cell: () => null },
-  { id: "customerOk", label: "Customer approval", hiddenByDefault: true, csv: (a) => a.CustomerApprovalStatus, cell: () => null },
-  { id: "sent", label: "Sent to customer", hiddenByDefault: true, csv: (a) => fmtDate(a.SentToCustomerAt), cell: () => null },
+  { id: "days", label: "Days at step", align: "right", csv: (a) => agreementDaysAtStep(a, rowFollowupProgress(a)), cell: (a) => <span className="tabular-nums text-xs text-muted-foreground">{agreementDaysAtStep(a, rowFollowupProgress(a)) ?? "—"}</span> },
+  { id: "value", label: "Value", sortKey: "GrandTotal", align: "right", csv: (a) => a.GrandTotal, cell: (a) => <span className="font-semibold tabular-nums">{a.GrandTotal ? fmtShort(a.GrandTotal) : "—"}</span> },
+  // Optional columns enabled via Column Chooser (also exported to Excel).
+  { id: "status", label: "Stage", sortKey: "Status", hiddenByDefault: true, csv: (a) => a.Status, cell: (a) => <GridStatusPill status={a.Status} label={statusText(a.Status)} /> },
+  { id: "signing", label: "Signing date", sortKey: "AgreementDate", hiddenByDefault: true, csv: (a) => fmtDate(a.AgreementDate), cell: (a) => <span className="text-xs tabular-nums text-muted-foreground">{a.AgreementDate ? fmtDate(a.AgreementDate) : "—"}</span> },
+  { id: "regNo", label: "AFS Reg. No.", hiddenByDefault: true, csv: (a) => a.AfsRegistrationNo || "", cell: (a) => <span className="font-mono text-xs tabular-nums">{a.AfsRegistrationNo || "—"}</span> },
+  { id: "papers", label: "Mandatory papers", hiddenByDefault: true, csv: (a) => `${rowFollowupProgress(a).uploaded}/${rowFollowupProgress(a).required}`, cell: (a) => {
+    const p = rowFollowupProgress(a);
+    return p.required ? <span className="text-xs tabular-nums">{p.uploaded} / {p.required} uploaded</span> : <span className="text-muted-foreground">—</span>;
+  } },
+  { id: "senior", label: "Senior approval", hiddenByDefault: true, csv: (a) => a.SeniorApprovalStatus, cell: (a) => <GridStatusPill status={a.SeniorApprovalStatus} /> },
+  { id: "customerOk", label: "Customer approval", hiddenByDefault: true, csv: (a) => a.CustomerApprovalStatus, cell: (a) => <GridStatusPill status={a.CustomerApprovalStatus} /> },
+  { id: "sent", label: "Sent to customer", hiddenByDefault: true, csv: (a) => fmtDate(a.SentToCustomerAt), cell: (a) => <span className="text-xs tabular-nums text-muted-foreground">{a.SentToCustomerAt ? fmtDate(a.SentToCustomerAt) : "—"}</span> },
   { id: "regNo", label: "Registration no.", hiddenByDefault: true, csv: (a) => a.AfsRegistrationNo, cell: () => null },
   { id: "regDate", label: "Registered on", hiddenByDefault: true, csv: (a) => fmtDate(a.AfsRegistrationDate), cell: () => null },
 ];
@@ -231,7 +244,7 @@ const CrmAgreement: React.FC = () => {
   const listResult = useSticky(listData);
   const counts: Record<string, number> = listResult?.statusCounts ?? {};
   const allCount = Object.values(counts).reduce((n, x) => n + x, 0);
-  const [prefs, setPrefs] = useGridPrefs("crm-agreements-cols-v2", COLS);
+  const [prefs, setPrefs] = useGridPrefs("crm-agreements-cols-v3", COLS);
   // The band's figures cover every agreement under the search and filters (any status).
   const scopeQs = useMemo(() => { const p = new URLSearchParams(listQs); ["page", "pageSize", "status", "sortKey", "sortDir"].forEach((k) => p.delete(k)); return p; }, [listQs]);
   const { data: scopeRows = [] } = useQuery({ queryKey: [KEY, "scope", scopeQs.toString()], queryFn: () => fetchAllAgreements(scopeQs), staleTime: 60_000, enabled: selectedId == null });
@@ -414,6 +427,7 @@ const CrmAgreement: React.FC = () => {
       : !(senior && custApproved && dated) ? "Needs senior approval, customer approval and an agreed date"
       : a.LegalExecutiveId == null ? "Assign a legal executive first"
       : pendingDocs.length ? `Mandatory papers not verified yet: ${pendingDocs.map((d: any) => d.Label || d.DocumentType).join(", ")}` : null;
+    const paid = a.AfsQpConfirmedAmount != null || !!a.AfsRegistryStatus;
     const regBlocked = bookingGone ? "The booking is cancelled: it can't be marked registered"
       : a.AfsRegistryStatus !== "Completed" ? "Complete the Agreement Registry at the Sub-Registrar first" : null;
 
@@ -427,58 +441,134 @@ const CrmAgreement: React.FC = () => {
     }
     else if (a.Status === CrmStatus.REGISTERED) { next = `Registered at the Sub-Registrar${a.AfsRegistrationDate ? ` on ${fmtDate(a.AfsRegistrationDate)}` : ""}${a.AfsRegistrationNo ? ` (doc no. ${a.AfsRegistrationNo})` : ""}.`; finished = true; }
     else if (a.Status === CrmStatus.EXECUTED) {
-      const paid = a.AfsQpConfirmedAmount != null || !!a.AfsRegistryStatus;
-      next = !regBlocked ? "Executed and the registry is complete: record the registration"
-        : paid ? "Executed: complete the registry, then record the registration" : "Executed: confirm the customer paid the registration fees, then the registry";
+      next = !regBlocked ? "Executed and Visit 1 registry is complete — record the Sub-Registrar registration number & date"
+        : paid ? "Executed — complete the Sub-Registrar Visit 1 appointment in AFS Registry, then Mark Registered" : "Executed — confirm customer paid stamp duty & fees in AFS Payment, then complete AFS Registry";
       action = !regBlocked ? { label: "Mark Registered", run: () => openRegister(a) } : paid ? { label: "Go to Registry", run: go("afsRegistry") } : { label: "Go to Registration Fees", run: go("afsPayment") };
-    } else if (a.LegalExecutiveId == null) { next = "Assign the legal executive who prepares the paperwork"; action = { label: "Go to Legal Work", run: go("legal") }; }
-    else if (seniorStatus === CrmStatus.PENDING) next = "Waiting for senior approval (Approval Inbox)";
-    else if (!senior) {
-      next = seniorStatus === CrmStatus.REJECTED ? `Senior approval rejected${a.SeniorApprovalRemarks ? `: ${a.SeniorApprovalRemarks}` : ""}: correct it and submit again` : "Prepare the papers, then submit for senior approval";
+    } else if (a.LegalExecutiveId == null) { next = "Assign the legal executive who prepares the paperwork (required before Senior Approval & Execution)"; action = { label: "Go to Legal Work", run: go("legal") }; }
+    else if (seniorStatus === CrmStatus.PENDING) {
+      const missingPapers = !(papers.required > 0 && papers.uploaded >= papers.required);
+      next = missingPapers
+        ? "Mandatory agreement documents must be uploaded (100%) before Senior Approval can pass"
+        : "Waiting for Admin Senior Approval in Approval Inbox › Agreements";
+      action = missingPapers ? { label: "Go to Documents", run: go("documents") } : { label: "Open Approval Inbox", run: () => navigate("/approvals") };
+    } else if (!senior) {
+      next = seniorStatus === CrmStatus.REJECTED ? `Senior approval rejected${a.SeniorApprovalRemarks ? `: ${a.SeniorApprovalRemarks}` : ""} — revise details/documents and resubmit` : "Prepare the papers, then submit for senior approval";
       action = { label: "Go to Legal Work", run: go("legal") };
     } else if (!sent) { next = "Senior-approved: share with the customer"; action = { label: "Send to Civilier Home", run: () => openSend(a) }; }
     else if (recheck) { next = `The customer asked for a recheck${a.LastRecheckRemarks ? `: "${a.LastRecheckRemarks}"` : ""}`; action = { label: "Resend to Customer", run: () => openSend(a) }; }
     else if (!custApproved) next = `Sent to the customer on ${fmtDate(a.SentToCustomerAt)}: waiting for their review`;
     else if (!dated) {
-      if (a.DateApprovalStatus === CrmStatus.PENDING) next = "Both sides agreed a date: waiting for its approval";
-      else if (a.ProposedDateStatus === CrmStatus.PENDING_CUSTOMER_REVIEW) next = `We proposed ${fmtDate(a.ProposedDate)}: waiting for the customer's answer`;
-      else if (a.ProposedDateStatus === "PendingCompanyReview") { next = `The customer proposed ${fmtDate(a.ProposedDate)}: accept it or propose another`; action = { label: "Accept Date", run: acceptDate }; }
-      else { next = "The customer approved: propose the signing date"; action = { label: "Propose Signing Date", run: () => openPropose(preferredAgrDate) }; }
+      if (a.DateApprovalStatus === CrmStatus.PENDING) next = "Signing date matched by both sides — waiting for Admin Date Approval in Approval Inbox › Agreement Date";
+      else if (a.ProposedDateStatus === CrmStatus.PENDING_CUSTOMER_REVIEW) next = `We proposed ${fmtDate(a.ProposedDate)} — waiting for customer's response`;
+      else if (a.ProposedDateStatus === "PendingCompanyReview") { next = `The customer proposed ${fmtDate(a.ProposedDate)} — accept it or propose another signing date`; action = { label: "Accept Date", run: acceptDate }; }
+      else { next = "Customer approved the draft — propose the signing date (Welcome Call date pre-filled if captured)"; action = { label: "Propose Signing Date", run: () => openPropose(preferredAgrDate) }; }
     } else if (pendingDocs.length) { next = `${pendingDocs.length} mandatory paper${pendingDocs.length > 1 ? "s" : ""} still to verify: ${pendingDocs.map((d: any) => d.Label || d.DocumentType).join(", ")}`; action = { label: "Go to Documents", run: go("documents") }; }
-    else { next = "Every check has passed: mark the agreement executed"; action = { label: "Mark Executed", run: markExecuted }; }
+    else { next = "All 5 execution prerequisites passed — mark the agreement Executed"; action = { label: "Mark Executed", run: markExecuted }; }
     if (!canWork && action && !action.label.startsWith("Go to")) action = null;
     if (!action && focus && SECTION_TITLE[focus] && !finished) action = { label: `Go to ${SECTION_TITLE[focus]}`, run: go(focus) };
 
     const approvals = [
-      { n: 1, title: "Senior review", text: "An approver (Approval Setup: CRM Agreement) approves the agreement before it is shared with the customer.", done: senior, active: seniorStatus === CrmStatus.PENDING || (!senior && !seniorStatus), stopped: seniorStatus === CrmStatus.REJECTED, mark: seniorStatus || "Not submitted" },
-      { n: 2, title: "Shared with the customer", text: "The customer reviews the agreement in their portal and approves it or asks for a recheck.", done: sent && !recheck, active: senior && (!sent || recheck), stopped: false, mark: sent ? "Sent" : "Not sent" },
-      { n: 3, title: "Customer review", text: "The customer's answer from the portal, or recorded by staff when they answered another way.", done: custApproved, active: sent && !custApproved && !recheck, stopped: recheck, mark: recheck ? "Recheck requested" : custStatus || "Pending" },
-      { n: 4, title: "Signing date", text: "Both sides agree a signing date; an approver confirms it.", done: dated, active: custApproved && !dated, stopped: false, mark: dated ? fmtDate(a.AgreementDate) : a.ProposedDate ? `Proposed ${fmtDate(a.ProposedDate)}` : "Not set" },
-      { n: 5, title: "Execution and registration", text: "Every mandatory paper verified, signed and executed, then registered at the Sub-Registrar.", done: a.Status === CrmStatus.REGISTERED, active: dated && a.Status !== CrmStatus.REGISTERED, stopped: false, mark: a.Status === CrmStatus.REGISTERED ? "Registered" : a.Status === CrmStatus.EXECUTED ? "Executed" : "Pending" },
+      { n: 1, title: "Senior review", text: "Requires a Legal Executive assigned + 100% of mandatory papers uploaded, then an Admin approves via Approval Inbox.", done: senior, active: seniorStatus === CrmStatus.PENDING || (!senior && !seniorStatus), stopped: seniorStatus === CrmStatus.REJECTED, mark: seniorStatus || "Not submitted" },
+      { n: 2, title: "Shared with the customer", text: "Share the senior-approved Agreement & documents to the customer on Civilier Home.", done: sent && !recheck, active: senior && (!sent || recheck), stopped: false, mark: sent ? "Sent" : "Not sent" },
+      { n: 3, title: "Customer review", text: "Customer approves in Civilier Home (or staff records offline response via Proxy).", done: custApproved, active: sent && !custApproved && !recheck, stopped: recheck, mark: recheck ? "Recheck requested" : custStatus || "Pending" },
+      { n: 4, title: "Signing date & Admin Date Approval", text: "Both sides match on a date, then Admin approves the final Agreement Date in Approval Inbox › Agreement Date.", done: dated, active: custApproved && !dated, stopped: false, mark: dated ? fmtDate(a.AgreementDate) : a.ProposedDateStatus === "Matched" ? "Matched · Pending Admin" : a.ProposedDate ? `Proposed ${fmtDate(a.ProposedDate)}` : "Not set" },
+      { n: 5, title: "Execution & Sub-Registrar Visit 1", text: "Verify all mandatory papers & mark Executed -> confirm AFS Fees -> complete Visit 1 AFS Registry -> mark Registered.", done: a.Status === CrmStatus.REGISTERED, active: dated && a.Status !== CrmStatus.REGISTERED, stopped: false, mark: a.Status === CrmStatus.REGISTERED ? "Registered" : a.Status === CrmStatus.EXECUTED ? "Executed" : "Pending" },
     ];
-    const keyBtn = `${KEY_LINE} h-8 px-3`;
+    const keyBtn = `${MATRIX_BTN} h-8 px-3`;
+    const guidanceTone: "done" | "stopped" | "waiting" | "moving" =
+      closed && a.Status === CrmStatus.REGISTERED ? "done"
+      : bookingGone || a.Status === CrmStatus.CANCELLED || seniorStatus === CrmStatus.REJECTED || recheck ? "stopped"
+      : a.Status === CrmStatus.EXECUTED || a.DateApprovalStatus === CrmStatus.PENDING || a.ProposedDateStatus === "PendingCompanyReview" || a.LegalExecutiveId == null || !senior || !custApproved ? "waiting"
+      : "moving";
+    const guidanceTitle =
+      a.Status === CrmStatus.REGISTERED ? "Agreement for Sale Registered (Visit 1 Complete)"
+      : bookingGone ? "Underlying Booking Cancelled / Inactive"
+      : a.Status === CrmStatus.CANCELLED ? "Agreement Cancelled"
+      : a.Status === CrmStatus.EXECUTED ? "Agreement Executed — Sub-Registrar Visit 1 Next"
+      : seniorStatus === CrmStatus.REJECTED ? "Senior Approval Rejected — Revise & Resubmit"
+      : recheck ? "Customer Requested a Recheck"
+      : a.DateApprovalStatus === CrmStatus.PENDING ? "Signing Date Matched — Awaiting Admin Date Approval"
+      : execBlocked == null && a.Status === CrmStatus.DRAFT ? "Ready for Execution"
+      : "Agreement Preparation in Progress";
 
     return (
       <div className="space-y-4">
-        <MoneyBand eyebrow={`Agreement for Sale · ${a.AgreementNo ?? ""}${a.VersionNo > 1 ? ` · version ${a.VersionNo}` : ""}`} title={<span className="capitalize">{personName(a.ApplicantName)}</span>}
-          status={<span className="inline-flex items-center h-5 px-2 rounded-full border border-white/30 text-[0.6875rem] font-semibold text-white">{bookingGone ? "Booking cancelled" : statusText(a.Status)}</span>}
-          sub={[a.ProjectName, a.UnitNo && `Unit ${a.UnitNo}`, a.BookingNo].filter(Boolean).join(" · ")}
-          actions={<>
-            <button type="button" onClick={backToList} className={BAND_KEY}><ArrowLeft size={13} /> All agreements</button>
-            <button type="button" onClick={() => navigate(`/crm/bookings?view=${a.BookingId}`)} className={BAND_KEY}><ExternalLink size={13} /> Open Booking</button>
-            {canWork && a.Status === CrmStatus.DRAFT && !bookingGone && <button type="button" onClick={() => openEdit(a)} className={BAND_KEY}><Pencil size={13} /> Edit Details</button>}
-            {canWork && (a.Status === CrmStatus.DRAFT || a.Status === CrmStatus.EXECUTED) && <button type="button" onClick={() => cancelAgreement(a)} className={cn(BAND_KEY, "!text-rose-300")}><XCircle size={13} /> Cancel Agreement</button>}
-            <button type="button" onClick={() => refetchDetail()} disabled={detailFetching} className={cn(BAND_KEY, "w-9 !px-0")} title="Refresh" aria-label="Refresh"><RefreshCw size={13} className={detailFetching ? "animate-spin" : ""} /></button>
-          </>}
-          lead={grand ? fmtShort(grand) : "—"} leadNote={a.IsPlotSale ? "total value (land)" : "total value (incl. GST)"}
-          bar={<StepBar steps={bar.steps} caption={bar.caption} onDark />}
-          figures={[
-            { label: "Collected", dot: BAND_DOT.collected, value: fmtShort(collected), exact: fmtRupees(collected), note: grand ? `${Math.round((collected / grand) * 100)}% of the value` : "—" },
-            { label: "Signing date", value: dated ? fmtDate(a.AgreementDate) : "—", note: dated ? "Agreed and approved" : a.ProposedDate ? `Proposed ${fmtDate(a.ProposedDate)}` : "Not set yet" },
-            { label: "Papers", dot: papers.required && papers.uploaded === papers.required ? BAND_DOT.collected : BAND_DOT.finance, value: papers.required ? `${papers.uploaded} of ${papers.required}` : "—", note: papers.required ? "Mandatory uploaded" : "None asked for yet" },
-            { label: "Agreement registration", value: a.AfsRegistrationNo || "—", note: a.AfsRegistrationNo ? `Registered ${fmtDate(a.AfsRegistrationDate)}` : `Registry: ${a.AfsRegistryStatus || "not started"}` },
-          ]}
-          footer={<BandNext text={next} finished={finished} action={action} />} />
+        <section className={cn(GRID_CARD, "rounded-xl overflow-hidden")} aria-label="Agreement record summary">
+          <div className="px-5 py-4 flex flex-wrap items-start justify-between gap-4 border-b border-border">
+            <div className="flex items-start gap-3 min-w-0 flex-1 basis-80">
+              <Initials name={a.ApplicantName} />
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <span className="font-mono font-medium text-foreground">{a.AgreementNo ?? "Agreement"}</span>
+                  {a.VersionNo > 1 && <span className="rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[0.6875rem] font-medium text-foreground">v{a.VersionNo}</span>}
+                  <span>·</span>
+                  <span>{a.BookingNo}</span>
+                  <span>·</span>
+                  {bookingGone ? <GridStatusPill status="Cancelled" label="Booking cancelled" /> : <GridStatusPill status={a.Status} label={statusText(a.Status)} />}
+                </div>
+                <h1 className="mt-1 text-xl font-bold tracking-tight capitalize text-foreground truncate">{personName(a.ApplicantName)}</h1>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {[a.ProjectName, a.UnitNo && `Unit ${a.UnitNo}`, a.LegalExecutiveName ? `Legal Exec: ${a.LegalExecutiveName}` : "Legal Exec: Unassigned"].filter(Boolean).join(" · ")}
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <button type="button" onClick={backToList} className={MATRIX_BTN}><ArrowLeft size={13} /> All agreements</button>
+              <button type="button" onClick={() => navigate(`/crm/bookings?view=${a.BookingId}`)} className={MATRIX_BTN}><ExternalLink size={13} /> Open Booking</button>
+              {canWork && a.Status === CrmStatus.DRAFT && !bookingGone && <button type="button" onClick={() => openEdit(a)} className={MATRIX_BTN}><Pencil size={13} /> Edit Details</button>}
+              {canWork && (a.Status === CrmStatus.DRAFT || a.Status === CrmStatus.EXECUTED) && <button type="button" onClick={() => cancelAgreement(a)} className={MATRIX_BTN_DANGER}><XCircle size={13} /> Cancel Agreement</button>}
+              <button type="button" onClick={() => refetchDetail()} disabled={detailFetching} className={cn(MATRIX_BTN, "w-9 !px-0")} title="Refresh" aria-label="Refresh"><RefreshCw size={13} className={detailFetching ? "animate-spin" : ""} /></button>
+            </div>
+          </div>
+
+          <dl className="grid grid-cols-2 lg:grid-cols-4 divide-y lg:divide-y-0 lg:divide-x divide-border border-b border-border bg-muted/15">
+            <div className="px-5 py-3 min-w-0">
+              <dt className="text-xs text-muted-foreground font-medium">{a.IsPlotSale ? "Land value" : "Agreement value"}</dt>
+              <dd className="mt-0.5 text-lg font-bold tabular-nums text-foreground" title={fmtRupees(grand)}>{grand ? fmtShort(grand) : "—"}</dd>
+              <dd className="text-[0.6875rem] text-muted-foreground tabular-nums">{fmtShort(collected)} collected ({grand ? Math.round((collected / grand) * 100) : 0}%)</dd>
+            </div>
+            <div className="px-5 py-3 min-w-0">
+              <dt className="text-xs text-muted-foreground font-medium">Mandatory papers</dt>
+              <dd className={cn("mt-0.5 text-lg font-bold tabular-nums", papers.required && papers.uploaded === papers.required ? TONE_EMERALD_TEXT : TONE_AMBER_TEXT)}>
+                {papers.required ? `${papers.uploaded} / ${papers.required}` : "—"}
+              </dd>
+              <dd className="text-[0.6875rem] text-muted-foreground">
+                {pendingDocs.length ? `${pendingDocs.length} awaiting verification` : papers.required ? "All mandatory verified" : "None requested"}
+              </dd>
+            </div>
+            <div className="px-5 py-3 min-w-0">
+              <dt className="text-xs text-muted-foreground font-medium">Signing date</dt>
+              <dd className={cn("mt-0.5 text-lg font-bold tabular-nums", dated ? TONE_EMERALD_TEXT : "text-foreground")}>
+                {dated ? fmtDate(a.AgreementDate) : a.ProposedDate ? fmtDate(a.ProposedDate) : "Not set"}
+              </dd>
+              <dd className="text-[0.6875rem] text-muted-foreground">
+                {dated ? "Agreed & admin-approved" : a.ProposedDateStatus === "Matched" ? "Matched · awaiting Admin Approval" : a.ProposedDate ? "Proposed date (in negotiation)" : "Proposed after customer approval"}
+              </dd>
+            </div>
+            <div className="px-5 py-3 min-w-0">
+              <dt className="text-xs text-muted-foreground font-medium">Visit 1 Registration</dt>
+              <dd className="mt-0.5 text-lg font-bold font-mono tabular-nums text-foreground truncate">{a.AfsRegistrationNo || "—"}</dd>
+              <dd className="text-[0.6875rem] text-muted-foreground">
+                {a.AfsRegistrationNo ? `Registered ${fmtDate(a.AfsRegistrationDate)}` : `Registry: ${a.AfsRegistryStatus || "not started"}`}
+              </dd>
+            </div>
+          </dl>
+
+          <div className="px-5 py-3">
+            <StepBar steps={bar.steps} caption={bar.caption} />
+          </div>
+        </section>
+
+        <GridGuidance
+          tone={guidanceTone}
+          title={guidanceTitle}
+          text={next}
+          action={action ? (
+            <button type="button" onClick={action.run} className={MATRIX_BTN_BRAND}>
+              {action.label} <ArrowRight size={13} />
+            </button>
+          ) : undefined}
+        />
 
         {step("details", (
           <GridRelated icon={ScrollText} title="Agreement Details" action={canWork && a.Status === CrmStatus.DRAFT && !bookingGone ? <button type="button" onClick={() => openEdit(a)} className={cn(GRID_BTN, "h-8")}><Pencil size={12} /> Edit Details</button> : undefined}>
@@ -503,7 +593,7 @@ const CrmAgreement: React.FC = () => {
               <div className="px-4 pb-3"><FinancialStatusBar grandTotal={grand} cleared={collected} pendingReceipts={Number(detail.financialSummary.mrOnAccount || 0)} approvedOnAccount={Number(detail.financialSummary.approvedOnAccount || 0)} compact /></div>
             )}
             {(revisions as any[]).length > 0 && (
-              <div className="px-4 py-3 space-y-1.5" style={{ borderTop: RULE_SOFT }}>
+              <div className="px-4 py-3 space-y-1.5 border-t border-border/70">
                 <p className={LBL}>Earlier versions (before version {a.VersionNo})</p>
                 {(revisions as any[]).map((r) => (
                   <div key={r.Id} className="text-xs rounded-md border border-border px-2.5 py-2">
@@ -518,98 +608,181 @@ const CrmAgreement: React.FC = () => {
 
         {step("legal", (
           <GridRelated icon={ShieldAlert} title="Legal Work and Approvals">
-            <div className="px-4 py-3 space-y-2" style={{ borderBottom: RULE_SOFT }}>
+            <div className="px-4 py-3.5 space-y-2.5 border-b border-border bg-muted/15">
               <div className="flex items-center justify-between gap-2"><span className="text-[0.8125rem] font-semibold">Legal executive</span><GridToneMark text={a.LegalExecutiveId ? "Assigned" : "Unassigned"} tone={a.LegalExecutiveId ? "done" : "waiting"} /></div>
-              <p className="text-xs text-muted-foreground">The person who prepares this agreement's paperwork. Needed before execution.</p>
+              <p className="text-xs text-muted-foreground">Named legal executive responsible for drafting and execution (required before Senior Approval &amp; Execution).</p>
               {a.LegalExecutiveId && !selectedLegal ? (
                 <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-2 flex-1 px-3 h-9 rounded-md" style={{ border: RULE_SOFT }}><UserCircle2 size={14} className="shrink-0" /><span className="text-sm font-medium">{a.LegalExecutiveName}</span><Lock size={11} className="text-muted-foreground ml-auto shrink-0" /></div>
-                  {canWork && !closed && !locked && <button onClick={() => setSelectedLegal(String(a.LegalExecutiveId))} className={`${KEY_LINE} h-9 px-3 shrink-0`}>Change</button>}
+                  <div className="flex items-center gap-2 flex-1 px-3 h-9 rounded-lg border border-border bg-card"><UserCircle2 size={14} className="shrink-0 text-primary" /><span className="text-sm font-medium">{a.LegalExecutiveName}</span><Lock size={11} className="text-muted-foreground ml-auto shrink-0" /></div>
+                  {canWork && !closed && !locked && <button onClick={() => setSelectedLegal(String(a.LegalExecutiveId))} className={MATRIX_BTN}>Change</button>}
                 </div>
               ) : closed || locked || !canWork ? (
                 <div className="font-medium text-sm">{a.LegalExecutiveName || <span className="text-muted-foreground">Unassigned</span>}</div>
               ) : (
-                <div className="flex items-center gap-2">
-                  <div className="flex-1"><SearchableSelect value={selectedLegal} onChange={setSelectedLegal} placeholder="Select legal executive" searchPlaceholder="Search people…" options={users as any[]} /></div>
-                  <button onClick={() => assignLegal(selectedLegal)} disabled={!selectedLegal || assigningLegal || selectedLegal === String(a.LegalExecutiveId ?? "")} className={`${KEY_INK} h-9 px-3`}>{assigningLegal ? "Assigning…" : "Assign"}</button>
-                  {a.LegalExecutiveId && <button onClick={() => setSelectedLegal("")} className={`${KEY_LINE} h-9 px-3 shrink-0`}>Cancel</button>}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="min-w-[14rem] flex-1"><SearchableSelect value={selectedLegal} onChange={setSelectedLegal} placeholder="Select legal executive" searchPlaceholder="Search people…" options={users as any[]} /></div>
+                  <button onClick={() => assignLegal(selectedLegal)} disabled={!selectedLegal || assigningLegal || selectedLegal === String(a.LegalExecutiveId ?? "")} className={MATRIX_BTN_BRAND}>{assigningLegal ? "Assigning…" : "Assign"}</button>
+                  {a.LegalExecutiveId && <button onClick={() => setSelectedLegal("")} className={MATRIX_BTN}>Cancel</button>}
                 </div>
               )}
             </div>
-            {approvals.map((x) => (
-              <div key={x.n} className="px-4 py-4 flex items-start gap-3" style={{ borderBottom: x.n < 5 ? RULE_SOFT : undefined }}>
-                <StepBox n={x.n} done={x.done} active={x.active} stopped={x.stopped} />
-                <div className="flex-1 min-w-0 space-y-1.5">
-                  <div className="flex items-center justify-between gap-2 flex-wrap"><span className="text-[0.8125rem] font-semibold">{x.title}</span><GridToneMark text={x.mark} tone={x.stopped ? "stopped" : x.done ? "done" : "waiting"} /></div>
-                  <p className="text-xs text-muted-foreground">{x.text}</p>
+            {approvals.map((x) => {
+              const allUploaded = papers.required > 0 && papers.uploaded >= papers.required;
+              const allVerified = papers.required > 0 && pendingDocs.length === 0;
+              return (
+                <div key={x.n} className={cn("px-4 py-4 flex items-start gap-3", x.n < 5 && "border-b border-border/70")}>
+                  <StepBox n={x.n} done={x.done} active={x.active} stopped={x.stopped} />
+                  <div className="flex-1 min-w-0 space-y-2">
+                    <div className="flex items-center justify-between gap-2 flex-wrap"><span className="text-[0.8125rem] font-semibold">{x.title}</span><GridToneMark text={x.mark} tone={x.stopped ? "stopped" : x.done ? "done" : "waiting"} /></div>
+                    <p className="text-xs text-muted-foreground">{x.text}</p>
 
-                  {x.n === 1 && senior && a.SeniorApprovedAt && <p className="text-xs flex items-center gap-1 tabular-nums"><CheckCircle2 size={11} /> Approved {fmtDate(a.SeniorApprovedAt)}{a.SeniorApprovalRemarks && <span className="text-muted-foreground ml-1">· {a.SeniorApprovalRemarks}</span>}</p>}
-                  {x.n === 1 && seniorStatus === CrmStatus.REJECTED && a.SeniorApprovalRemarks && <p className="text-xs text-destructive rounded-md px-2 py-1.5 border border-destructive/40"><strong>Rejection reason:</strong> {a.SeniorApprovalRemarks}</p>}
-                  {x.n === 1 && !locked && !senior && (
-                    <div className="flex items-center gap-2 flex-wrap pt-0.5">
-                      <ApprovalActions status={seniorStatus} recordId={a.Id} endpoint={API} submitOnly onSuccess={refreshAll} />
-                      {seniorStatus === CrmStatus.PENDING && <span className="text-xs text-muted-foreground">Awaiting review in the Approval Inbox</span>}
-                    </div>
-                  )}
-
-                  {x.n === 2 && sent && <p className="text-xs flex items-center gap-1 tabular-nums"><Send size={11} /> Sent {fmtDate(a.SentToCustomerAt)}</p>}
-                  {x.n === 2 && recheck && <p className="text-xs text-destructive rounded-md px-2 py-1.5 border border-destructive/40"><strong>Recheck requested{a.RecheckCount > 1 ? ` (${a.RecheckCount} times)` : ""}:</strong> {a.LastRecheckRemarks || "No remark given"}</p>}
-                  {x.n === 2 && senior && (!sent || recheck) && !locked && canWork && <button onClick={() => openSend(a)} className={`${KEY_INK} h-8 px-3`}>{recheck ? "Resend to Customer" : "Send to Civilier Home"}</button>}
-
-                  {x.n === 3 && custApproved && a.CustomerApprovedAt && <p className="text-xs flex items-center gap-1 tabular-nums"><CheckCircle2 size={11} /> Approved by the customer {fmtDate(a.CustomerApprovedAt)}</p>}
-                  {x.n === 3 && sent && !custApproved && !recheck && !locked && canWork && (
-                    <div className="flex gap-2 flex-wrap pt-0.5">
-                      <button onClick={() => setDialog("proxyApprove")} className={keyBtn}><UserCircle2 size={11} /> Record Approval (offline)</button>
-                      <button onClick={() => setDialog("proxyRecheck")} className={`${keyBtn} !text-destructive`}><UserCircle2 size={11} /> Record Recheck (offline)</button>
-                    </div>
-                  )}
-
-                  {x.n === 4 && !dated && custApproved && !locked && (
-                    a.DateApprovalStatus === CrmStatus.PENDING ? <p className="text-xs flex items-center gap-1.5"><Clock size={11} /> Date agreed by both sides: waiting for its approval</p>
-                    : a.ProposedDateStatus === CrmStatus.PENDING_CUSTOMER_REVIEW ? (
-                      <div className="space-y-1.5">
-                        <p className="text-xs text-muted-foreground flex items-center gap-1"><Clock size={11} /> Waiting for the customer's answer on {fmtDate(a.ProposedDate)}</p>
-                        {canWork && <button onClick={() => setDialog("proxyDate")} className={keyBtn}><UserCircle2 size={11} /> Record Their Acceptance (offline)</button>}
+                    {x.n === 1 && !senior && !locked && (
+                      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs">
+                        <span className={cn("inline-flex items-center gap-1 font-medium", a.LegalExecutiveId ? TONE_EMERALD_TEXT : TONE_AMBER_TEXT)}>
+                          {a.LegalExecutiveId ? <Check size={12} /> : <Clock size={12} />} Legal Exec {a.LegalExecutiveId ? "Assigned" : "Missing"}
+                        </span>
+                        <span className="text-border">·</span>
+                        <span className={cn("inline-flex items-center gap-1 font-medium", allUploaded ? TONE_EMERALD_TEXT : TONE_AMBER_TEXT)}>
+                          {allUploaded ? <Check size={12} /> : <Clock size={12} />} Mandatory papers: {papers.required ? `${papers.uploaded}/${papers.required} uploaded` : "None added yet"}
+                        </span>
+                        {!allUploaded && (
+                          <button type="button" onClick={go("documents")} className="ml-auto text-xs font-semibold text-primary hover:underline">
+                            Go to Documents →
+                          </button>
+                        )}
                       </div>
-                    ) : a.ProposedDateStatus === "PendingCompanyReview" ? (
-                      canWork && <div className="flex items-center gap-2 flex-wrap">
-                        <button onClick={acceptDate} disabled={saving} className={`${KEY_INK} h-8 px-3`}>Accept {fmtDate(a.ProposedDate)}</button>
-                        <button onClick={() => openPropose(a.ProposedDate ? String(a.ProposedDate).slice(0, 10) : "")} className={keyBtn}>Propose Another Date</button>
+                    )}
+                    {x.n === 1 && senior && a.SeniorApprovedAt && <p className="text-xs flex items-center gap-1 tabular-nums text-foreground"><CheckCircle2 size={11} className={TONE_EMERALD_TEXT} /> Approved {fmtDate(a.SeniorApprovedAt)}{a.SeniorApprovalRemarks && <span className="text-muted-foreground ml-1">· {a.SeniorApprovalRemarks}</span>}</p>}
+                    {x.n === 1 && seniorStatus === CrmStatus.REJECTED && a.SeniorApprovalRemarks && <p className={cn("text-xs rounded-lg px-3 py-2 border border-rose-500/30 bg-rose-500/10", TONE_ROSE_TEXT)}><strong>Rejection reason:</strong> {a.SeniorApprovalRemarks}</p>}
+                    {x.n === 1 && !locked && !senior && (
+                      <div className="flex items-center gap-2 flex-wrap pt-0.5">
+                        <ApprovalActions status={seniorStatus} recordId={a.Id} endpoint={API} submitOnly onSuccess={refreshAll} />
+                        {seniorStatus === CrmStatus.PENDING && (
+                          <button type="button" onClick={() => navigate("/approvals")} className={cn(MATRIX_BTN, "!h-8 !px-2.5")}>
+                            <ExternalLink size={12} /> Open Approval Inbox
+                          </button>
+                        )}
                       </div>
-                    ) : canWork && (
-                      <div className="space-y-2">
-                        <button onClick={() => openPropose(preferredAgrDate)} className={`${KEY_INK} h-8 px-3`}><CalendarDays size={12} /> Propose Signing Date</button>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-xs text-muted-foreground">Customer gave a date another way?</span>
-                          <DateInput value={proxyProposedDate} onChange={(e) => setProxyProposedDate(e.target.value)} className={cn(GRID_INPUT, "h-8 w-40")} />
-                          <button onClick={() => proxyProposedDate && setDialog("proxyPropose")} disabled={!proxyProposedDate} className={keyBtn}><UserCircle2 size={11} /> Record Their Date</button>
+                    )}
+
+                    {x.n === 2 && sent && <p className="text-xs flex items-center gap-1 tabular-nums"><Send size={11} /> Sent {fmtDate(a.SentToCustomerAt)}</p>}
+                    {x.n === 2 && recheck && <p className={cn("text-xs rounded-lg px-3 py-2 border border-rose-500/30 bg-rose-500/10", TONE_ROSE_TEXT)}><strong>Recheck requested{a.RecheckCount > 1 ? ` (${a.RecheckCount} times)` : ""}:</strong> {a.LastRecheckRemarks || "No remark given"}</p>}
+                    {x.n === 2 && senior && (!sent || recheck) && !locked && canWork && <button onClick={() => openSend(a)} className={cn(MATRIX_BTN_BRAND, "!h-8 !px-3")}>{recheck ? "Resend to Customer" : "Send to Civilier Home"}</button>}
+
+                    {x.n === 3 && custApproved && a.CustomerApprovedAt && <p className="text-xs flex items-center gap-1 tabular-nums"><CheckCircle2 size={11} className={TONE_EMERALD_TEXT} /> Approved by the customer {fmtDate(a.CustomerApprovedAt)}</p>}
+                    {x.n === 3 && sent && !custApproved && !recheck && !locked && canWork && (
+                      <div className="flex gap-2 flex-wrap pt-0.5">
+                        <button onClick={() => setDialog("proxyApprove")} className={keyBtn}><UserCircle2 size={11} /> Record Approval (offline)</button>
+                        <button onClick={() => setDialog("proxyRecheck")} className={cn(MATRIX_BTN_DANGER, "!h-8 !px-3")}><UserCircle2 size={11} /> Record Recheck (offline)</button>
+                      </div>
+                    )}
+
+                    {x.n === 4 && !dated && custApproved && !locked && (
+                      a.DateApprovalStatus === CrmStatus.PENDING ? (
+                        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs">
+                          <Clock size={13} className={TONE_AMBER_TEXT} />
+                          <span className="text-foreground font-medium">Date matched ({fmtDate(a.ProposedDate)}) — awaiting Admin Date Approval in Approval Inbox › Agreement Date</span>
+                          <button type="button" onClick={() => navigate("/approvals")} className={cn(MATRIX_BTN, "ml-auto !h-7 !px-2.5")}>
+                            <ExternalLink size={11} /> Approval Inbox
+                          </button>
                         </div>
+                      ) : a.ProposedDateStatus === CrmStatus.PENDING_CUSTOMER_REVIEW ? (
+                        <div className="space-y-1.5">
+                          <p className="text-xs text-muted-foreground flex items-center gap-1"><Clock size={11} /> Waiting for the customer's answer on {fmtDate(a.ProposedDate)}</p>
+                          {canWork && <button onClick={() => setDialog("proxyDate")} className={keyBtn}><UserCircle2 size={11} /> Record Their Acceptance (offline)</button>}
+                        </div>
+                      ) : a.ProposedDateStatus === "PendingCompanyReview" ? (
+                        canWork && <div className="flex items-center gap-2 flex-wrap">
+                          <button onClick={acceptDate} disabled={saving} className={cn(MATRIX_BTN_BRAND, "!h-8 !px-3")}>Accept {fmtDate(a.ProposedDate)}</button>
+                          <button onClick={() => openPropose(a.ProposedDate ? String(a.ProposedDate).slice(0, 10) : "")} className={keyBtn}>Propose Another Date</button>
+                        </div>
+                      ) : canWork && (
+                        <div className="space-y-2">
+                          <button onClick={() => openPropose(preferredAgrDate)} className={cn(MATRIX_BTN_BRAND, "!h-8 !px-3")}><CalendarDays size={12} /> Propose Signing Date</button>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs text-muted-foreground">Customer gave a date another way?</span>
+                            <DateInput value={proxyProposedDate} onChange={(e) => setProxyProposedDate(e.target.value)} className={cn(GRID_INPUT, "h-8 w-40")} />
+                            <button onClick={() => proxyProposedDate && setDialog("proxyPropose")} disabled={!proxyProposedDate} className={keyBtn}><UserCircle2 size={11} /> Record Their Date</button>
+                          </div>
+                        </div>
+                      )
+                    )}
+                    {x.n === 4 && (dateHistory as any[]).length > 0 && (
+                      <div className="pt-1 space-y-1">
+                        <p className={cn(LBL, "flex items-center gap-1")}><FolderClock size={11} /> Date history</p>
+                        {(dateHistory as any[]).map((h) => <p key={h.Id} className="text-xs text-muted-foreground tabular-nums">{h.ProposedBy === "Customer" ? "Customer" : "We"} proposed {fmtDate(h.ProposedDate)} · {fmtDate(h.CreatedAt)}{h.CreatedByName ? ` by ${h.CreatedByName}` : ""}</p>)}
                       </div>
-                    )
-                  )}
-                  {x.n === 4 && (dateHistory as any[]).length > 0 && (
-                    <div className="pt-1 space-y-1">
-                      <p className={cn(LBL, "flex items-center gap-1")}><FolderClock size={11} /> Date history</p>
-                      {(dateHistory as any[]).map((h) => <p key={h.Id} className="text-xs text-muted-foreground tabular-nums">{h.ProposedBy === "Customer" ? "Customer" : "We"} proposed {fmtDate(h.ProposedDate)} · {fmtDate(h.CreatedAt)}{h.CreatedByName ? ` by ${h.CreatedByName}` : ""}</p>)}
-                    </div>
-                  )}
+                    )}
 
-                  {x.n === 5 && a.Status === CrmStatus.DRAFT && canWork && (
-                    <div className="space-y-1">
-                      <button onClick={markExecuted} disabled={!!execBlocked || saving} title={execBlocked ?? undefined} className={cn(execBlocked ? keyBtn : `${KEY_INK} h-8 px-3`, "disabled:opacity-60")}><CheckCircle2 size={12} /> Mark Executed</button>
-                      {execBlocked && <p className="text-xs text-muted-foreground">{execBlocked}.</p>}
-                    </div>
-                  )}
-                  {x.n === 5 && a.Status === CrmStatus.EXECUTED && canWork && (
-                    <div className="space-y-1">
-                      <button onClick={() => openRegister(a)} disabled={!!regBlocked} title={regBlocked ?? undefined} className={cn(regBlocked ? keyBtn : `${KEY_INK} h-8 px-3`, "disabled:opacity-60")}><CheckCircle2 size={12} /> Mark Registered</button>
-                      {regBlocked && <p className="text-xs text-muted-foreground">{regBlocked}.</p>}
-                    </div>
-                  )}
-                  {x.n === 5 && a.Status === CrmStatus.REGISTERED && a.AfsRegistrationNo && <p className="text-xs flex items-center gap-1 tabular-nums"><CheckCircle2 size={11} /> Registration no. {a.AfsRegistrationNo} · {fmtDate(a.AfsRegistrationDate)}</p>}
+                    {x.n === 5 && a.Status === CrmStatus.DRAFT && (
+                      <div className="space-y-2.5 pt-0.5">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2 text-[0.6875rem]">
+                          {[
+                            { label: "Legal Executive", ok: !!a.LegalExecutiveId, note: a.LegalExecutiveName || "Assign above" },
+                            { label: "Senior Approval", ok: senior, note: seniorStatus || "Pending" },
+                            { label: "Customer Approval", ok: custApproved, note: recheck ? "Recheck requested" : custStatus || "Pending" },
+                            { label: "Mandatory Verified", ok: allVerified, note: papers.required ? `${papers.required - pendingDocs.length}/${papers.required} verified` : "None", jump: !allVerified ? go("documents") : undefined },
+                            { label: "Final Signing Date", ok: dated, note: dated ? fmtDate(a.AgreementDate) : a.DateApprovalStatus === CrmStatus.PENDING ? "Pending Admin" : "Not agreed" },
+                          ].map((g) => (
+                            <div key={g.label} className={cn("rounded-lg border px-2.5 py-2", g.ok ? "border-emerald-500/30 bg-emerald-500/10" : "border-border bg-muted/20")}>
+                              <div className={cn("font-semibold flex items-center gap-1", g.ok ? TONE_EMERALD_TEXT : "text-muted-foreground")}>
+                                {g.ok ? <Check size={11} /> : <Clock size={11} />}
+                                <span className="truncate">{g.label}</span>
+                              </div>
+                              <div className="mt-0.5 text-muted-foreground truncate">
+                                {g.note}
+                                {g.jump && <button type="button" onClick={g.jump} className="ml-1 text-primary font-semibold hover:underline">Verify →</button>}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        {canWork && (
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button onClick={markExecuted} disabled={!!execBlocked || saving} title={execBlocked ?? undefined} className={cn(execBlocked ? keyBtn : cn(MATRIX_BTN_BRAND, "!h-8 !px-3"), "disabled:opacity-60")}><CheckCircle2 size={12} /> Mark Executed</button>
+                            {execBlocked && <span className="text-xs text-muted-foreground">{execBlocked}.</span>}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {x.n === 5 && a.Status === CrmStatus.EXECUTED && (
+                      <div className="space-y-2.5 pt-0.5">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[0.6875rem]">
+                          <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2">
+                            <div className={cn("font-semibold flex items-center gap-1", TONE_EMERALD_TEXT)}><Check size={11} /> 1. Agreement Executed</div>
+                            <div className="text-muted-foreground mt-0.5">Signed on {fmtDate(a.AgreementDate)}</div>
+                          </div>
+                          <div className={cn("rounded-lg border px-3 py-2", paid ? "border-emerald-500/30 bg-emerald-500/10" : "border-amber-500/30 bg-amber-500/10")}>
+                            <div className={cn("font-semibold flex items-center gap-1", paid ? TONE_EMERALD_TEXT : TONE_AMBER_TEXT)}>
+                              {paid ? <Check size={11} /> : <Clock size={11} />} 2. AFS Registration Fees
+                            </div>
+                            <div className="text-muted-foreground mt-0.5 flex items-center justify-between gap-2">
+                              <span>{paid ? "Government fees confirmed" : "Confirm stamp duty & fees"}</span>
+                              {!paid && <button type="button" onClick={go("afsPayment")} className="text-primary font-semibold hover:underline shrink-0">Open →</button>}
+                            </div>
+                          </div>
+                          <div className={cn("rounded-lg border px-3 py-2", a.AfsRegistryStatus === "Completed" ? "border-emerald-500/30 bg-emerald-500/10" : "border-border bg-muted/20")}>
+                            <div className={cn("font-semibold flex items-center gap-1", a.AfsRegistryStatus === "Completed" ? TONE_EMERALD_TEXT : "text-muted-foreground")}>
+                              {a.AfsRegistryStatus === "Completed" ? <Check size={11} /> : <Clock size={11} />} 3. Sub-Registrar Visit 1
+                            </div>
+                            <div className="text-muted-foreground mt-0.5 flex items-center justify-between gap-2">
+                              <span>{a.AfsRegistryStatus || "Not started"}</span>
+                              {a.AfsRegistryStatus !== "Completed" && <button type="button" onClick={go("afsRegistry")} className="text-primary font-semibold hover:underline shrink-0">Open →</button>}
+                            </div>
+                          </div>
+                        </div>
+                        {canWork && (
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button onClick={() => openRegister(a)} disabled={!!regBlocked} title={regBlocked ?? undefined} className={cn(regBlocked ? keyBtn : cn(MATRIX_BTN_BRAND, "!h-8 !px-3"), "disabled:opacity-60")}><CheckCircle2 size={12} /> Mark Registered</button>
+                            {regBlocked && <span className="text-xs text-muted-foreground">{regBlocked}.</span>}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {x.n === 5 && a.Status === CrmStatus.REGISTERED && a.AfsRegistrationNo && <p className={cn("text-xs flex items-center gap-1 tabular-nums font-medium", TONE_EMERALD_TEXT)}><CheckCircle2 size={12} /> Registration no. {a.AfsRegistrationNo} · {fmtDate(a.AfsRegistrationDate)}</p>}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </GridRelated>
         ))}
 
@@ -661,7 +834,7 @@ const CrmAgreement: React.FC = () => {
         {step("history", (
           <GridRelated icon={History} title="History">
             <AgreementActivity agreement={a} documents={documents} dateHistory={dateHistory as any[]} revisions={revisions as any[]} />
-            <div className="px-4 py-3 text-xs" style={{ borderTop: RULE_SOFT }}>
+            <div className="px-4 py-3 text-xs border-t border-border/70">
               <p className={cn(LBL, "mb-2")}>Approval trail</p>
               <ApprovalTrailTimeline table="CrmAgreement" recordId={a.Id} refreshKey={a.UpdatedAt} empty={<span className="text-muted-foreground">No approval steps recorded yet.</span>} />
             </div>
@@ -671,7 +844,7 @@ const CrmAgreement: React.FC = () => {
         <GridRelated icon={FileText} title="Related">
           <div className="px-4 py-3 flex flex-wrap gap-2">
             {[["Payments", `/crm/payments?bookingId=${a.BookingId}`], ["NOC", `/crm/noc?bookingId=${a.BookingId}`], ["Sale Deed", `/crm/sales-deed?bookingId=${a.BookingId}`], ["Legal Milestones", `/crm/legal-milestones?bookingId=${a.BookingId}`]].map(([label, to]) => (
-              <button key={label} type="button" onClick={() => navigate(to)} className={cn(GRID_BTN, "h-8")}><ExternalLink size={12} /> {label}</button>
+              <button key={label} type="button" onClick={() => navigate(to)} className={cn(MATRIX_BTN, "h-8")}><ExternalLink size={12} /> {label}</button>
             ))}
           </div>
         </GridRelated>
@@ -692,43 +865,191 @@ const CrmAgreement: React.FC = () => {
       <Breadcrumbs items={["Dashboard", "CRM", "Agreements"]} />
       {selectedId != null ? record() : (
         <>
-          <MoneyBand eyebrow="CRM" title="Agreements" sub="The Agreement for Sale: legal paperwork, senior and customer approval, the signing date, execution, then the registration fees and the registry."
-            actions={<>
-              {rights.canCreate && <button type="button" onClick={() => { setAgrForm({ ...EMPTY_AGR_FORM, BookingId: "" }); setDialog("new"); }} className={BAND_KEY_MAIN}><Plus size={13} /> New Agreement</button>}
-              <button type="button" onClick={() => refetch()} disabled={isFetching} className={cn(BAND_KEY, "w-9 !px-0")} title="Refresh" aria-label="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
-            </>}
-            lead={`${registered} of ${allCount - (counts[CrmStatus.CANCELLED] ?? 0)}`} leadNote="agreements registered"
-            bar={<CollectionBar onDark due={allCount - (counts[CrmStatus.CANCELLED] ?? 0)} collected={registered} finance={executedN} recorded={0} />}
-            figures={[
-              { label: "In preparation", value: String(drafts), note: "Papers, approvals and the date" },
-              { label: "Executed, to register", dot: BAND_DOT.finance, value: String(executedN), note: "With the Sub-Registrar" },
-              { label: "Needs action", dot: needs > 0 ? BAND_DOT.overdue : undefined, value: String(needs), note: "Recheck, date, legal executive and more", alert: needs > 0 },
-              { label: "Agreement value", value: fmtShort(value), exact: fmtRupees(value), note: "Live agreements" },
-            ]} />
+          {(() => {
+            const cancelledCount = counts[CrmStatus.CANCELLED] ?? 0;
+            const liveCount = Math.max(0, allCount - cancelledCount);
+            const regPct = liveCount > 0 ? Math.round((registered / liveCount) * 100) : 0;
+            const execPct = liveCount > 0 ? Math.round(((registered + executedN) / liveCount) * 100) : 0;
+            return (
+              <>
+                <section className={cn(GRID_CARD, "rounded-xl px-5 py-4 space-y-3")} aria-label="Agreements workspace header">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="flex items-start gap-3 min-w-0 flex-1 basis-72">
+                      <span className="w-10 h-10 rounded-xl bg-primary text-primary-foreground flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
+                        <ScrollText size={19} />
+                      </span>
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-xs font-medium text-muted-foreground">CRM · Legal &amp; Registration</span>
+                          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/15 px-2 py-0.5 text-[0.6875rem] font-semibold text-emerald-300 [[data-theme]_&]:bg-emerald-500/10 [[data-theme]_&]:border-emerald-500/25 [[data-theme]_&]:text-emerald-700 tabular-nums">
+                            {registered} / {liveCount} registered ({regPct}%)
+                          </span>
+                        </div>
+                        <h1 className="text-xl font-bold tracking-tight text-foreground mt-0.5">Agreements for Sale</h1>
+                        <p className="text-xs text-muted-foreground mt-0.5 max-w-[78ch]">
+                          Auto-created on Approved Booking + Welcomed Call + Milestone 1 coverage. Track Legal Executive prep, Senior &amp; Customer approvals, Signing Date agreement, Execution, and Visit 1 Registration.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      <button type="button" onClick={() => navigate("/crm/legal-milestones")} className={MATRIX_BTN}>
+                        <ExternalLink size={13} />
+                        <span>Legal Milestones</span>
+                      </button>
+                      <button type="button" onClick={() => refetch()} disabled={isFetching} className={cn(MATRIX_BTN, "w-9 !px-0")} title="Refresh" aria-label="Refresh">
+                        <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+                      </button>
+                      {rights.canCreate && (
+                        <button type="button" onClick={() => { setAgrForm({ ...EMPTY_AGR_FORM, BookingId: "" }); setDialog("new"); }} className={MATRIX_BTN_BRAND}>
+                          <Plus size={14} />
+                          <span>New Agreement</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="pt-2.5 border-t border-border/70 flex flex-wrap items-center justify-between gap-3 text-[0.6875rem] text-muted-foreground">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-medium text-foreground">9-Step Flow:</span>
+                      <span className="rounded-md bg-muted px-2 py-0.5">1–4 Prep &amp; Senior Approval</span>
+                      <ArrowRight size={11} />
+                      <span className="rounded-md bg-muted px-2 py-0.5">5–7 Customer Approval &amp; Signing Date</span>
+                      <ArrowRight size={11} />
+                      <span className="rounded-md bg-muted px-2 py-0.5">8 Execution</span>
+                      <ArrowRight size={11} />
+                      <span className="rounded-md bg-muted px-2 py-0.5">9 Visit 1 Fees, Registry &amp; Reg. No.</span>
+                    </div>
+                    <div className="flex items-center gap-2 min-w-[11rem]">
+                      <div className="h-1.5 w-28 rounded-full bg-muted overflow-hidden flex">
+                        <div className="h-full bg-emerald-500 transition-all" style={{ width: `${regPct}%` }} />
+                        <div className="h-full bg-amber-400 transition-all" style={{ width: `${Math.max(0, execPct - regPct)}%` }} />
+                      </div>
+                      <span className="tabular-nums font-medium text-foreground">{execPct}% executed+</span>
+                    </div>
+                  </div>
+                </section>
+
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                  <button type="button" onClick={() => { s.setStatus(CrmStatus.DRAFT); s.setPage(1); }}
+                    className={cn("rounded-xl border bg-card px-4 py-3 text-left transition-all cursor-pointer hover:border-primary/40",
+                      s.status === CrmStatus.DRAFT ? "border-amber-500/60 ring-1 ring-amber-500/25" : "border-border")}>
+                    <div className="text-xs text-muted-foreground font-medium">In preparation</div>
+                    <div className={cn("text-lg sm:text-xl font-bold tabular-nums mt-1", drafts > 0 ? TONE_AMBER_TEXT : "text-foreground")}>
+                      {isLoading ? "…" : drafts}
+                    </div>
+                    <div className="text-[0.6875rem] text-muted-foreground mt-0.5">Papers, approvals &amp; signing date</div>
+                  </button>
+
+                  <button type="button" onClick={() => { s.setStatus(CrmStatus.EXECUTED); s.setPage(1); }}
+                    className={cn("rounded-xl border bg-card px-4 py-3 text-left transition-all cursor-pointer hover:border-primary/40",
+                      s.status === CrmStatus.EXECUTED ? "border-sky-500/60 ring-1 ring-sky-500/25" : "border-border")}>
+                    <div className="text-xs text-muted-foreground font-medium">Executed · Visit 1 pending</div>
+                    <div className={cn("text-lg sm:text-xl font-bold tabular-nums mt-1", executedN > 0 ? TONE_SKY_TEXT : "text-foreground")}>
+                      {isLoading ? "…" : executedN}
+                    </div>
+                    <div className="text-[0.6875rem] text-muted-foreground mt-0.5">AFS fees, Visit 1 &amp; Reg. No.</div>
+                  </button>
+
+                  <button type="button" onClick={() => { s.setStatus(CrmStatus.REGISTERED); s.setPage(1); }}
+                    className={cn("rounded-xl border bg-card px-4 py-3 text-left transition-all cursor-pointer hover:border-primary/40",
+                      s.status === CrmStatus.REGISTERED ? "border-emerald-500/60 ring-1 ring-emerald-500/25" : "border-border")}>
+                    <div className="text-xs text-muted-foreground font-medium">Registered (Visit 1 done)</div>
+                    <div className={cn("text-lg sm:text-xl font-bold tabular-nums mt-1", registered > 0 ? TONE_EMERALD_TEXT : "text-foreground")}>
+                      {isLoading ? "…" : registered}
+                    </div>
+                    <div className="text-[0.6875rem] text-muted-foreground tabular-nums mt-0.5">
+                      {fmtShort(value)} live value
+                    </div>
+                  </button>
+
+                  <button type="button" onClick={() => { s.setStatus(ALL); s.setPage(1); }}
+                    className={cn("rounded-xl border bg-card px-4 py-3 text-left transition-all cursor-pointer hover:border-primary/40",
+                      s.status === ALL ? "border-primary/60 ring-1 ring-primary/25" : "border-border")}>
+                    <div className="text-xs text-muted-foreground font-medium">Needs action (all)</div>
+                    <div className={cn("text-lg sm:text-xl font-bold tabular-nums mt-1", needs > 0 ? TONE_AMBER_TEXT : "text-foreground")}>
+                      {isLoading ? "…" : needs}
+                    </div>
+                    <div className="text-[0.6875rem] text-muted-foreground tabular-nums mt-0.5">
+                      {allCount} total{cancelledCount ? ` · ${cancelledCount} cancelled` : ""}
+                    </div>
+                  </button>
+                </div>
+              </>
+            );
+          })()}
+
           <div className={cn(GRID_CARD, "rounded-xl overflow-hidden")}>
             <GridTabs<string> label="Agreements" active={s.status} onChange={s.setStatus}
-              tabs={[ALL, ...AGR_STATUSES].map((k) => ({ key: k, label: k === ALL ? "All agreements" : statusText(k), count: listResult ? (k === ALL ? allCount : counts[k] ?? 0) : null }))} />
-            <div className="px-3 py-2 flex flex-wrap items-center gap-2 border-b border-border">
-              <GridSearch value={s.searchInput} onChange={s.setSearchInput} placeholder="Customer, agreement or booking" />
+              tabs={[ALL, ...AGR_STATUSES].map((k) => ({ key: k, label: k === ALL ? "All agreements" : statusText(k), count: listResult ? (k === ALL ? allCount : counts[k] ?? 0) : null }))}
+              end={needs > 0 ? <span className={cn("text-xs font-semibold tabular-nums", TONE_AMBER_TEXT)}>{needs} needing action</span> : undefined} />
+            <div className="px-4 py-3 flex flex-wrap items-center gap-2.5 border-b border-border bg-muted/20">
+              <GridSearch value={s.searchInput} onChange={s.setSearchInput} placeholder="Search customer, agreement no., booking no…" />
               <CrmCompanyProjectBlockFilter value={s.cpb} onChange={s.setCpb} />
               <GridDateFilter label="Signing date" value={signed} onChange={setSigned} />
-              {listFiltered && <button type="button" onClick={() => { s.reset(); setSignedRaw(GRID_ANY_DATE); }} className={GRID_BTN}>Clear filters</button>}
-              <button type="button" onClick={handleExport} disabled={exporting || !allCount} className={cn(GRID_BTN, "ml-auto")} title="Export to Excel"><Download size={13} /> <span className="hidden md:inline">{exporting ? "Exporting…" : "Export"}</span></button>
+              {listFiltered && <button type="button" onClick={() => { s.reset(); setSignedRaw(GRID_ANY_DATE); }} className={MATRIX_BTN}>Clear filters</button>}
+              <div className="ml-auto flex items-center gap-2">
+                <GridColumnChooser cols={COLS} prefs={prefs} onChange={setPrefs} />
+                <button type="button" onClick={handleExport} disabled={exporting || !allCount} className={MATRIX_BTN} title="Export to Excel">
+                  <Download size={13} /> <span className="hidden md:inline">{exporting ? "Exporting…" : "Export"}</span>
+                </button>
+              </div>
             </div>
             <CrmGrid cols={COLS} prefs={prefs} onPrefs={setPrefs} rows={listResult?.rows ?? []} rowKey={(a) => a.Id} noRowNumbers
               loading={isLoading} fetching={isFetching} error={isError ? translateError((error as Error)?.message) : null} onRetry={() => refetch()}
               sort={s.sort} onSort={s.toggleSort} onRowClick={(a) => selectAgreement(a.Id)}
-              empty={listFiltered ? "No agreement matches these filters." : "No agreement yet. One is made when a booking has everything it needs."}
+              mobileCardRenderer={(a) => {
+                const bar = agreementBar(a, rowFollowupProgress(a));
+                const alerts = agreementAlerts(a);
+                const days = agreementDaysAtStep(a, rowFollowupProgress(a));
+                return (
+                  <button type="button" onClick={() => selectAgreement(a.Id)}
+                    className="w-full text-left rounded-xl border border-border bg-card p-3.5 space-y-2.5 hover:border-primary/45 transition-colors">
+                    <div className="flex items-start justify-between gap-2.5">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <Initials name={a.ApplicantName} small />
+                        <div className="min-w-0">
+                          <div className="font-semibold text-sm text-foreground capitalize truncate">{personName(a.ApplicantName)}</div>
+                          <div className="text-xs text-muted-foreground tabular-nums">{a.AgreementNo}{a.VersionNo > 1 ? ` v${a.VersionNo}` : ""} · {a.BookingNo}</div>
+                        </div>
+                      </div>
+                      <GridStatusPill status={a.Status} label={statusText(a.Status)} />
+                    </div>
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                      <span className="truncate">{[a.ProjectName, a.UnitNo].filter(Boolean).join(" · ") || "—"}</span>
+                      <span className={a.LegalExecutiveName ? "" : TONE_AMBER_TEXT}>{a.LegalExecutiveName || "No legal exec."}</span>
+                    </div>
+                    <StepBar steps={bar.steps} caption={bar.caption} />
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-border/60">
+                      <div className="flex flex-wrap gap-1">
+                        {alerts.length ? alerts.map((x) => <AlertPill key={x.key} tone={x.tone} label={x.label} />) : <span className="text-[0.6875rem] text-muted-foreground">On track</span>}
+                      </div>
+                      <div className="flex items-center gap-2.5 text-xs tabular-nums">
+                        {days != null && <span className="text-muted-foreground">{days}d at step</span>}
+                        {a.GrandTotal && <span className="font-semibold text-foreground">{fmtShort(a.GrandTotal)}</span>}
+                      </div>
+                    </div>
+                  </button>
+                );
+              }}
+              empty={listFiltered ? "No agreement matches these filters." : "No agreement yet. One is made automatically once a booking clears Booking Approval, Welcomed Call & Milestone 1."}
               page={s.page} pageSize={pageSize} total={listResult?.total ?? 0} onPage={s.setPage} onPageSize={(n) => { setPageSize(n); s.setPage(1); }} />
           </div>
         </>
       )}
 
       {dialog === "new" && (
-        <GridDialog onClose={close} icon={ScrollText} title="New Agreement" description="The Agreement for Sale for a booking whose welcome call is done and whose bank, PAN and Aadhaar details are on file."
-          footer={<><button onClick={close} className={GRID_BTN}>Cancel</button><button onClick={createAgreement} disabled={saving || !agrForm.BookingId} className={GRID_BTN_BRAND}>{saving ? "Creating…" : "Create Agreement"}</button></>}>
+        <GridDialog onClose={close} icon={ScrollText} title="New Agreement" description="Manually create an Agreement for Sale for an eligible booking (most agreements auto-create as soon as all 3 prerequisites below land)."
+          footer={<><button onClick={close} className={MATRIX_BTN}>Cancel</button><button onClick={createAgreement} disabled={saving || !agrForm.BookingId} className={MATRIX_BTN_BRAND}>{saving ? "Creating…" : "Create Agreement"}</button></>}>
+          <div className="mb-4 rounded-xl border border-border bg-muted/25 px-4 py-3 text-xs space-y-2">
+            <div className="font-semibold text-foreground">When does a booking become eligible?</div>
+            <ul className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-muted-foreground">
+              <li className="rounded-lg border border-border/80 bg-card px-2.5 py-2"><strong className="block text-foreground font-medium">1. Approved Booking</strong>Booking approved &amp; active (with allotted unit for Flat/Unit sales).</li>
+              <li className="rounded-lg border border-border/80 bg-card px-2.5 py-2"><strong className="block text-foreground font-medium">2. Welcomed Call</strong>At least one Welcome Call logged with outcome <span className="font-medium text-foreground">Welcomed</span>.</li>
+              <li className="rounded-lg border border-border/80 bg-card px-2.5 py-2"><strong className="block text-foreground font-medium">3. Booking Amount</strong>Milestone 1 paid or covered by approved on-account receipts.</li>
+            </ul>
+            <p className="text-[0.6875rem] text-muted-foreground">Bank details, PAN &amp; Aadhaar are <strong className="text-foreground">not</strong> prerequisites — legal details below are optional at creation and can be revised any time before execution.</p>
+          </div>
           <GridFormSection title="Booking">
-            <GridFormField label="Booking" required wide hint={(bookings as any[]).length ? undefined : "No booking is eligible yet: it needs to be approved, its welcome call done, and the customer's bank, PAN and Aadhaar on file."}>
+            <GridFormField label="Booking" required wide hint={(bookings as any[]).length ? undefined : "No eligible booking without an agreement right now — auto-creation triggers once Approved Booking + Welcomed Call + Milestone 1 cover complete."}>
               <SearchableSelect value={agrForm.BookingId} onChange={(v) => setAgrForm((f) => ({ ...f, BookingId: v, LegalName: "", PanNo: "", AadhaarNo: "", LegalAddress: "" }))}
                 placeholder="Select booking" searchPlaceholder="Search booking or customer…" options={(bookings as any[]).map((b) => ({ value: String(b.Id), label: `${b.BookingNo} · ${personName(b.ApplicantName)}` }))} />
             </GridFormField>

@@ -290,11 +290,11 @@ export function CrmAppPage({ icon: Icon, section, title, subtitle, actions, chil
 // ── Status pill ──────────────────────────────────────────────────────────────
 // The pill's colour comes from the status's own meaning (StatusBadge's tone): settled, waiting, under way, stopped, draft.
 const PILL_TONE: Record<ReturnType<typeof statusBadgeTone>, string> = {
-  done: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/25",
-  waiting: "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30",
-  moving: "bg-sky-500/10 text-sky-700 dark:text-sky-300 border-sky-500/25",
-  stopped: "bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/25",
-  draft: "bg-slate-500/10 text-slate-600 dark:text-slate-300 border-slate-500/25",
+  done: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30 [[data-theme]_&]:bg-emerald-500/10 [[data-theme]_&]:text-emerald-700 [[data-theme]_&]:border-emerald-500/25",
+  waiting: "bg-amber-500/15 text-amber-300 border-amber-500/30 [[data-theme]_&]:bg-amber-500/10 [[data-theme]_&]:text-amber-700 [[data-theme]_&]:border-amber-500/30",
+  moving: "bg-sky-500/15 text-sky-300 border-sky-500/30 [[data-theme]_&]:bg-sky-500/10 [[data-theme]_&]:text-sky-700 [[data-theme]_&]:border-sky-500/25",
+  stopped: "bg-rose-500/15 text-rose-300 border-rose-500/30 [[data-theme]_&]:bg-rose-500/10 [[data-theme]_&]:text-rose-700 [[data-theme]_&]:border-rose-500/25",
+  draft: "bg-slate-500/15 text-slate-300 border-slate-500/30 [[data-theme]_&]:bg-slate-500/10 [[data-theme]_&]:text-slate-600 [[data-theme]_&]:border-slate-500/25",
 };
 export function GridStatusPill({ status, label }: { status: string | null | undefined; label?: string }) {
   if (!status) return <span className="text-muted-foreground">—</span>;
@@ -389,7 +389,12 @@ export function GridGuidance({ tone, title, text, action }: { tone: GridGuidance
     done: "border-emerald-500/30 bg-emerald-500/5", stopped: "border-rose-500/30 bg-rose-500/5",
     waiting: "border-amber-500/30 bg-amber-500/5", moving: "border-primary/30 bg-primary/5",
   };
-  const ink: Record<GridGuidanceTone, string> = { done: "text-emerald-600", stopped: "text-destructive", waiting: "text-amber-600", moving: "text-primary" };
+  const ink: Record<GridGuidanceTone, string> = {
+    done: "text-emerald-400 [[data-theme]_&]:text-emerald-700",
+    stopped: "text-rose-400 [[data-theme]_&]:text-rose-700",
+    waiting: "text-amber-300 [[data-theme]_&]:text-amber-700",
+    moving: "text-primary",
+  };
   const Icon = tone === "done" ? CheckCircle2 : tone === "stopped" ? AlertTriangle : Info;
   return (
     <div className={cn("rounded-lg border px-4 py-3 flex flex-wrap items-start gap-3", box[tone])} role="status">

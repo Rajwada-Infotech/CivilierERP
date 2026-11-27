@@ -5,6 +5,7 @@ import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { GRID_KEY, GRID_KEY_BRAND, GRID_KEY_DANGER, GRID_SHEET_KEYS } from "@/components/crm/CrmDataTable";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { translateError } from "@/lib/translateError";
@@ -170,3 +171,99 @@ export const Facts: React.FC<{ title: string; rows: [string, React.ReactNode][] 
     </dl>
   </div>
 );
+
+// ── Modern enterprise grid styles & dialog for Unit Matrix (keeps legacy exports intact for other pages) ──
+export const MATRIX_INP = GRID_SHEET_KEYS.INP;
+export const MATRIX_TEXTAREA = GRID_SHEET_KEYS.TEXTAREA;
+export const MATRIX_BTN = `${GRID_KEY} h-9 px-3`;
+export const MATRIX_BTN_BRAND = `${GRID_KEY_BRAND} h-9 px-3.5`;
+export const MATRIX_BTN_DANGER = `${GRID_KEY_DANGER} h-9 px-3.5`;
+
+export function fmtHoldRemaining(holdUntil: string | null): string | null {
+  if (!holdUntil) return null;
+  const diffMs = new Date(holdUntil).getTime() - Date.now();
+  if (!Number.isFinite(diffMs)) return null;
+  if (diffMs <= 0) return "Expired";
+  const hours = Math.floor(diffMs / 3_600_000);
+  if (hours >= 24) return `${Math.ceil(hours / 24)}d left`;
+  return `${Math.max(1, hours)}h left`;
+}
+
+export function ModernPlaceHoldDialog({ entityType, entityId, label, subtitle, projectId, canPlace, onDone, onClose }: {
+  entityType: "Unit" | "Parking"; entityId: number; label: string; subtitle?: string; projectId: string; canPlace: boolean; onDone: () => void; onClose: () => void;
+}) {
+  const [applicationId, setApplicationId] = useState("");
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const { data: customers = [], isLoading } = useMatrixCustomers(projectId);
+
+  const place = async () => {
+    if (!applicationId) return void toast.error("Select a customer.");
+    setSaving(true);
+    try {
+      await holdCall(HOLDS_API, "POST", { EntityType: entityType, EntityId: entityId, ApplicationId: parseInt(applicationId, 10), Reason: reason || null });
+      toast.success(`${label} is on hold`);
+      onDone();
+      onClose();
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-lg rounded-xl p-5 gap-4">
+        <DialogHeader className="pr-8">
+          <DialogTitle className="text-lg font-bold capitalize">Hold {label}</DialogTitle>
+          {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
+        </DialogHeader>
+
+        <div className="space-y-3">
+          <label className="block space-y-1">
+            <span className="text-xs font-medium text-muted-foreground block">
+              Customer / Live Application <span className="text-destructive">*</span>
+            </span>
+            <SearchableSelect
+              value={applicationId}
+              onChange={setApplicationId}
+              placeholder={isLoading ? "Loading customers…" : "Select customer"}
+              searchPlaceholder="Search name, mobile or application…"
+              options={customerOptions(customers)}
+            />
+            {!isLoading && customers.length === 0 && (
+              <span className="block text-xs text-muted-foreground pt-0.5">
+                {`No live application in this project yet — only a customer of the same project can ${entityType === "Parking" ? "hold this parking slot" : "hold this unit"}.`}
+              </span>
+            )}
+          </label>
+
+          <p className="text-xs text-muted-foreground rounded-lg border border-border bg-muted/30 px-3 py-2">
+            Holds remain active until released here, converted into a booking, or when the application is closed.
+          </p>
+
+          <label className="block space-y-1">
+            <span className="text-xs font-medium text-muted-foreground block">Reason / remarks (optional)</span>
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              rows={2}
+              placeholder="e.g. Token cheque expected tomorrow…"
+              className={MATRIX_TEXTAREA}
+            />
+          </label>
+        </div>
+
+        <div className="flex justify-end gap-2 pt-3 border-t border-border">
+          <button type="button" onClick={onClose} className={`${MATRIX_BTN} text-foreground`}>Cancel</button>
+          {canPlace && (
+            <button type="button" onClick={place} disabled={saving} className={MATRIX_BTN_BRAND}>
+              {saving ? "Placing hold…" : "Place hold"}
+            </button>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}

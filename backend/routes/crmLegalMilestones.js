@@ -34,9 +34,12 @@ const MANUAL_STEPS = new Set(["DirectorMeeting"]);
 // create/update logic on its dedicated page; this page only summarises +
 // links out so the team can see the entire journey in one place.
 const LM_SELECT = `
-  SELECT m.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName, a.ApplicantName, a.Mobile,
+  SELECT m.*, b.BookingNo, b.ProjectId, b.Status AS BookingStatus, b.IsFrozen AS BookingIsFrozen,
+    COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName, a.ApplicantName, a.Mobile,
+    CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bp WHERE bp.BookingId = b.Id AND bp.Status = N'Active') THEN 1 ELSE 0 END AS IsPlotBooking,
+    CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmWelcomeCall wc WHERE wc.BookingId = b.Id AND wc.Outcome = 'Welcomed') THEN 1 ELSE 0 END AS WelcomeDone,
     -- Agreement status (Executed / Registered / etc.)
-    ag.Status AS AgreementStatus, ag.AgreementNo,
+    ag.Id AS AgreementId, ag.Status AS AgreementStatus, ag.AgreementNo,
     -- The agreement's own steps (the Agreement page's: agreement/config.tsx agreementStepStates), read off the record.
     ag.LegalExecutiveId AS AgrLegalExecutiveId, ag.SeniorApprovalStatus AS AgrSeniorStatus, ag.SentToCustomerAt AS AgrSentAt,
     ag.CustomerApprovalStatus AS AgrCustomerStatus, ag.AgreementDate AS AgrDate,
@@ -45,9 +48,15 @@ const LM_SELECT = `
     -- Sub-Registrar Visit 1: Agreement for Sale registration
     aqp.Id AS AfsQPId, aqp.AfsQPNo, aqp.Status AS AfsQPStatus,
     areg.Id AS AfsRegistryId, areg.AfsRegNo, areg.Status AS AfsRegistryStatus,
-    -- Sale Deed
+    -- Sale Deed + full approval sub-states (mirrors crmSalesDeed.js)
     sd.Id AS SalesDeedId, sd.DeedNo, sd.ExecutedBy AS DeedExecutedBy, sd.RegistrationNo AS DeedRegistrationNo,
+    sd.LegalExecutiveId AS DeedLegalExecutiveId, sd.SeniorApprovalStatus AS DeedSeniorApprovalStatus,
+    sd.SentToCustomerAt AS DeedSentToCustomerAt, sd.CustomerApprovalStatus AS DeedCustomerApprovalStatus,
     sd.DirectorApprovalStatus AS DeedDirectorApprovalStatus,
+    sd.StampDuty AS DeedStampDuty, sd.RegistrationFee AS DeedRegistrationFee,
+    (SELECT COUNT(*) FROM dbo.CrmSalesDeedDocument d WHERE d.SalesDeedId = sd.Id AND d.IsMandatory = 1) AS DeedDocsRequired,
+    (SELECT COUNT(*) FROM dbo.CrmSalesDeedDocument d WHERE d.SalesDeedId = sd.Id AND d.IsMandatory = 1 AND d.Status = 'Verified') AS DeedDocsVerified,
+    (SELECT COUNT(*) FROM dbo.CrmSalesDeedDocument d WHERE d.SalesDeedId = sd.Id AND d.IsMandatory = 1 AND d.FileBase64 IS NOT NULL) AS DeedDocsUploaded,
     -- Sub-Registrar Visit 2: Sale Deed registration
     qp.Id AS QueryPaymentId, qp.QPNo, qp.Status AS QueryPaymentStatus,
     reg.Id AS RegistryId, reg.RegNo, reg.Status AS RegistryStatus,
@@ -55,32 +64,26 @@ const LM_SELECT = `
     mut.Id AS MutationId, mut.MutationNo, mut.Status AS MutationStatus,
     bankNoc.Id AS BankNocId, bankNoc.NocNo AS BankNocNo, bankNoc.Status AS BankNocStatus,
     orgNoc.Id AS OrgNocId, orgNoc.NocNo AS OrgNocNo, orgNoc.Status AS OrgNocStatus,
-    -- Possession sequence (OC/CC is project-level; fetched via booking's ProjectId)
-    occc.HasReceived AS OcCcReceived,
+    -- Possession sequence (OC/CC is project/block-level; fetched via vw_CrmBookingOcCc)
+    occc.HasReceived AS OcCcReceived, occc.OccSource AS OcCcSource,
     pp.Status AS PrePossessionStatus,
-    pn.Id AS PossessionNoticeId, pn.Status AS PossessionNoticeStatus,
-    hov.Status AS HandoverStatus,
+    ISNULL(pp.DocumentationCheck, 0) AS PrePossessionDocCheck,
+    ISNULL(pp.QualityInspectionCheck, 0) AS PrePossessionQualityCheck,
+    ISNULL(pp.UtilityReadinessCheck, 0) AS PrePossessionUtilityCheck,
+    pn.Id AS PossessionNoticeId, pn.NoticeNo AS PossessionNoticeNo, pn.Status AS PossessionNoticeStatus, pn.ResponseDeadline AS NoticeResponseDeadline,
+    hov.Id AS HandoverId, hov.Status AS HandoverStatus, hov.OpenSnagCount AS HandoverOpenSnags,
     -- Real-estate category + lifecycle status from Project Master (General
-    -- tab Type + Timeline tab Status). Governs only the Handover-timing note
-    -- shown in the Sale Deed/Handover stage text — see buildWorkflowModel in
-    -- CrmLegalMilestones.tsx and getProjectSaleGate in crmWorkflowGuards.js.
-    -- Never waives Agreement/AFS — that stays mandatory for every booking.
+    -- tab Type + Timeline tab Status). Governs RequiresHandoverBeforeDeed
+    -- enforced by crmSalesDeed.js POST / (under-construction projects must
+    -- finish Handover before preparing Sale Deed).
     proj.entity_type AS ProjectType, proj.status AS ProjectStatus,
+    CASE WHEN proj.entity_type = 'UnderConstruction' AND ISNULL(proj.status, '') <> 'Completed' THEN 1 ELSE 0 END AS RequiresHandoverBeforeDeed,
+    -- Active home-loan status (mirrors checkLoanProcessingCleared in crmWorkflowGuards.js)
+    loan.SanctionStatus AS LoanSanctionStatus, loan.LoanCount,
     -- Mirror the Handover net-funding gate so the legal workflow indicator
     -- cannot disagree with the action page about on-account funds.
     CASE WHEN ${bookingFullyFundedSql("m.BookingId")} THEN 0 ELSE 1 END AS HasOutstandingDues,
-    -- No Objection Certificate is a SINGLE step per booking, not two — the
-    -- bank's NOC and the developer's NOC serve the same purpose (clearing
-    -- the booking for Possession/Handover); a booking only ever needs one,
-    -- decided by how it's financed (see resolveNocType in
-    -- crmWorkflowGuards.js for the full precedence rules, mirrored here as
-    -- a single-query CASE for the list endpoint):
-    --   1. A real, non-Rejected CrmNoc row already on file settles it —
-    --      never contradict data that already exists.
-    --   2. Otherwise: loan-financed (FinancingType = 'LoanFinanced', or an
-    --      active CrmLoanDetail row — SanctionStatus NOT IN ('NotApplied',
-    --      'Rejected'), same convention as crmBookings.js's ActiveLoans
-    --      column) → Bank; otherwise → Organisation.
+    -- No Objection Certificate is a SINGLE step per booking, not two.
     b.FinancingType,
     CASE
       WHEN bankNoc.Id IS NOT NULL AND bankNoc.Status <> 'Rejected' THEN 'Bank'
@@ -96,9 +99,6 @@ const LM_SELECT = `
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
   LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
   LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
-  -- Needed for block-level OC/CC resolution below (migration 447) — moved
-  -- here (was previously only appended by the GET / list route's own
-  -- SELECT_WITH_BLOCK) so GET /booking/:bookingId gets it too.
   LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
   OUTER APPLY (
     SELECT TOP 1 Id, AgreementNo, Status, LegalExecutiveId, SeniorApprovalStatus, SentToCustomerAt, CustomerApprovalStatus, AgreementDate
@@ -113,7 +113,9 @@ const LM_SELECT = `
     WHERE BookingId = m.BookingId ORDER BY CreatedAt DESC
   ) areg
   OUTER APPLY (
-    SELECT TOP 1 Id, DeedNo, ExecutedBy, RegistrationNo, DirectorApprovalStatus FROM dbo.CrmSalesDeed
+    SELECT TOP 1 Id, DeedNo, ExecutedBy, RegistrationNo, LegalExecutiveId, SeniorApprovalStatus, SentToCustomerAt,
+           CustomerApprovalStatus, DirectorApprovalStatus, StampDuty, RegistrationFee
+    FROM dbo.CrmSalesDeed
     WHERE BookingId = m.BookingId ORDER BY CreatedAt DESC
   ) sd
   OUTER APPLY (
@@ -128,22 +130,24 @@ const LM_SELECT = `
     SELECT TOP 1 Id, MutationNo, Status FROM dbo.CrmMutation
     WHERE BookingId = m.BookingId ORDER BY CreatedAt DESC
   ) mut
-  -- OC/CC for this booking - its own block(s), or the project when it has
-  -- no block; one rule for every screen (migration 577, vw_CrmBookingOcCc).
   OUTER APPLY (
-    SELECT ISNULL((SELECT v.Received FROM dbo.vw_CrmBookingOcCc v WHERE v.BookingId = b.Id), 0) AS HasReceived
+    SELECT TOP 1 v.Received AS HasReceived, v.Source AS OccSource FROM dbo.vw_CrmBookingOcCc v WHERE v.BookingId = b.Id
   ) occc
   OUTER APPLY (
-    SELECT TOP 1 Status FROM dbo.CrmPrePossession
+    SELECT TOP 1 Status, DocumentationCheck, QualityInspectionCheck, UtilityReadinessCheck FROM dbo.CrmPrePossession
     WHERE BookingId = m.BookingId ORDER BY CreatedAt DESC
   ) pp
   OUTER APPLY (
-    SELECT TOP 1 Id, Status FROM dbo.CrmPossessionNotice
+    SELECT TOP 1 Id, NoticeNo, Status, ResponseDeadline FROM dbo.CrmPossessionNotice
     WHERE BookingId = m.BookingId ORDER BY CreatedAt DESC
   ) pn
   OUTER APPLY (
-    SELECT TOP 1 Status FROM dbo.CrmHandover
-    WHERE BookingId = m.BookingId ORDER BY CreatedAt DESC
+    SELECT TOP 1 h.Id, h.Status,
+      CASE WHEN h.Status IN ('Completed', 'Cancelled') THEN 0
+           ELSE ISNULL((SELECT COUNT(*) FROM dbo.CrmSnagItem s WHERE s.HandoverId = h.Id AND s.Status IN ('Open', 'InProgress')), 0)
+      END AS OpenSnagCount
+    FROM dbo.CrmHandover h
+    WHERE h.BookingId = m.BookingId ORDER BY CASE WHEN h.Status <> 'Cancelled' THEN 0 ELSE 1 END, h.CreatedAt DESC
   ) hov
   OUTER APPLY (
     SELECT TOP 1 Id, NocNo, Status FROM dbo.CrmNoc
@@ -153,6 +157,13 @@ const LM_SELECT = `
     SELECT TOP 1 Id, NocNo, Status FROM dbo.CrmNoc
     WHERE BookingId = m.BookingId AND NocType = 'Organisation' ORDER BY CreatedAt DESC
   ) orgNoc
+  OUTER APPLY (
+    SELECT
+      (SELECT TOP 1 l.SanctionStatus FROM dbo.CrmLoanDetail l
+       WHERE l.BookingId = b.Id AND ISNULL(l.SanctionStatus, N'') <> N'Closed' ORDER BY l.Id DESC) AS SanctionStatus,
+      (SELECT COUNT(*) FROM dbo.CrmLoanDetail l
+       WHERE l.BookingId = b.Id AND ISNULL(l.SanctionStatus, N'') <> N'Closed') AS LoanCount
+  ) loan
 `;
 
 // GET / — all legal milestone trackers
@@ -170,25 +181,33 @@ const AGREEMENT_STEPS = agreementStepConditions({
 });
 const AGREEMENT_DONE = AGREEMENT_STEPS[AGREEMENT_STEPS.length - 1].done;
 const AFS_REGISTERED = `${S("AgreementStatus")} = 'Registered'`;
+const LOAN_BLOCKED = `(${S("FinancingType")} = 'LoanFinanced' AND ISNULL(x.HasOutstandingDues, 0) = 1 AND ${S("LoanSanctionStatus")} NOT IN ('Sanctioned', 'Disbursed'))`;
+const HANDOVER_DONE = `${S("HandoverStatus")} = 'Completed'`;
+// Mirrors getProjectSaleGate + crmSalesDeed.js POST /: under-construction projects require Handover Completed before preparing Sale Deed.
+const DEED_WAIT_FOR_HANDOVER = `(ISNULL(x.RequiresHandoverBeforeDeed, 0) = 1 AND NOT (${HANDOVER_DONE}))`;
 const LM_STAGES = [
   ...AGREEMENT_STEPS.map((st, i) => ({ key: st.key, phase: "agreement", done: st.done, locked: i === 0 ? "1 = 0" : `NOT (${AGREEMENT_STEPS[i - 1].done})` })),
   { key: "afsQP", phase: "afsVisit1", done: `${S("AfsQPStatus")} = 'Confirmed' OR ${AFS_REGISTERED}`, locked: `NOT (${AGREEMENT_DONE})` },
   { key: "afsReg", phase: "afsVisit1", done: AFS_REGISTERED, locked: `NOT (${AGREEMENT_DONE}) OR (${S("AfsQPStatus")} <> 'Confirmed' AND NOT (${AFS_REGISTERED}))` },
   { key: "noc", phase: "noc", done: `${NOC_STATUS} = 'Issued'`, locked: `NOT (${AFS_REGISTERED})` },
-  // The project's certificate: worked on the OC/CC page for the whole project; on a journey it opens once the agreement is executed.
-  { key: "ocCc", phase: "possession", done: `ISNULL(x.OcCcReceived, 0) = 1`, locked: `NOT (${AGREEMENT_DONE})` },
+  // Project/block certificate: gated behind Visit 1 so Possession doesn't read "In progress" before Agreement is Registered.
+  { key: "ocCc", phase: "possession", done: `ISNULL(x.OcCcReceived, 0) = 1`, locked: `NOT (${AFS_REGISTERED})` },
   { key: "prePossession", phase: "possession", done: `${S("PrePossessionStatus")} = 'Ready'`, locked: `NOT (${AFS_REGISTERED}) OR ISNULL(x.OcCcReceived, 0) <> 1` },
-  { key: "possessionNotice", phase: "possession", done: `${S("PossessionNoticeStatus")} = 'Acknowledged'`, locked: `${S("PrePossessionStatus")} <> 'Ready'` },
+  { key: "possessionNotice", phase: "possession", done: `${S("PossessionNoticeStatus")} = 'Acknowledged'`, locked: `NOT (${AFS_REGISTERED}) OR ${S("PrePossessionStatus")} <> 'Ready' OR ISNULL(x.OcCcReceived, 0) <> 1` },
   {
-    key: "handover", phase: "possession", done: `${S("HandoverStatus")} = 'Completed'`,
-    // Handover's own four gates (crmHandover.js POST /).
-    locked: `NOT (${AFS_REGISTERED}) OR ${S("PossessionNoticeStatus")} <> 'Acknowledged' OR ${NOC_STATUS} IN ('Pending', 'Approved') OR ISNULL(x.HasOutstandingDues, 0) = 1`,
+    key: "handover", phase: "possession", done: HANDOVER_DONE,
+    // Handover's exact backend gates (crmHandover.js POST /).
+    locked: `NOT (${AFS_REGISTERED}) OR ${S("PrePossessionStatus")} <> 'Ready' OR ${S("PossessionNoticeStatus")} <> 'Acknowledged' OR ${NOC_STATUS} IN ('Pending', 'Approved') OR ISNULL(x.HasOutstandingDues, 0) = 1`,
   },
-  // Done once the director approves it: that is what opens its registration (Query Payment).
-  { key: "salesDeed", phase: "saleDeed", done: `${S("DeedDirectorApprovalStatus")} = 'Approved'`, locked: `NOT (${AFS_REGISTERED})` },
-  { key: "queryPayment", phase: "afsVisit2", done: `${S("QueryPaymentStatus")} = 'Confirmed'`, locked: `NOT (${AGREEMENT_DONE}) OR x.SalesDeedId IS NULL OR ${S("DeedDirectorApprovalStatus")} <> 'Approved'` },
-  { key: "registry", phase: "afsVisit2", done: `${S("RegistryStatus")} = 'Completed'`, locked: `NOT (${AGREEMENT_DONE}) OR x.SalesDeedId IS NULL OR ${S("QueryPaymentStatus")} <> 'Confirmed'` },
-  { key: "mutation", phase: "mutation", done: `${S("MutationStatus")} = 'Approved'`, locked: `${S("RegistryStatus")} <> 'Completed'` },
+  // Done once Director Approved; before creation enforces AFS Registered + Loan cleared + Handover (if Under-Construction).
+  {
+    key: "salesDeed", phase: "saleDeed", done: `${S("DeedDirectorApprovalStatus")} = 'Approved'`,
+    locked: `NOT (${AFS_REGISTERED}) OR (x.SalesDeedId IS NULL AND (${LOAN_BLOCKED} OR ${DEED_WAIT_FOR_HANDOVER}))`,
+  },
+  // Visit 2 always waits for Visit 1 (AFS Registered) AND Director Approved Sale Deed.
+  { key: "queryPayment", phase: "afsVisit2", done: `${S("QueryPaymentStatus")} = 'Confirmed'`, locked: `NOT (${AFS_REGISTERED}) OR x.SalesDeedId IS NULL OR ${S("DeedDirectorApprovalStatus")} <> 'Approved'` },
+  { key: "registry", phase: "afsVisit2", done: `${S("RegistryStatus")} = 'Completed'`, locked: `NOT (${AFS_REGISTERED}) OR x.SalesDeedId IS NULL OR ${S("QueryPaymentStatus")} <> 'Confirmed'` },
+  { key: "mutation", phase: "mutation", done: `${S("MutationStatus")} = 'Approved'`, locked: `NOT (${AFS_REGISTERED}) OR ${S("RegistryStatus")} <> 'Completed'` },
 ];
 // Every phase after the agreement opens once the agreement is executed (this page's display only: the pages that own
 // each step keep their own checks).

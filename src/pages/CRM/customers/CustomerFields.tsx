@@ -1,8 +1,11 @@
-// The parts of a customer both forms show: identity and money, the address (permanent always, current only when it
-// differs), billing mode and notes. Used by New customer and the open customer alike, so the two never drift.
+// Shared customer profile fields: identity & KYC, addresses (permanent + optional current), billing mode, and notes.
 import React from "react";
+import { FileText, MapPin, Receipt, UserCheck } from "lucide-react";
 import { AutoInput } from "@/components/ui/date-input";
-import { Block, Field, IDENTITY_FIELDS, INP, TEXTAREA, type CustomerForm } from "./config";
+import { cn } from "@/lib/utils";
+import {
+  CUST_INP, CUST_TEXTAREA, CustBlock, CustField, IDENTITY_FIELDS, type CustomerForm,
+} from "./config";
 
 type SetForm = (updater: (f: CustomerForm) => CustomerForm) => void;
 
@@ -10,60 +13,122 @@ export function CustomerFields({ form, setForm, readOnly = false, onIdentityBlur
   form: CustomerForm; setForm: SetForm; readOnly?: boolean; onIdentityBlur?: (key: keyof CustomerForm) => void;
 }) {
   const set = (k: keyof CustomerForm, v: unknown) => setForm((f) => ({ ...f, [k]: v }));
-  const address = (prefix: "Permanent" | "Current") => (
-    <>
-      <Field label={prefix === "Permanent" ? "Permanent address" : "Current address"}>
-        <textarea value={form[`${prefix}Address`] as string} readOnly={readOnly} rows={2} onChange={(e) => set(`${prefix}Address`, e.target.value)} className={TEXTAREA} />
-      </Field>
+
+  const addressSection = (prefix: "Permanent" | "Current") => (
+    <div className="space-y-3">
+      <CustField label={prefix === "Permanent" ? "Permanent address" : "Current address"}>
+        <textarea
+          value={form[`${prefix}Address`] as string}
+          readOnly={readOnly}
+          rows={2}
+          placeholder={prefix === "Permanent" ? "House/flat, street, locality…" : "Correspondence address…"}
+          onChange={(e) => set(`${prefix}Address`, e.target.value)}
+          className={CUST_TEXTAREA}
+        />
+      </CustField>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {(["City", "State", "Pincode"] as const).map((part) => (
-          <Field key={part} label={part}>
-            <input type="text" value={form[`${prefix}${part}`] as string} readOnly={readOnly} onChange={(e) => set(`${prefix}${part}`, e.target.value)} className={INP} />
-          </Field>
+          <CustField key={part} label={part}>
+            <input
+              type="text"
+              value={form[`${prefix}${part}`] as string}
+              readOnly={readOnly}
+              onChange={(e) => set(`${prefix}${part}`, e.target.value)}
+              className={CUST_INP}
+            />
+          </CustField>
         ))}
       </div>
-    </>
+    </div>
   );
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <Block title="Person">
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+      <CustBlock title="Identity & KYC" icon={<UserCheck size={14} className="text-primary" />}>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {IDENTITY_FIELDS.map(({ key, label, type, required }) => (
-            <Field key={key} label={label} required={required} className={key === "CustomerName" ? "sm:col-span-2" : undefined}>
-              <AutoInput type={type} value={form[key] as string} readOnly={readOnly}
+            <CustField key={key} label={label} required={required} className={key === "CustomerName" ? "sm:col-span-2" : undefined}>
+              <AutoInput
+                type={type}
+                value={form[key] as string}
+                readOnly={readOnly}
                 onChange={(e) => set(key, e.target.value)}
                 onBlur={() => onIdentityBlur?.(key)}
-                className={INP} />
-            </Field>
+                className={CUST_INP}
+              />
+            </CustField>
           ))}
         </div>
-      </Block>
+      </CustBlock>
 
       <div className="space-y-4">
-        <Block title="Address">
-          {address("Permanent")}
-          <label className="flex items-center gap-2 text-xs text-foreground">
-            <input type="checkbox" checked={form.IsCurrentSameAsPermanent} disabled={readOnly} onChange={(e) => set("IsCurrentSameAsPermanent", e.target.checked)} className="accent-foreground" />
-            Current address is the same
+        <CustBlock title="Addresses" icon={<MapPin size={14} className="text-primary" />}>
+          {addressSection("Permanent")}
+          <label className={cn(
+            "inline-flex items-center gap-2 text-xs text-foreground pt-1 select-none",
+            readOnly ? "opacity-75" : "cursor-pointer",
+          )}>
+            <input
+              type="checkbox"
+              checked={form.IsCurrentSameAsPermanent}
+              disabled={readOnly}
+              onChange={(e) => set("IsCurrentSameAsPermanent", e.target.checked)}
+              className="w-4 h-4 rounded accent-primary disabled:opacity-50"
+            />
+            Current correspondence address is the same
           </label>
-          {!form.IsCurrentSameAsPermanent && address("Current")}
-        </Block>
+          {!form.IsCurrentSameAsPermanent && (
+            <div className="pt-2 border-t border-border">
+              {addressSection("Current")}
+            </div>
+          )}
+        </CustBlock>
 
-        <Block title="Billing" note="Non-invoice customers never get an invoice, here or in Accounts' Sale Invoice">
-          <div className="flex items-center gap-5">
-            {(["NonInvoice", "Invoice"] as const).map((mode) => (
-              <label key={mode} className={`flex items-center gap-2 text-sm ${readOnly ? "opacity-70" : "cursor-pointer"}`}>
-                <input type="radio" disabled={readOnly} checked={form.InvoiceMode === mode} onChange={() => set("InvoiceMode", mode)} className="accent-foreground" />
-                {mode === "NonInvoice" ? "Non-invoice" : "Invoice"}
-              </label>
-            ))}
+        <CustBlock
+          title="Billing mode"
+          icon={<Receipt size={14} className="text-primary" />}
+          note="Non-invoice profiles never receive a GST Sale Invoice"
+        >
+          <div className="grid grid-cols-2 gap-2.5">
+            {(["NonInvoice", "Invoice"] as const).map((mode) => {
+              const selected = form.InvoiceMode === mode;
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  disabled={readOnly}
+                  onClick={() => !readOnly && set("InvoiceMode", mode)}
+                  className={cn(
+                    "rounded-lg border px-3 py-2 text-left text-xs transition-colors flex items-center gap-2",
+                    selected
+                      ? "border-primary bg-primary/10 text-primary font-semibold"
+                      : "border-border bg-card text-foreground hover:bg-muted/40",
+                    readOnly && "cursor-default",
+                  )}
+                >
+                  <span className={cn(
+                    "w-3.5 h-3.5 rounded-full border-2 shrink-0 flex items-center justify-center",
+                    selected ? "border-primary" : "border-muted-foreground/40",
+                  )}>
+                    {selected && <span className="w-1.5 h-1.5 rounded-full bg-primary block" />}
+                  </span>
+                  {mode === "NonInvoice" ? "Non-invoice" : "Invoice (GST)"}
+                </button>
+              );
+            })}
           </div>
-        </Block>
+        </CustBlock>
 
-        <Block title="Notes">
-          <textarea value={form.Notes} readOnly={readOnly} rows={2} onChange={(e) => set("Notes", e.target.value)} className={TEXTAREA} />
-        </Block>
+        <CustBlock title="Notes" icon={<FileText size={14} className="text-primary" />}>
+          <textarea
+            value={form.Notes}
+            readOnly={readOnly}
+            rows={2}
+            placeholder="Internal profile remarks…"
+            onChange={(e) => set("Notes", e.target.value)}
+            className={CUST_TEXTAREA}
+          />
+        </CustBlock>
       </div>
     </div>
   );

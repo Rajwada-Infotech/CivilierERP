@@ -11,15 +11,16 @@ import { toast } from "sonner";
 import { ChevronDown, ChevronRight, Pencil, Plus, Trash2, X } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useSheetAsk } from "@/components/sheet/SheetAsk";
-import { SheetMark, money } from "@/components/sheet/Sheet";
+import { money } from "@/components/sheet/Sheet";
+import { GRID_CARD, GridToneMark } from "@/components/crm/CrmDataTable";
 import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useUrlParam } from "@/hooks/useUrlParam";
 import { usePageRights } from "@/hooks/usePageRights";
-import { Legend, Tile, type TileStatus } from "../matrix/shared";
+import { type TileStatus } from "../matrix/shared";
 import { ParkingNamingPanel } from "./NamingPanel";
 import { ProjectPicker } from "./ProjectPicker";
-import { API, INP, KEY_INK, KEY_LINE, LBL, NUM, Notice, PANEL, RULE, RULE_SOFT, Section, TEXT_LINK, fetchStatus, lockOf, plural } from "./config";
+import { API, INP, KEY_INK, KEY_LINE, KEY_RED, LBL, NUM, Notice, Section, TEXT_LINK, TONE_AMBER_TEXT, TONE_EMERALD_TEXT, TONE_SKY_TEXT, fetchStatus, lockOf, plural } from "./config";
 
 type ParkingTemplateRow = { ParkingType: string; Count: string; Charge: string; GstRate: string };
 type SlotEdit = { SlotNo: string; ParkingType: string };
@@ -50,8 +51,29 @@ const slotStatus = (s: Slot): TileStatus => (s.LockAllotmentId || s.LockBookingN
 // "TSTRSD/A/P07" reads as "P07" on a tile; the full name is its tooltip.
 const shortName = (slotNo: string) => slotNo.split("/").pop() || slotNo;
 const COUNT0: Record<TileStatus, number> = { Available: 0, OnHold: 0, Booked: 0, Blocked: 0 };
-// The block list is rows of a CSS grid, not a <table>: an open block's own mix table
-// would otherwise be a table inside a table cell, which the app's table styles break.
+const SLOT_TILE_CLS: Record<TileStatus, { card: string; dot: string; label: string }> = {
+  Available: {
+    card: "border-emerald-500/30 bg-emerald-500/[0.06] hover:border-emerald-500/60 text-foreground",
+    dot: "bg-emerald-500",
+    label: "Free",
+  },
+  OnHold: {
+    card: "border-amber-500/40 bg-amber-500/10 hover:border-amber-500/70 text-foreground",
+    dot: "bg-amber-500",
+    label: "On hold",
+  },
+  Booked: {
+    card: "border-sky-500/40 bg-sky-500/10 hover:border-sky-500/70 text-foreground",
+    dot: "bg-sky-500",
+    label: "Booked",
+  },
+  Blocked: {
+    card: "border-border bg-muted/40 text-muted-foreground opacity-75",
+    dot: "bg-slate-400",
+    label: "Blocked",
+  },
+};
+
 const ROW = "grid grid-cols-[minmax(100px,1fr)_minmax(150px,2.4fr)_84px_56px_64px_64px_88px_112px] items-center gap-x-2 min-w-[760px]";
 const CELL_NUM = "text-right tabular-nums";
 
@@ -251,9 +273,9 @@ const ParkingSetup: React.FC = () => {
       <ProjectPicker companyId={companyId} projectId={projectId} onCompany={(v) => { setCompanyId(v); setProjectId(""); }} onProject={setProjectId} />
 
       {!projectId && (
-        <div className="bg-card px-6 py-10 text-center" style={{ border: RULE_SOFT }}>
-          <p className="text-sm font-medium">No project selected</p>
-          <p className="text-xs text-muted-foreground mt-1">Pick a company and project above to set up its parking.</p>
+        <div className="rounded-xl border border-dashed border-border bg-card px-6 py-10 text-center">
+          <p className="text-sm font-medium text-foreground">No project selected</p>
+          <p className="text-xs text-muted-foreground mt-1">Pick a company and project above to configure parking mixes, pricing, and slots.</p>
         </div>
       )}
       {projectId && statusLoading && <p className="text-sm text-muted-foreground">Loading the project…</p>}
@@ -261,21 +283,52 @@ const ParkingSetup: React.FC = () => {
       {projectId && slotsFailed && <Notice tone="error">{(slotsError as Error)?.message}</Notice>}
 
       {projectId && status && !step1Done && (
-        <Notice>This project has no blocks yet. Create them on the Blocks tab first, then come back here to set up parking.</Notice>
+        <Notice tone="fix">This project has no blocks yet. Create blocks on the <strong>Blocks, floors &amp; units</strong> tab first, then return here to set up parking.</Notice>
       )}
 
       {/* Slots with no block show in the parking matrix but not in the per-block totals below. */}
       {projectId && status && (status.orphanParkingSlotCount ?? 0) > 0 && (
         <Notice tone="fix">
-          <span className={NUM}>{plural(status.orphanParkingSlotCount, "parking slot")}</span> on this project {status.orphanParkingSlotCount === 1 ? "has" : "have"} no block and won&apos;t appear in the per-block totals below — give {status.orphanParkingSlotCount === 1 ? "it" : "them"} a block in{" "}
-          <Link to="/crm/setup/parking-slot-master" className={TEXT_LINK}>Parking Slot Master</Link> before relying on this page as the full picture.
+          <span className={NUM}>{plural(status.orphanParkingSlotCount, "parking slot")}</span> on this project {status.orphanParkingSlotCount === 1 ? "has" : "have"} no block and won&apos;t appear in the per-block totals below — assign {status.orphanParkingSlotCount === 1 ? "it" : "them"} a block in{" "}
+          <Link to="/crm/setup/parking-slot-master" className={TEXT_LINK}>Parking Slot Master</Link> before relying on these totals.
         </Notice>
       )}
 
       {projectId && status && step1Done && (
         <>
-          <Section title="Parking, block by block" done={blocks.some((b) => b.ParkingSlotCount > 0)}
-            note="One row per block. Open a block to set its mix (types, slots, charge, GST) and see its slots."
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className={`${GRID_CARD} rounded-xl px-4 py-3`}>
+              <div className="text-xs font-medium text-muted-foreground">Slots created / planned</div>
+              <div className="text-xl font-bold tabular-nums text-foreground mt-1">
+                {created.toLocaleString("en-IN")} <span className="text-sm font-normal text-muted-foreground">/ {planned.toLocaleString("en-IN")}</span>
+              </div>
+              <div className={`text-[0.6875rem] mt-0.5 tabular-nums ${toCreate > 0 ? TONE_AMBER_TEXT : "text-muted-foreground"}`}>
+                {toCreate > 0 ? `${plural(toCreate, "slot")} pending generation` : "All planned mixes generated"}
+              </div>
+            </div>
+            <div className={`${GRID_CARD} rounded-xl px-4 py-3`}>
+              <div className="text-xs font-medium text-muted-foreground">Free slots</div>
+              <div className={`text-xl font-bold tabular-nums mt-1 ${TONE_EMERALD_TEXT}`}>{stateCounts.Available.toLocaleString("en-IN")}</div>
+              <div className="text-[0.6875rem] text-muted-foreground mt-0.5">Available for allotment</div>
+            </div>
+            <div className={`${GRID_CARD} rounded-xl px-4 py-3`}>
+              <div className="text-xs font-medium text-muted-foreground">On hold / booked</div>
+              <div className={`text-xl font-bold tabular-nums mt-1 ${TONE_SKY_TEXT}`}>
+                {(stateCounts.OnHold + stateCounts.Booked).toLocaleString("en-IN")}
+              </div>
+              <div className="text-[0.6875rem] text-muted-foreground tabular-nums mt-0.5">
+                {stateCounts.OnHold} held · {stateCounts.Booked} booked
+              </div>
+            </div>
+            <div className={`${GRID_CARD} rounded-xl px-4 py-3`}>
+              <div className="text-xs font-medium text-muted-foreground">Parking inventory value</div>
+              <div className="text-xl font-bold tabular-nums text-foreground mt-1" title={inr(value)}>{value ? money(value) : "—"}</div>
+              <div className="text-[0.6875rem] text-muted-foreground mt-0.5">Across {plural(blocks.length, "block")}</div>
+            </div>
+          </div>
+
+          <Section tag="P" title="Parking, block by block" done={blocks.some((b) => b.ParkingSlotCount > 0)}
+            note="Click any block to configure its parking types, slot counts, base charge & GST, and inspect live slot status."
             right={rights.canCreate && toCreate > 0 && (
               <button onClick={() => handleGenerate()} disabled={generating !== null} className={`${KEY_INK} h-8 px-3`}>
                 {generating === "all" ? "Creating…" : `Create all ${plural(toCreate, "parking slot")}`}
@@ -284,8 +337,8 @@ const ParkingSetup: React.FC = () => {
             <ParkingNamingPanel projectId={Number(projectId)} shortName={status.project?.ShortCode} blocks={blocks} canEdit={rights.canEdit} />
 
             {/* One row per block; one block open at a time below its row. */}
-            <div className="overflow-x-auto thin-scroll text-sm" style={{ border: RULE }}>
-              <div className={`${ROW} px-3 py-2`} style={{ borderBottom: RULE }}>
+            <div className="rounded-xl border border-border overflow-x-auto thin-scroll text-sm bg-card">
+              <div className={`${ROW} px-3.5 py-2.5 border-b border-border bg-muted/30`}>
                 <span className={LBL}>Block</span>
                 <span className={LBL}>Mix</span>
                 <span className={`${LBL} text-right`}>Slots</span>
@@ -312,8 +365,8 @@ const ParkingSetup: React.FC = () => {
                   <React.Fragment key={b.Id}>
                   <div role="button" tabIndex={0} onClick={toggle} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } }}
                     aria-expanded={isOpen}
-                    className={`${ROW} px-3 py-2 cursor-pointer transition-colors ${isOpen ? "bg-primary/5" : "hover:bg-primary/5"}`} style={{ borderBottom: RULE_SOFT }}>
-                    <span className="font-semibold whitespace-nowrap inline-flex items-center gap-1.5">{isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />} Block {b.BlockName}</span>
+                    className={`${ROW} px-3.5 py-2.5 cursor-pointer border-b border-border/70 transition-colors ${isOpen ? "bg-primary/[0.06]" : "hover:bg-primary/[0.04]"}`}>
+                    <span className="font-semibold whitespace-nowrap inline-flex items-center gap-1.5 text-foreground">{isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />} Block {b.BlockName}</span>
                     <span className="text-xs text-muted-foreground truncate" title={saved.map((r) => `${r.ParkingType} ${r.Count}`).join(" · ") || undefined}>
                       {saved.length ? saved.map((r) => `${r.ParkingType} ${r.Count}`).join(" · ") : <span className="italic">No mix yet</span>}
                     </span>
@@ -333,17 +386,17 @@ const ParkingSetup: React.FC = () => {
                     </span>
                   </div>
                   {isOpen && (
-                  <div className="bg-card" style={{ borderBottom: RULE }}>
+                  <div className="bg-muted/10 border-b border-border">
                     {rights.canEdit && generatedCount > 0 && editingTemplateFor !== b.Id && (
-                      <div className="px-3 pt-2.5 flex justify-end max-w-3xl">
+                      <div className="px-3.5 pt-3 flex justify-end max-w-3xl">
                         <button onClick={() => setEditingTemplateFor(b.Id)} className={`${KEY_LINE} h-7 px-2.5`}><Pencil size={11} /> Edit mix</button>
                       </div>
                     )}
                     {/* ── The mix (kept narrow: a type reads next to its numbers) ── */}
-                    <div className="px-3 py-2 overflow-x-auto thin-scroll max-w-3xl">
+                    <div className="px-3.5 py-2.5 overflow-x-auto thin-scroll max-w-3xl">
                       <table className="w-full text-xs min-w-[420px]">
                         <thead>
-                          <tr style={{ borderBottom: RULE }}>
+                          <tr className="border-b border-border">
                             <th className={th}>Type</th>
                             <th className={`${th} !text-right w-16`}>Slots</th>
                             <th className={`${th} !text-right w-28`}>Charge / slot</th>
@@ -356,7 +409,7 @@ const ParkingSetup: React.FC = () => {
                           {rows.map((row, idx) => {
                             const rowValue = (parseInt(row.Count, 10) || 0) * num(row.Charge);
                             return locked ? (
-                              <tr key={idx} style={{ borderBottom: RULE_SOFT }}>
+                              <tr key={idx} className="border-b border-border/60">
                                 <td className="!px-2 !py-2">{row.ParkingType}</td>
                                 <td className={`!px-2 !py-2 text-right ${NUM}`}>{row.Count}</td>
                                 <td className={`!px-2 !py-2 text-right ${NUM}`}>{inrOrDash(row.Charge)}</td>
@@ -364,7 +417,7 @@ const ParkingSetup: React.FC = () => {
                                 <td className={`!px-2 !py-2 text-right ${NUM}`}>{rowValue ? inr(rowValue) : "—"}</td>
                               </tr>
                             ) : (
-                              <tr key={idx} style={{ borderBottom: RULE_SOFT }}>
+                              <tr key={idx} className="border-b border-border/60">
                                 <td className="!px-1 !py-1.5">
                                   <select value={row.ParkingType} onChange={(e) => updateTemplateRow(b.Id, idx, { ParkingType: e.target.value })} className={`${SMALL_INP} max-w-[180px]`}>
                                     {parkingTypes.filter((t) => t === row.ParkingType || !rows.some((r) => r.ParkingType === t)).map((t) => <option key={t} value={t}>{t}</option>)}
@@ -407,14 +460,12 @@ const ParkingSetup: React.FC = () => {
                     </div>
 
                     {!locked && (
-                      <div className="px-3 pb-3 space-y-2 max-w-3xl">
+                      <div className="px-3.5 pb-3 space-y-2 max-w-3xl">
                         {generatedCount > 0 && (
                           <p className="text-xs text-muted-foreground">Saving creates the slots a raised count adds. Lowering a count doesn&apos;t remove slots already created — delete those on the map below.</p>
                         )}
                         <div className="flex justify-end gap-2">
                           {generatedCount > 0 && <button onClick={() => setEditingTemplateFor(null)} className={`${KEY_LINE} h-8 px-3`}>Cancel</button>}
-                          {/* Saving a mix creates what it adds at once — a saved-but-not-created mix
-                              looked like parking that "didn't show". */}
                           <button onClick={async () => {
                             if (!(await handleSaveTemplate(b.Id))) return;
                             setEditingTemplateFor(null);
@@ -426,19 +477,34 @@ const ParkingSetup: React.FC = () => {
                       </div>
                     )}
 
-                    {/* ── The slots, as a map ── */}
+                    {/* ── The slots, as a rounded 5-theme map ── */}
                     {blockSlots.length > 0 && (
-                      <div className="px-3 pb-3 pt-2.5 space-y-2" style={{ borderTop: RULE_SOFT }}>
-                        <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-10 gap-1.5">
-                          {blockSlots.map((s) => (
-                            <Tile key={s.Id} name={shortName(s.SlotNo)} status={slotStatus(s)} tag={null}
-                              line={s.ParkingType || "—"} title={`${s.SlotNo}${s.LockBookingNo ? ` — ${s.LockBookingNo}` : ""}`}
-                              onClick={() => { setOpenSlotId(openSlotId === s.Id ? null : s.Id); setEditingSlot(null); }} />
-                          ))}
+                      <div className="px-3.5 pb-3.5 pt-3 space-y-2.5 border-t border-border/70">
+                        <div className="grid grid-cols-3 sm:grid-cols-6 lg:grid-cols-10 gap-1.5">
+                          {blockSlots.map((s) => {
+                            const st = slotStatus(s);
+                            const cfg = SLOT_TILE_CLS[st];
+                            const selected = openSlotId === s.Id;
+                            return (
+                              <button
+                                key={s.Id}
+                                type="button"
+                                title={`${s.SlotNo}${s.LockBookingNo ? ` — ${s.LockBookingNo}` : ""}`}
+                                onClick={() => { setOpenSlotId(selected ? null : s.Id); setEditingSlot(null); }}
+                                className={`rounded-lg border px-2.5 py-2 text-left transition-all ${cfg.card} ${selected ? "ring-2 ring-primary/60 border-primary" : ""}`}
+                              >
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${cfg.dot}`} />
+                                  <span className={`${NUM} text-xs font-bold truncate`}>{shortName(s.SlotNo)}</span>
+                                </div>
+                                <div className="mt-0.5 text-[0.6875rem] text-muted-foreground truncate">{s.ParkingType || "—"}</div>
+                              </button>
+                            );
+                          })}
                         </div>
 
                         {openSlot && (
-                          <div className="px-3 py-2.5 bg-card space-y-2" style={{ border: RULE }}>
+                          <div className="rounded-xl border border-border px-3.5 py-3 bg-card space-y-2 shadow-sm">
                             {editingSlot ? (
                               <div className="flex flex-wrap items-end gap-2">
                                 <label className="space-y-1 flex-1 min-w-[160px]">
@@ -456,8 +522,8 @@ const ParkingSetup: React.FC = () => {
                               </div>
                             ) : (
                               <div className="flex flex-wrap items-center gap-3">
-                                <span className="text-sm"><span className={`${NUM} font-semibold`}>{openSlot.SlotNo}</span> <span className="text-muted-foreground">· {openSlot.ParkingType || "No type"}</span></span>
-                                {openLock ? <SheetMark text={openLock.text} tone={openLock.tone} /> : <SheetMark text="Free" tone="done" />}
+                                <span className="text-sm"><span className={`${NUM} font-semibold text-foreground`}>{openSlot.SlotNo}</span> <span className="text-muted-foreground">· {openSlot.ParkingType || "No type"}</span></span>
+                                {openLock ? <GridToneMark text={openLock.text} tone={openLock.tone} /> : <GridToneMark text="Free" tone="done" />}
                                 <span className="ml-auto flex items-center gap-1.5">
                                   {rights.canEdit && (
                                     <button onClick={() => setEditingSlot({ SlotNo: openSlot.SlotNo || "", ParkingType: openSlot.ParkingType || parkingTypes[0] || "" })}
@@ -465,15 +531,23 @@ const ParkingSetup: React.FC = () => {
                                   )}
                                   {rights.canDelete && (
                                     <button onClick={() => handleDeleteSlot(openSlot)} disabled={!!openLock || savingSlot}
-                                      title={openLock ? "Booked or held — release it first" : undefined} className={`${KEY_LINE} h-7 px-2.5 !text-destructive !border-destructive`}><Trash2 size={11} /> Delete</button>
+                                      title={openLock ? "Booked or held — release it first" : undefined} className={`${KEY_RED} h-7 px-2.5`}><Trash2 size={11} /> Delete</button>
                                   )}
-                                  <button onClick={() => setOpenSlotId(null)} aria-label="Close" className="h-7 w-7 inline-flex items-center justify-center text-muted-foreground hover:text-foreground"><X size={13} /></button>
+                                  <button onClick={() => setOpenSlotId(null)} aria-label="Close" className="h-7 w-7 rounded-md inline-flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground"><X size={13} /></button>
                                 </span>
                               </div>
                             )}
                           </div>
                         )}
-                        <Legend counts={counts} />
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground pt-1">
+                          {(["Available", "OnHold", "Booked", "Blocked"] as TileStatus[]).map((st) => (
+                            <span key={st} className="inline-flex items-center gap-1.5">
+                              <span className={`w-2 h-2 rounded-full ${SLOT_TILE_CLS[st].dot}`} />
+                              <span>{SLOT_TILE_CLS[st].label}</span>
+                              <span className="font-semibold text-foreground tabular-nums">{counts[st]}</span>
+                            </span>
+                          ))}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -482,18 +556,21 @@ const ParkingSetup: React.FC = () => {
                 );
               })}
               {/* The project's totals. */}
-              <div className={`${ROW} px-3 py-2.5 font-semibold`}>
-                <span className={LBL}>Project</span>
+              <div className={`${ROW} px-3.5 py-2.5 font-semibold bg-muted/20`}>
+                <span className={LBL}>Project total</span>
                 <span className="text-xs font-normal text-muted-foreground">{toCreate > 0 ? `${plural(toCreate, "slot")} still to create` : "Every saved mix is filled"}</span>
                 <span className={CELL_NUM}>{created}<span className="text-muted-foreground font-normal"> / {planned}</span></span>
                 <span className={CELL_NUM}>{stateCounts.Available}</span>
                 <span className={CELL_NUM}>{stateCounts.OnHold}</span>
                 <span className={CELL_NUM}>{stateCounts.Booked}</span>
-                <span className={`${CELL_NUM} whitespace-nowrap`} title={inr(value)}>{money(value)}</span>
+                <span className={`${CELL_NUM} whitespace-nowrap`} title={inr(value)}>{value ? money(value) : "—"}</span>
                 <span />
               </div>
             </div>
-            <Link to="/crm/setup/parking-slot-master" className={`${TEXT_LINK} inline-block text-muted-foreground`}>All slot details in Parking Slot Master</Link>
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+              <Link to="/crm/setup/parking-slot-master" className={TEXT_LINK}>All slot details in Parking Slot Master →</Link>
+              <Link to="/crm/parking-matrix" className={TEXT_LINK}>Open Live Parking Matrix →</Link>
+            </div>
           </Section>
         </>
       )}

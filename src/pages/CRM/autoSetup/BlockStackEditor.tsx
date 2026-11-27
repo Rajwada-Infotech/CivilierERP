@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronDown, ChevronRight, Pencil, Plus, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, Pencil, Plus, X } from "lucide-react";
+import { Link } from "react-router-dom";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { SheetMark } from "@/components/sheet/Sheet";
+import { GridToneMark } from "@/components/crm/CrmDataTable";
 import { unitTypeOptions, type LayoutType } from "@/api/unitBhkConfigApi";
-import { INP, KEY_INK, KEY_LINE, LBL, NUM, RULE, RULE_SOFT, TEXT_LINK } from "./config";
+import { INP, KEY_INK, KEY_LINE, LBL, NUM, TEXT_LINK, TONE_AMBER_TEXT } from "./config";
 
 // A tower block shown as the building it is: top floor first, each floor
 // saying what it holds. Define the TYPICAL floor once — every floor follows it
@@ -78,8 +79,12 @@ function MixEditor({ rows, onChange, kinds, layoutTypes, canEdit }: {
       {/* One line per type: labelled fields that wrap onto a second line when
           the panel is narrow — never squeezed, never a sideways scrollbar. */}
       <div className="space-y-2">
-        {rows.map((r, i) => (
-          <div key={i} className="flex flex-wrap items-end gap-x-2.5 gap-y-2 bg-card p-2.5" style={{ border: RULE_SOFT }}>
+        {rows.map((r, i) => {
+          const layout = !r.UnitKind && r.UnitType ? layoutTypes.find((t) => t.label === r.UnitType) : null;
+          const missingRooms = !!layout && layout.roomCount === 0;
+          return (
+          <div key={i} className="space-y-1.5 rounded-lg border border-border/80 bg-muted/15 p-2.5">
+          <div className="flex flex-wrap items-end gap-x-2.5 gap-y-2">
             <label className="flex min-w-[10rem] flex-[1.6_1_10rem] flex-col gap-1">
               <span className={FIELD_LABEL}>Type</span>
               <select value={r.UnitKind ? `kind:${r.UnitKind}` : r.UnitType} disabled={!canEdit}
@@ -112,10 +117,18 @@ function MixEditor({ rows, onChange, kinds, layoutTypes, canEdit }: {
             ))}
             {canEdit && rows.length > 1 && (
               <button type="button" onClick={() => onChange(rows.filter((_, j) => j !== i))} aria-label="Remove this type" title="Remove this type"
-                className="inline-flex h-9 w-9 flex-none items-center justify-center text-muted-foreground hover:text-destructive"><X size={15} /></button>
+                className="inline-flex h-9 w-9 flex-none items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-muted"><X size={15} /></button>
             )}
           </div>
-        ))}
+          {missingRooms && (
+            <div className={`flex items-center gap-1.5 text-[0.6875rem] ${TONE_AMBER_TEXT}`}>
+              <AlertTriangle size={11} className="shrink-0" />
+              <span>&ldquo;{r.UnitType}&rdquo; has no room layout yet in <Link to="/civilworkdpr/room-composition" className="underline font-medium">Unit Composition</Link> — units will generate cleanly without auto-created DPR rooms.</span>
+            </div>
+          )}
+          </div>
+          );
+        })}
       </div>
       {canEdit && (
         <button type="button" onClick={() => onChange([...rows, { UnitType: firstType, Count: 1 }])} className={`mt-2 inline-flex items-center gap-1 ${TEXT_LINK}`}>
@@ -189,11 +202,11 @@ export function BlockStackEditor({ blockId, blockName, kinds, layoutTypes, canEd
   return (
     <div className="space-y-3">
       {/* Typical floor — defined once, used by every floor that isn't "own mix". */}
-      <div className="bg-card p-3 space-y-2.5" style={{ border: RULE }}>
+      <div className="rounded-xl border border-border bg-card p-3.5 space-y-2.5">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em]">Typical floor</span>
+          <span className="text-xs font-bold text-foreground">Typical floor</span>
           <span className="text-xs text-muted-foreground">applies to every floor unless a floor has its own mix</span>
-          <span className="ml-auto text-xs text-muted-foreground"><span className={`${NUM} text-foreground`}>{total(typical)}</span> per floor</span>
+          <span className="ml-auto text-xs text-muted-foreground"><span className={`${NUM} font-semibold text-foreground`}>{total(typical)}</span> per floor</span>
           {canEdit && !typicalEditing && (
             <button type="button" onClick={() => setTypicalOpen(true)} className={`${KEY_LINE} h-7 px-2.5`}>
               <Pencil size={11} /> Edit
@@ -220,7 +233,7 @@ export function BlockStackEditor({ blockId, blockName, kinds, layoutTypes, canEd
             const on = (data.paymentPlanIds ?? []).includes(p.Id);
             return (
               <button key={p.Id} type="button" disabled={!canEdit || busy} onClick={() => togglePlan(p.Id)} aria-pressed={on}
-                className={`h-7 px-2.5 text-xs border transition-colors disabled:opacity-60 ${on ? "bg-foreground text-card border-foreground" : "border-foreground/30 hover:border-foreground"}`}>
+                className={`h-7 px-2.5 rounded-lg text-xs font-medium border transition-colors disabled:opacity-60 ${on ? "bg-primary text-primary-foreground border-primary shadow-sm" : "border-border bg-card text-foreground hover:border-primary/45"}`}>
                 {p.PlanName}
               </button>
             );
@@ -229,10 +242,10 @@ export function BlockStackEditor({ blockId, blockName, kinds, layoutTypes, canEd
       )}
 
       {/* The building, top floor first. */}
-      <div className="bg-card overflow-x-auto thin-scroll" style={{ border: RULE }}>
+      <div className="rounded-xl border border-border bg-card overflow-x-auto thin-scroll">
         <table className="w-full text-xs min-w-[360px]">
           <thead>
-            <tr style={{ borderBottom: RULE }}>
+            <tr className="border-b border-border bg-muted/30">
               <th className={`!px-3 !py-2 text-left w-16 ${LBL}`}>Floor</th><th className={`!px-3 !py-2 text-left ${LBL}`}>Units on this floor</th><th className={`!px-3 !py-2 text-right w-16 ${LBL}`}>Total</th>
             </tr>
           </thead>
@@ -250,30 +263,30 @@ export function BlockStackEditor({ blockId, blockName, kinds, layoutTypes, canEd
                       if (!isOpen && f.IsGenerated) onOpenGeneratedFloor?.(f);
                       setOpenFloor(isOpen ? null : f.Id);
                     }}
-                    className={`cursor-pointer transition-colors ${isOpen ? "bg-primary/5" : "hover:bg-primary/5"}`} style={{ borderBottom: RULE_SOFT }}>
-                    <td className={`!px-3 !py-2 font-medium ${NUM}`}>
+                    className={`cursor-pointer border-b border-border/70 last:border-0 transition-colors ${isOpen ? "bg-primary/[0.05]" : "hover:bg-primary/[0.04]"}`}>
+                    <td className={`!px-3 !py-2.5 font-medium ${NUM}`}>
                       <span className="inline-flex items-center gap-1.5">
                         {isOpen ? <ChevronDown size={12} className="text-muted-foreground" /> : <ChevronRight size={12} className="text-muted-foreground" />}
                         {label}
                       </span>
                     </td>
-                    <td className="!px-3 !py-2">
+                    <td className="!px-3 !py-2.5">
                       <div className="flex flex-wrap items-center gap-2">
                         {f.FloorNo === 0 && !f.IsGenerated && (
                           <span className="inline-flex items-center gap-2 text-muted-foreground" onClick={(e) => e.stopPropagation()}>
                             <button type="button" role="switch" aria-checked={!!f.HasUnits} aria-label="Sellable units on the ground floor"
                               disabled={!canEdit || busy} onClick={() => toggleUnits(f, !f.HasUnits)}
-                              className={`relative h-4 w-7 border border-foreground transition-colors disabled:opacity-50 ${f.HasUnits ? "bg-foreground" : "bg-card"}`}>
-                              <span className={`absolute top-[2px] h-2.5 w-2.5 transition-all ${f.HasUnits ? "left-[14px] bg-card" : "left-[2px] bg-foreground"}`} />
+                              className={`relative h-5 w-9 rounded-full border transition-colors disabled:opacity-50 ${f.HasUnits ? "bg-primary border-primary" : "bg-muted border-border"}`}>
+                              <span className={`absolute top-0.5 h-3.5 w-3.5 rounded-full bg-white shadow transition-all ${f.HasUnits ? "left-[18px]" : "left-0.5"}`} />
                             </button>
                             {!f.HasUnits && "No sellable units"}
                           </span>
                         )}
                         {f.IsGenerated ? (
-                          <SheetMark text={`${f.GeneratedUnitCount} unit(s) created`} tone="done" />
+                          <GridToneMark text={`${f.GeneratedUnitCount} unit(s) created`} tone="done" />
                         ) : f.HasUnits && (f.ownMix ? (
                           <>
-                            <SheetMark text="Own mix" tone="moving" />
+                            <GridToneMark text="Own mix" tone="moving" />
                             <span>{describe(f.ownMix)}</span>
                           </>
                         ) : (
@@ -281,14 +294,14 @@ export function BlockStackEditor({ blockId, blockName, kinds, layoutTypes, canEd
                         ))}
                       </div>
                     </td>
-                    <td className={`!px-3 !py-2 text-right ${NUM}`}>
+                    <td className={`!px-3 !py-2.5 text-right ${NUM}`}>
                       {f.IsGenerated ? f.GeneratedUnitCount : f.HasUnits ? total(rows) : "—"}
                     </td>
                   </tr>
 
                   {/* Detail — locked view first, Edit to change. */}
                   {isOpen && (
-                    <tr className="bg-primary/[0.03]" style={{ borderBottom: RULE_SOFT }}>
+                    <tr className="bg-muted/15 border-b border-border/70">
                       <td />
                       <td colSpan={2} className="!px-3 !pb-3 !pt-1">
                         {f.IsGenerated ? (
@@ -339,7 +352,7 @@ export function BlockStackEditor({ blockId, blockName, kinds, layoutTypes, canEd
       </div>
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         {pending > 0 ? <span><b className={`${NUM} text-foreground`}>{pending}</b> unit(s) in {blockName} ready to generate.</span>
-          : <SheetMark text={`Nothing pending in ${blockName}`} tone="done" />}
+          : <GridToneMark text={`Nothing pending in ${blockName}`} tone="done" />}
       </div>
     </div>
   );
