@@ -181,6 +181,13 @@ export const salesSetupItems: SetupItem[] = [
     color: "text-violet-500",
     pageKey: "customer-master",
   },
+  {
+    icon: PlusCircle,
+    label: "Stock Update",
+    path: "/sales/stock-update",
+    color: "text-violet-500",
+    pageKey: "sales-stock-update",
+  },
 ];
 
 export const maintenanceSetupItems: SetupItem[] = [
@@ -407,6 +414,13 @@ export const engineeringSetupItems: SetupItem[] = [
     path: "/masters/engineering-activity",
     color: "text-orange-400",
     pageKey: "engineering-activity-master",
+  },
+  {
+    icon: Truck,
+    label: "Equipment Master",
+    path: "/masters/equipment",
+    color: "text-orange-400",
+    pageKey: "equipment-master",
   },
 ];
 

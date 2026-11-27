@@ -25,6 +25,32 @@ export interface BoqItem {
   amount: number;
 }
 
+/** A BOQ equipment line (dbo.BoqEquipment): equipment from the Equipment Master, the activity it serves, qty × rate. */
+export interface BoqEquipmentLine {
+  Id?: number;
+  _key?: string;
+  equipmentId: string;
+  equipmentName: string;
+  equipmentCode: string;
+  activityId: string;
+  activityName: string;
+  description: string;
+  quantity: string;
+  uomName: string;
+  rate: string;
+  tax: string;
+  amount: number;
+}
+/** An Equipment Master record as the BOQ picker needs it. */
+export interface EquipmentOption {
+  id: string;
+  name: string;
+  code: string;
+  uom: string;
+  rate: number | null;
+  isActive: boolean;
+}
+
 export interface BoqActivity {
   Id?: number;
   _key: string;
@@ -77,6 +103,8 @@ export interface BoqRecord {
   RoomName?: string | null;
   BoqItems: BoqItem[];
   BoqActivities: BoqActivity[];
+  /** Saved equipment rows (migration 724); absent on a BOQ from before the Equipment tab. */
+  BoqEquipment?: any[];
 }
 
 export interface Company {
@@ -222,6 +250,37 @@ export const rowToItem = (r: any): BoqItem => ({
   amount: parseFloat(r.LineAmount) || 0,
 });
 
+export const blankEquipment = (): BoqEquipmentLine => ({
+  _key: uid(),
+  equipmentId: "",
+  equipmentName: "",
+  equipmentCode: "",
+  activityId: "",
+  activityName: "",
+  description: "",
+  quantity: "",
+  uomName: "",
+  rate: "",
+  tax: "18",
+  amount: 0,
+});
+
+export const rowToEquipment = (r: any): BoqEquipmentLine => ({
+  Id: r.Id,
+  _key: uid(),
+  equipmentId: r.EquipmentId != null ? String(r.EquipmentId) : "",
+  equipmentName: r.EquipmentName ?? "",
+  equipmentCode: r.EquipmentCode ?? "",
+  activityId: r.ActivityId ?? "",
+  activityName: r.ActivityName ?? "",
+  description: r.Description ?? "",
+  quantity: r.Quantity != null ? String(Number(r.Quantity)) : "",
+  uomName: r.UomName ?? "",
+  rate: r.Rate != null ? String(Number(r.Rate)) : "",
+  tax: String(r.TaxPct ?? "18"),
+  amount: parseFloat(r.LineAmount) || 0,
+});
+
 export const rowToActivity = (r: any): BoqActivity => ({
   Id: r.Id,
   _key: uid(),
@@ -249,7 +308,26 @@ export const buildPayload = (
   activities: BoqActivity[],
   activityOptions: ActivityOption[] = [],
   activityGroups: ActivityGroupOption[] = [],
+  equipment: BoqEquipmentLine[] = [],
 ) => ({
+  BoqEquipment: equipment
+    .filter((eq) => eq.equipmentName)
+    .map((eq) => {
+      const act = eq.activityId ? activities.find((a) => a.activityId === eq.activityId) : undefined;
+      return {
+        equipmentId: eq.equipmentId || null,
+        equipmentName: eq.equipmentName,
+        equipmentCode: eq.equipmentCode || null,
+        activityId: act ? act.activityId : null,
+        activityName: act ? act.activityName : null,
+        description: eq.description,
+        quantity: eq.quantity,
+        uomName: eq.uomName,
+        rate: eq.rate,
+        tax: eq.tax,
+        amount: eq.amount,
+      };
+    }),
   BoqNo: form.BoqNo || undefined,
   BoqDate: form.BoqDate,
   CompanyId: form.CompanyId ? Number(form.CompanyId) : null,

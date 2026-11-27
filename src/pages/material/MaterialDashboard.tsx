@@ -56,7 +56,7 @@ const PIPE_TILE_CSS = `
 .crm-sheet .pipe-tile-head { display: flex; align-items: center; gap: 9px; padding: 10px 14px; border-bottom: 1px solid var(--ink); }
 .crm-sheet .pipe-step { width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--ink); font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--ink); }
 .crm-sheet .pipe-tile-cells { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); flex: 1; }
-.crm-sheet .pipe-cell { text-align: left; min-width: 0; padding: 14px; transition: background .15s; }
+.crm-sheet .pipe-cell { display: flex; flex-direction: column; justify-content: flex-start; align-items: stretch; text-align: left; min-width: 0; padding: 14px; transition: background .15s; }
 .crm-sheet .pipe-cell + .pipe-cell { border-left: 1px solid var(--rule-soft); }
 .crm-sheet .pipe-cell:hover, .crm-sheet .pipe-cell:focus-visible { background: var(--blue-wash); outline: none; }
 @media (max-width: 1100px) { .crm-sheet .pipe-tiles { grid-template-columns: minmax(0, 1fr); } }

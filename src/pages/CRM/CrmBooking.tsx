@@ -10,8 +10,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
-  AlertTriangle, ChevronRight, Download, FileSignature, IndianRupee, Landmark, Lock, MoreHorizontal, Phone, Plus, RefreshCw, Repeat, Trash2,
+  AlertTriangle, BellRing, ChevronRight, Download, ExternalLink, FileSignature, IndianRupee, Landmark, Lock, MoreHorizontal, Phone, Plus, RefreshCw, Repeat, Trash2,
 } from "lucide-react";
+import { SendReminderDialog } from "./CrmReminderSetup";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { SentBackNote, useSentBack, useSentBackStates, SENT_BACK_STATE } from "@/components/crm/CrmListToolbar";
 import {
@@ -21,7 +22,7 @@ import { ApprovalActions } from "@/components/ApprovalActions";
 import { VillaOffersPanel } from "@/components/crm/VillaOffersPanel";
 import {
   CrmGrid, GridColumnChooser, GridSavedViews, GridSearch, GridStatusPill, GridTabs, GridToneMark, exportGrid, useGridPrefs,
-  GRID_BTN, GRID_CARD, GRID_KEY, GRID_KEY_BRAND, GRID_PAGE_SIZES, type GridCol,
+  GRID_BTN, GRID_CARD, GRID_KEY, GRID_KEY_BRAND, GRID_MENU_GLASS, GRID_PAGE_SIZES, type GridCol,
 } from "@/components/crm/CrmDataTable";
 import { CrmCompanyProjectBlockFilter } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { ApplicantNames, coApplicantsOf, useCoApplicantNames } from "@/components/crm/ApplicantNames";
@@ -97,6 +98,7 @@ const CrmBooking: React.FC = () => {
   const [viewingBookingId, setViewingBookingId] = useState<number | null>(null);
   const [deepLinkOpenedFor, setDeepLinkOpenedFor] = useState("");
   const [unitChangeBooking, setUnitChangeBooking] = useState<any | null>(null);
+  const [reminderBookingId, setReminderBookingId] = useState<number | null>(null);
   const [exporting, setExporting] = useState(false);
 
   // The URL carries the open booking (?view=<id>), so a refresh or a shared link reopens it.
@@ -321,8 +323,12 @@ const CrmBooking: React.FC = () => {
                   <MoreHorizontal size={15} />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56" onClick={(e) => e.stopPropagation()}>
-                <DropdownMenuItem onClick={() => openBooking(b.Id)}>Open booking</DropdownMenuItem>
+              <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}
+                className={cn("w-56", GRID_MENU_GLASS)}>
+                <DropdownMenuItem onClick={() => openBooking(b.Id)} className="gap-2"><ExternalLink size={14} /> Open booking</DropdownMenuItem>
+                {!isBookingClosed(b.Status) && (canEdit || canDoAction("crm-payments", "edit") || canDoAction("crm-reminder-setup", "edit")) && (
+                  <DropdownMenuItem onClick={() => setReminderBookingId(b.Id)} className="gap-2"><BellRing size={14} /> Send reminder</DropdownMenuItem>
+                )}
                 {hasJumpLinks && (
                   <>
                     <DropdownMenuSeparator />
@@ -555,6 +561,7 @@ const CrmBooking: React.FC = () => {
       )}
 
       {unitChangeBooking && <ChangeUnitDialog booking={unitChangeBooking} onClose={() => setUnitChangeBooking(null)} />}
+      {reminderBookingId != null && <SendReminderDialog bookingId={reminderBookingId} onClose={() => setReminderBookingId(null)} />}
     </div>
   );
 };

@@ -8,8 +8,15 @@ export interface SaleOrderItem {
   qty: number;
   uom?: string;
   rate: number;
+  /** GST % on the line (sale to a buyer). */
+  gstRate?: number;
+  /** qty × rate */
   amount?: number;
+  taxAmount?: number;
+  /** amount + tax */
+  total?: number;
   remarks?: string;
+  /** Older orders only. */
   glHeadId?: number | null;
 }
 
@@ -23,14 +30,23 @@ export interface SaleOrder {
   FromProjectName: string;
   FromGodownID: number;
   FromGodownName: string;
-  ToCompanyID: number;
-  ToCompanyName: string;
-  ToProjectID: number;
-  ToProjectName: string;
-  ToGodownID: number;
-  ToGodownName: string;
+  /** Older transfer orders only — a sale to a buyer has no To side. */
+  ToCompanyID: number | null;
+  ToCompanyName: string | null;
+  ToProjectID: number | null;
+  ToProjectName: string | null;
+  ToGodownID: number | null;
+  ToGodownName: string | null;
+  /** The buyer: any ledger head (the Journal Voucher's list). */
+  BuyerLHeadId: number | null;
+  BuyerName: string | null;
   SaleItems: SaleOrderItem[];
+  BasicAmount: number | null;
+  TaxAmount: number | null;
+  /** Grand total incl. GST. */
   TotalAmount: number;
+  /** Posted to the ledger on approval (Dr buyer / Cr Sales / Cr GST Output). */
+  GLPosted?: boolean;
   Remarks: string | null;
   Status: string;
   PostedToStock?: boolean;
@@ -85,9 +101,7 @@ export interface CreateSaleOrderPayload {
   FromCompanyID: number;
   FromProjectID: number;
   FromGodownID: number;
-  ToCompanyID: number;
-  ToProjectID: number;
-  ToGodownID: number;
+  BuyerLHeadId: number;
   SaleItems: SaleOrderItem[];
   Remarks?: string;
   OrderDate?: string;
@@ -98,6 +112,8 @@ export const createSaleOrder = async (
 ): Promise<{
   SaleOrderID: number;
   DocNo: string;
+  BasicAmount: number;
+  TaxAmount: number;
   TotalAmount: number;
   message: string;
 }> => {
@@ -111,4 +127,22 @@ export const createSaleOrder = async (
     throw new Error(err.error || `Sale order failed: ${res.status}`);
   }
   return res.json().catch(() => ({}));
+};
+
+/** The ledger entry for a sale: the legs posted on approval, or a preview of what approval will post. */
+export interface SaleOrderPosting {
+  state: "posted" | "preview" | "rejected" | "none";
+  reason?: string;
+  voucherNo?: string;
+  voucherDate?: string | null;
+  rows: { label: string; side: "debit" | "credit"; amount: number; narration?: string | null }[];
+}
+
+export const getSaleOrderPosting = async (id: number): Promise<SaleOrderPosting> => {
+  const res = await fetchWithAuth(`${BASE}/${id}/posting`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Failed to load the posting: ${res.status}`);
+  }
+  return res.json();
 };

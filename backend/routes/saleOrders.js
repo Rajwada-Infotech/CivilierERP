@@ -6,8 +6,9 @@ router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { projectAllowed } = require("../services/projectScope");
 
-// A sale order moves stock from one project to another: a restricted user can
-// see it if either end is theirs, but can only raise one out of their own project.
+// A sale order sells our materials from one of our godowns to a buyer (any ledger). Older orders moved stock to
+// another of our projects instead (To*), so a restricted user still sees one if either end is theirs; new ones are
+// raised only out of the user's own project.
 const soScopeIds = (scope) => scope.map(Number).filter(Number.isFinite).join(",") || "NULL";
 const soVisibleSql = (scope, alias = "so") =>
   scope ? ` AND (${alias}.FromProjectID IN (${soScopeIds(scope)}) OR ${alias}.ToProjectID IN (${soScopeIds(scope)}))` : "";
@@ -60,7 +61,8 @@ const HEADER_SELECT = `
   so.ToCompanyID,   tc.name AS ToCompanyName,
   so.ToProjectID,   tp.name AS ToProjectName,
   so.ToGodownID,    tg.GodownName AS ToGodownName,
-  so.SaleItems, so.TotalAmount, so.Remarks, so.Status, so.PostedToStock,
+  so.BuyerLHeadId,  ah.LHeadName AS BuyerName,
+  so.SaleItems, so.BasicAmount, so.TaxAmount, so.TotalAmount, so.Remarks, so.Status, so.PostedToStock, so.GLPosted,
   so.CreatedBy, so.CreatedAt, so.UpdatedAt
 `;
 
@@ -69,10 +71,12 @@ const HEADER_JOINS = `
   JOIN dbo.enterprise fc ON fc.id = so.FromCompanyID
   JOIN dbo.enterprise fp ON fp.id = so.FromProjectID
   JOIN dbo.Godowns    fg ON fg.GodownID = so.FromGodownID
-  JOIN dbo.enterprise tc ON tc.id = so.ToCompanyID
-  JOIN dbo.enterprise tp ON tp.id = so.ToProjectID
-  JOIN dbo.Godowns    tg ON tg.GodownID = so.ToGodownID
+  LEFT JOIN dbo.enterprise tc ON tc.id = so.ToCompanyID
+  LEFT JOIN dbo.enterprise tp ON tp.id = so.ToProjectID
+  LEFT JOIN dbo.Godowns    tg ON tg.GodownID = so.ToGodownID
+  LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = so.BuyerLHeadId
 `;
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 // ─── GET list of sale orders ───────────────────────────────────────────────
 // dropOnAnyWrite: a sale order's status also changes from the Approval Inbox, which doesn't bump "sale-orders".
@@ -84,6 +88,7 @@ router.get("/", requirePageRight("sale-order", "view"), cache("sale-orders", 60,
       toCompany,
       fromProject,
       toProject,
+      buyer,
     } = req.query;
     // Bounded: a bad or huge ?limit used to reach SQL as NaN / any size.
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
@@ -112,6 +117,10 @@ router.get("/", requirePageRight("sale-order", "view"), cache("sale-orders", 60,
       request.input("toProject", sql.Int, parseInt(toProject));
       where += " AND so.ToProjectID=@toProject";
     }
+    if (buyer) {
+      request.input("buyer", sql.Int, parseInt(buyer));
+      where += " AND so.BuyerLHeadId=@buyer";
+    }
 
     const countReq = pool.request();
     if (fromCompany)
@@ -120,6 +129,7 @@ router.get("/", requirePageRight("sale-order", "view"), cache("sale-orders", 60,
     if (fromProject)
       countReq.input("fromProject", sql.Int, parseInt(fromProject));
     if (toProject) countReq.input("toProject", sql.Int, parseInt(toProject));
+    if (buyer) countReq.input("buyer", sql.Int, parseInt(buyer));
     const countResult = await countReq.query(`
       SELECT COUNT(*) AS total FROM dbo.SaleOrders so ${where}
     `);
@@ -141,6 +151,60 @@ router.get("/", requirePageRight("sale-order", "view"), cache("sale-orders", 60,
     res.json({ data: rows, total: dbTotal });
   } catch (err) {
     console.error("[sale-orders] GET /:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── GET /:id/posting — the ledger entry for this sale ─────────────────────
+// Once approved: the legs actually posted (GeneralLedgerEntry, SourceType 'SaleOrder'). Before that: what approval
+// will post — Dr buyer (total) / Cr the company's sales ledger (basic) / Cr GST Output A/c (tax). An older transfer order posts nothing.
+router.get("/:id/posting", requirePageRight("sale-order", "view"), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = getPool();
+    const so = (await pool.request().input("id", sql.Int, id).query(`
+      SELECT so.DocNo, so.BuyerLHeadId, ah.LHeadName AS BuyerName, so.BasicAmount, so.TaxAmount, so.TotalAmount, so.GLPosted, so.Status,
+             fc.name AS CompanyName, sh.LHeadName AS SalesHeadName
+      FROM dbo.SaleOrders so
+      LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = so.BuyerLHeadId
+      LEFT JOIN dbo.enterprise fc ON fc.id = so.FromCompanyID
+      LEFT JOIN dbo.AccountHeadMaster sh ON sh.LHeadCode = CONCAT('SALES-C-', so.FromCompanyID)
+      WHERE so.SaleOrderID = @id`)).recordset[0];
+    if (!so) return res.status(404).json({ error: "Sale order not found" });
+    if (!so.BuyerLHeadId) return res.json({ state: "none", reason: "A transfer between our own godowns posts nothing to the ledger.", rows: [] });
+
+    if (so.GLPosted) {
+      const rows = (await pool.request().input("id", sql.Int, id).query(`
+        SELECT g.VoucherNo, g.VoucherDate, a.LHeadName AS label, g.DebitAmount, g.CreditAmount, g.Narration
+        FROM dbo.GeneralLedgerEntry g JOIN dbo.AccountHeadMaster a ON a.LHeadId = g.LHeadId
+        WHERE g.SourceType = 'SaleOrder' AND g.SourceId = @id
+        ORDER BY CASE WHEN g.DebitAmount > 0 THEN 0 ELSE 1 END, g.EntryId`)).recordset;
+      return res.json({
+        state: "posted",
+        voucherNo: rows[0]?.VoucherNo ?? so.DocNo,
+        voucherDate: rows[0]?.VoucherDate ?? null,
+        rows: rows.map((r) => ({
+          label: r.label,
+          side: Number(r.DebitAmount) > 0 ? "debit" : "credit",
+          amount: Number(r.DebitAmount) > 0 ? Number(r.DebitAmount) : Number(r.CreditAmount),
+          narration: r.Narration,
+        })),
+      });
+    }
+
+    const total = round2(so.TotalAmount);
+    const tax = round2(so.TaxAmount);
+    const basic = round2(total - tax);
+    const rows = [{ label: so.BuyerName || "Buyer", side: "debit", amount: total }];
+    if (basic > 0) rows.push({ label: so.SalesHeadName || `Sales - ${so.CompanyName || "company"}`, side: "credit", amount: basic });
+    if (tax > 0) rows.push({ label: "GST Output A/c", side: "credit", amount: tax });
+    res.json({
+      state: so.Status === "Rejected" ? "rejected" : "preview",
+      voucherNo: so.DocNo,
+      rows,
+    });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
@@ -169,12 +233,9 @@ router.get("/:id", requirePageRight("sale-order", "view"), async (req, res) => {
 });
 
 // ─── POST create sale order ────────────────────────────────────────────────
-// Sale orders go through the same Draft -> Pending -> Approved/Rejected
-// lifecycle as GRN/BOQ/PurchaseOrders. Creation only records the header +
-// items; stock is NOT touched here. Every new order is auto-submitted for
-// approval immediately after creation (Draft -> Pending), so it shows up
-// in the Approval Inbox right away. StockLedger OUT/IN entries are only
-// posted once the order clears its final approval level (see PUT /:id/approve).
+// Sells items out of one of our godowns to a buyer (any ledger head — the Journal Voucher's list). Each line:
+// item, UOM, qty, rate, GST %. Same Draft -> Pending -> Approved lifecycle as GRN/PO: creation only records the
+// order and auto-submits it; stock goes OUT and the sale is posted to the ledger on final approval (PUT /:id/approve).
 router.post("/", requirePageRight("sale-order", "create"), async (req, res) => {
   const pool = getPool();
   if (req.projectScope && !projectAllowed(req.projectScope, parseInt(req.body?.FromProjectID, 10))) {
@@ -185,10 +246,8 @@ router.post("/", requirePageRight("sale-order", "create"), async (req, res) => {
       FromCompanyID,
       FromProjectID,
       FromGodownID,
-      ToCompanyID,
-      ToProjectID,
-      ToGodownID,
-      SaleItems, // [{itemId, itemName, qty, uom, rate, remarks}]
+      BuyerLHeadId,
+      SaleItems, // [{itemId, itemName, qty, uom, rate, gstRate, remarks}]
       Remarks,
       OrderDate,
     } = req.body;
@@ -196,112 +255,73 @@ router.post("/", requirePageRight("sale-order", "create"), async (req, res) => {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
 
-    if (
-      !FromCompanyID ||
-      !FromProjectID ||
-      !FromGodownID ||
-      !ToCompanyID ||
-      !ToProjectID ||
-      !ToGodownID
-    )
-      return res.status(400).json({
-        error:
-          "FromCompanyID, FromProjectID, FromGodownID, ToCompanyID, ToProjectID and ToGodownID are all required",
-      });
-    if (FromGodownID === ToGodownID)
-      return res
-        .status(400)
-        .json({ error: "Source and destination godown must differ" });
+    if (!FromCompanyID || !FromProjectID || !FromGodownID)
+      return res.status(400).json({ error: "Pick the company, project and godown the items are sold from." });
+    const buyerId = parseInt(BuyerLHeadId, 10);
+    if (!Number.isFinite(buyerId)) return res.status(400).json({ error: "Pick the buyer." });
 
-    // ── Verify each Company/Project/Godown triple is internally consistent ──
-    // The UI only ever derives FromGodownID/ToGodownID from the selected
-    // project, so this never fires from normal use — but nothing stops a
-    // stale tab, script, or future caller from posting a mismatched triple
-    // (the same bug class that made Stock.tsx/StockTransfer.tsx godowns
-    // invisible when EnterpriseID didn't match: see migrations 105/106).
-    // Confirm up front instead of trusting the request body.
-    const triples = [
-      {
-        label: "From",
-        companyId: FromCompanyID,
-        projectId: FromProjectID,
-        godownId: FromGodownID,
-      },
-      {
-        label: "To",
-        companyId: ToCompanyID,
-        projectId: ToProjectID,
-        godownId: ToGodownID,
-      },
-    ];
-    for (const t of triples) {
-      const check = await pool
-        .request()
-        .input("godownId", sql.Int, parseInt(t.godownId))
-        .input("projectId", sql.Int, parseInt(t.projectId))
-        .input("companyId", sql.Int, parseInt(t.companyId)).query(`
-          SELECT g.GodownID, g.ProjectID, p.company_id AS CompanyID
-          FROM dbo.Godowns g
-          JOIN dbo.enterprise p ON p.id = g.ProjectID AND p.business_type = 'P'
-          WHERE g.GodownID = @godownId
-        `);
+    // The godown must belong to the project, and the project to the company (the UI only offers matching ones;
+    // a stale tab or script could still post a mismatched triple).
+    const check = await pool
+      .request()
+      .input("godownId", sql.Int, parseInt(FromGodownID))
+      .query(`
+        SELECT g.GodownID, g.ProjectID, p.company_id AS CompanyID
+        FROM dbo.Godowns g
+        JOIN dbo.enterprise p ON p.id = g.ProjectID AND p.business_type = 'P'
+        WHERE g.GodownID = @godownId
+      `);
+    const g = check.recordset[0];
+    if (!g) return res.status(400).json({ error: "Godown not found or not linked to a project." });
+    if (g.ProjectID !== parseInt(FromProjectID)) return res.status(400).json({ error: "The godown does not belong to the selected project." });
+    if (g.CompanyID !== parseInt(FromCompanyID)) return res.status(400).json({ error: "The project does not belong to the selected company." });
 
-      if (!check.recordset.length)
-        return res.status(400).json({
-          error: `${t.label} godown not found or not linked to a project`,
-        });
-
-      const row = check.recordset[0];
-      if (row.ProjectID !== parseInt(t.projectId))
-        return res.status(400).json({
-          error: `${t.label} godown does not belong to the selected project`,
-        });
-      if (row.CompanyID !== parseInt(t.companyId))
-        return res.status(400).json({
-          error: `${t.label} project does not belong to the selected company`,
-        });
-    }
+    const buyerRow = (await pool.request().input("id", sql.Int, buyerId)
+      .query("SELECT LHeadId, LHeadName FROM dbo.AccountHeadMaster WHERE LHeadId = @id")).recordset[0];
+    if (!buyerRow) return res.status(400).json({ error: "The buyer picked no longer exists." });
 
     const rawItems = parseItems(SaleItems);
-    if (!rawItems.length)
-      return res.status(400).json({ error: "At least one item is required" });
+    if (!rawItems.length) return res.status(400).json({ error: "Add at least one item." });
 
-    // Normalize rate/amount per item. Stock availability is only checked
-    // at approval time (not here), since stock hasn't moved yet and may
-    // change between submission and approval.
-    const items = rawItems.map((it) => {
+    // Stock is checked at approval (it can move between now and then), not here.
+    const items = rawItems.map((it, i) => {
       const qty = Number(it.qty);
-      const rate = Number(it.rate) || 0;
-      if (!it.itemId || !(qty > 0))
-        throw new Error(`Invalid item entry: itemId=${it.itemId} qty=${qty}`);
+      const rate = Number(it.rate);
+      const gstRate = Number(it.gstRate) || 0;
+      if (!it.itemId) throw new Error(`Line ${i + 1}: pick an item.`);
+      if (!(qty > 0)) throw new Error(`Line ${i + 1}: enter a quantity above 0.`);
+      if (!(rate >= 0)) throw new Error(`Line ${i + 1}: enter a rate.`);
+      if (gstRate < 0 || gstRate > 100) throw new Error(`Line ${i + 1}: GST % must be 0 to 100.`);
+      const amount = round2(qty * rate);
+      const taxAmount = round2((amount * gstRate) / 100);
       return {
-        itemId: it.itemId,
+        itemId: String(it.itemId),
         itemName: it.itemName || "",
         qty,
         uom: it.uom || "",
         rate,
-        amount: Math.round(qty * rate * 100) / 100,
+        gstRate,
+        amount,
+        taxAmount,
+        total: round2(amount + taxAmount),
         remarks: it.remarks || "",
-        // Revenue GL Head this item posts to once invoiced — see
-        // createSaleInvoiceInternal's GL posting in saleInvoices.js.
-        glHeadId: it.glHeadId ? parseInt(it.glHeadId, 10) : null,
       };
     });
-    const totalAmount =
-      Math.round(items.reduce((sum, it) => sum + it.amount, 0) * 100) / 100;
+    const basicAmount = round2(items.reduce((s, it) => s + it.amount, 0));
+    const taxAmount = round2(items.reduce((s, it) => s + it.taxAmount, 0));
+    const totalAmount = round2(basicAmount + taxAmount);
+    if (!(totalAmount > 0)) return res.status(400).json({ error: "The order total must be above 0." });
 
     const oDate = OrderDate || new Date().toISOString().slice(0, 10);
 
-    // ── Build a doc number (simple sequential: SO-YYYYMMDD-N) ────────────
+    // ── Doc number (simple sequential: SO-YYYYMMDD-N) ────────────────────
     const countRes = await pool.request().query(`
       SELECT COUNT(1)+1 AS N FROM dbo.SaleOrders
       WHERE CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE)
     `);
     const seq = String(countRes.recordset[0].N).padStart(3, "0");
-    const ymd = oDate.replace(/-/g, "");
-    const docNo = `SO-${ymd}-${seq}`;
+    const docNo = `SO-${oDate.replace(/-/g, "")}-${seq}`;
 
-    // ── Insert SaleOrders header as Draft ─────────────────────────────────
     const insertRes = await pool
       .request()
       .input("DocNo", sql.NVarChar(100), docNo)
@@ -309,38 +329,29 @@ router.post("/", requirePageRight("sale-order", "create"), async (req, res) => {
       .input("FromCompanyID", sql.Int, parseInt(FromCompanyID))
       .input("FromProjectID", sql.Int, parseInt(FromProjectID))
       .input("FromGodownID", sql.Int, parseInt(FromGodownID))
-      .input("ToCompanyID", sql.Int, parseInt(ToCompanyID))
-      .input("ToProjectID", sql.Int, parseInt(ToProjectID))
-      .input("ToGodownID", sql.Int, parseInt(ToGodownID))
+      .input("BuyerLHeadId", sql.Int, buyerId)
       .input("SaleItems", sql.NVarChar(sql.MAX), JSON.stringify(items))
+      .input("BasicAmount", sql.Decimal(18, 2), basicAmount)
+      .input("TaxAmount", sql.Decimal(18, 2), taxAmount)
       .input("TotalAmount", sql.Decimal(18, 2), totalAmount)
       .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
       .input("CreatedBy", sql.NVarChar(255), userEmail).query(`
         INSERT INTO dbo.SaleOrders
-          (DocNo, OrderDate, FromCompanyID, FromProjectID, FromGodownID,
-           ToCompanyID, ToProjectID, ToGodownID, SaleItems, TotalAmount,
-           Remarks, Status, CreatedBy)
+          (DocNo, OrderDate, FromCompanyID, FromProjectID, FromGodownID, BuyerLHeadId,
+           SaleItems, BasicAmount, TaxAmount, TotalAmount, Remarks, Status, CreatedBy)
         OUTPUT INSERTED.SaleOrderID
         VALUES
-          (@DocNo, @OrderDate, @FromCompanyID, @FromProjectID, @FromGodownID,
-           @ToCompanyID, @ToProjectID, @ToGodownID, @SaleItems, @TotalAmount,
-           @Remarks, 'Draft', @CreatedBy)
+          (@DocNo, @OrderDate, @FromCompanyID, @FromProjectID, @FromGodownID, @BuyerLHeadId,
+           @SaleItems, @BasicAmount, @TaxAmount, @TotalAmount, @Remarks, 'Draft', @CreatedBy)
       `);
     const saleOrderId = insertRes.recordset[0].SaleOrderID;
 
     // ── Auto-submit for approval (Draft -> Pending) ───────────────────────
     let submitResult = { newStatus: "Draft" };
     try {
-      submitResult = await transition(
-        "sale-orders",
-        saleOrderId,
-        "Pending",
-        userEmail,
-        req.user?.role,
-      );
+      submitResult = await transition("sale-orders", saleOrderId, "Pending", userEmail, req.user?.role);
     } catch (submitErr) {
-      // Header is already saved as Draft; surface the submit failure but
-      // don't lose the record — the user (or an admin) can resubmit later.
+      // Saved as Draft; the user (or an admin) can resubmit later.
       console.error("[sale-orders] auto-submit failed:", submitErr.message);
     }
 
@@ -349,6 +360,8 @@ router.post("/", requirePageRight("sale-order", "create"), async (req, res) => {
     res.status(201).json({
       SaleOrderID: saleOrderId,
       DocNo: docNo,
+      BasicAmount: basicAmount,
+      TaxAmount: taxAmount,
       TotalAmount: totalAmount,
       Status: submitResult.newStatus,
       message:
@@ -384,6 +397,78 @@ router.put("/:id/submit", requirePageRight("sale-order", "edit"), async (req, re
     res.status(400).json({ error: err.message });
   }
 });
+
+/**
+ * The selling company's own sales ledger, "Sales - <Company>" (LHeadCode SALES-C-<companyId>, under REVENUE FROM
+ * OPERATIONS). Created the first time that company sells, the same way each company gets its own Cash in Hand head
+ * (generalLedger.ensureCashInHandHead) — so each company's sales stay apart.
+ */
+async function ensureCompanySalesHead(pool, companyId, createdBy) {
+  const code = `SALES-C-${companyId}`;
+  const existing = (await pool.request().input("code", sql.NVarChar(20), code)
+    .query("SELECT LHeadId FROM dbo.AccountHeadMaster WHERE LHeadCode = @code")).recordset[0];
+  if (existing) return existing.LHeadId;
+  const companyName = (await pool.request().input("id", sql.Int, companyId)
+    .query("SELECT name FROM dbo.enterprise WHERE id = @id")).recordset[0]?.name || `Company ${companyId}`;
+  const group = (await pool.request().query(`
+    SELECT TOP 1 AGId FROM dbo.AccountGroup
+    WHERE Name = 'REVENUE FROM OPERATIONS' OR Code = 'RO' OR Name LIKE '%REVENUE%'
+    ORDER BY CASE WHEN Name = 'REVENUE FROM OPERATIONS' THEN 0 WHEN Code = 'RO' THEN 1 ELSE 2 END`)).recordset[0];
+  const inserted = await pool
+    .request()
+    .input("LHeadName", sql.NVarChar(200), `Sales - ${companyName}`)
+    .input("LHeadCode", sql.NVarChar(20), code)
+    .input("LBelongsTo", sql.Int, group?.AGId ?? null)
+    .input("CompanyName", sql.NVarChar(500), companyName)
+    .input("CreatedBy", sql.NVarChar(150), createdBy || "system").query(`
+      INSERT INTO dbo.AccountHeadMaster
+        (LHeadName, LHeadCode, LHeadAddress, LHeadContactPerson, LHeadType, LHeadStatus, LBelongsTo, Status,
+         DisplayName, CompanyName, IsSystemGenerated, ApprovedBy, ApprovedAt, CreatedBy, CreatedAt)
+      OUTPUT INSERTED.LHeadId
+      VALUES
+        (@LHeadName, @LHeadCode, 'N/A', 'System Admin', 'GL', 1, @LBelongsTo, 'Approved',
+         @LHeadName, @CompanyName, 1, @CreatedBy, SYSDATETIME(), @CreatedBy, SYSDATETIME())`);
+  await bumpCacheVersion("account-head-master").catch(() => {});
+  return inserted.recordset[0].LHeadId;
+}
+
+/**
+ * Posts an approved sale to a buyer: Dr buyer (grand total) / Cr the selling company's sales ledger (basic) /
+ * Cr GST Output A/c (tax).
+ * Once only (GLPosted). An older transfer order (no buyer) posts nothing — its Sale Invoice does that.
+ */
+async function postSaleToLedger(pool, id, userEmail) {
+  const so = (await pool.request().input("id", sql.Int, id).query(`
+    SELECT SaleOrderID, DocNo, OrderDate, FromCompanyID, FromProjectID, BuyerLHeadId,
+           BasicAmount, TaxAmount, TotalAmount, GLPosted
+    FROM dbo.SaleOrders WHERE SaleOrderID = @id`)).recordset[0];
+  if (!so || !so.BuyerLHeadId || so.GLPosted) return { posted: false };
+  const { postVoucher, getGLHeadIdByCode } = require("../services/generalLedger");
+  const total = round2(so.TotalAmount);
+  const tax = round2(so.TaxAmount);
+  const basic = round2(total - tax); // the exact rest, so the voucher balances to the paisa
+  const legs = [{ lHeadId: so.BuyerLHeadId, debit: total, narration: `${so.DocNo} — Sale Order` }];
+  if (basic > 0) legs.push({ lHeadId: await ensureCompanySalesHead(pool, so.FromCompanyID, userEmail), credit: basic, narration: `${so.DocNo} — sales` });
+  if (tax > 0) legs.push({ lHeadId: await getGLHeadIdByCode(pool, "SALES-GST-OUTPUT", "GST Output A/c"), credit: tax, narration: `${so.DocNo} — GST output` });
+  await postVoucher(pool, {
+    voucherNo: so.DocNo,
+    voucherDate: so.OrderDate || new Date(),
+    sourceType: "SaleOrder",
+    sourceId: so.SaleOrderID,
+    companyId: so.FromCompanyID ?? null,
+    projectId: so.FromProjectID ?? null,
+    createdBy: userEmail,
+    legs,
+  });
+  await pool.request().input("id", sql.Int, id).query("UPDATE dbo.SaleOrders SET GLPosted = 1 WHERE SaleOrderID = @id");
+  try {
+    const { recordGLPosting } = require("../services/approvalService");
+    await recordGLPosting("sale-order", id, { posted: true }, userEmail);
+  } catch {
+    /* the audit note is optional */
+  }
+  return { posted: true };
+}
 
 // ── PUT /:id/approve — Pending → Approved (posts stock on final approval) ──
 // No requirePageRight gate — transition() is the real authority (role
@@ -463,7 +548,9 @@ router.put("/:id/approve", async (req, res) => {
                 VALUES (@ItemID,@Qty,@UOM,'OUT','SO',@RefID,@GodownID,@DocNo,GETDATE())
               `);
 
-            await transaction
+            // Only an older transfer order moves the stock into another of our godowns; a sale to a buyer just
+            // takes it out.
+            if (header.ToGodownID) await transaction
               .request()
               .input("ItemID", sql.NVarChar(50), itemId)
               .input("Qty", sql.Decimal(18, 2), qty)
@@ -493,6 +580,17 @@ router.put("/:id/approve", async (req, res) => {
         // stays at its current (Pending) status so it can be retried.
         throw postErr;
       }
+
+      // A sale to a buyer is posted to the ledger: Dr buyer (grand total) / Cr Sales A/c (basic) / Cr GST Output A/c
+      // (tax). If the posting fails, the stock just taken out is put back and the order stays Pending.
+      try {
+        await postSaleToLedger(pool, id, userEmail);
+      } catch (glErr) {
+        await pool.request().input("id", sql.Int, id).query(`
+          DELETE FROM dbo.StockLedger WHERE RefType = 'SO' AND RefID = @id;
+          UPDATE dbo.SaleOrders SET PostedToStock = 0 WHERE SaleOrderID = @id;`);
+        throw new Error(`The sale could not be posted to the ledger, so nothing was approved: ${glErr.message}`);
+      }
     }
 
     // Stock is posted (or this isn't the final level yet) — now it's safe
@@ -512,7 +610,7 @@ router.put("/:id/approve", async (req, res) => {
 
     res.json({
       message: isFinalLevel
-        ? "Sale order approved and stock posted"
+        ? "Sale order approved: stock taken out and the sale posted"
         : "Sale order approval recorded",
       ...result,
     });

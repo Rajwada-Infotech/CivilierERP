@@ -107,6 +107,7 @@ const APP_SELECT = `
     cust.State AS CustomerState, cust.Pincode AS CustomerPincode,
     bk.Id AS BookingId, bk.BookingNo, bk.Status AS BookingStatus, bk.WorkflowStage AS BookingWorkflowStage, bk.ReadyForApprovalAt AS BookingReadyForApprovalAt, bk.UnitNo AS BookingUnitNo,
     bk.ProjectName AS BookingProjectName, bk.TotalValue AS BookingTotalValue, bk.GrandTotal AS BookingGrandTotal, bk.BookingDate,
+    (SELECT ISNULL(SUM(m.AmountPaid), 0) FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = bk.Id) AS BookingCleared,
     (SELECT TOP 1 Status FROM dbo.CrmSalesDeed WHERE BookingId = bk.Id ORDER BY CreatedAt DESC) AS DeedStatus,
     -- Stage drives the Converted/In Process/Not Converted split every
     -- Applications view now works from. Converted means a LIVE booking
@@ -125,7 +126,10 @@ const APP_SELECT = `
     -- every query is exactly what makes it safe regardless of that history.
     CASE
       WHEN bk.Id IS NOT NULL AND bk.Status NOT IN ${DEAD_BOOKING_SQL} THEN 'Converted'
-      WHEN a.Status IN ('${CrmStatus.REJECTED}', '${CrmStatus.CANCELLED}') THEN 'NotConverted'
+      WHEN a.Status IN ('${CrmStatus.REJECTED}', '${CrmStatus.CANCELLED}', 'Expired') THEN 'NotConverted'
+      -- A resale / ownership-change buyer's application is made Converted with the booking it takes; once that
+      -- booking is no longer on it, it is closed (as scripts/releaseDeadApplicationLines.js treats it), not in process.
+      WHEN a.Status = N'Converted' THEN 'NotConverted'
       ELSE 'InProcess'
     END AS Stage,
     -- Distinguishes a bookable application that's actually bookable from one
@@ -228,6 +232,34 @@ function buildApplicationFilters(req0, query, projectScope = null) {
 // applied to crmInvoices.js's grouped-view query this session).
 const DISPLAY_STAGE_EXPR = `CASE WHEN x.Stage = 'Converted' AND x.BookingStatus <> '${CrmStatus.APPROVED}' THEN 'InProcess' ELSE x.Stage END`;
 
+// What an in-process application is waiting on (?focus=), over the list's own columns (y). One definition for the
+// list filter and the counts, the same tests the row's status notes and actions use.
+const HAS_PROPERTY = "(y.PreferredUnitId IS NOT NULL OR y.PreferredUnitIdsCsv IS NOT NULL OR y.PreferredPlotIdsCsv IS NOT NULL)";
+const NOT_BOOKED_PENDING = `y.Status = N'${CrmStatus.PENDING}' AND y.Stage <> 'Converted'`;
+const APPLICATION_FOCUS = {
+  draft: `y.Status = N'${CrmStatus.DRAFT}'`,
+  noProperty: `${NOT_BOOKED_PENDING} AND NOT ${HAS_PROPERTY}`,
+  unitUnavailable: `${NOT_BOOKED_PENDING} AND y.UnitUnavailableForBooking = 1`,
+  readyToBook: `${NOT_BOOKED_PENDING} AND ${HAS_PROPERTY} AND y.UnitUnavailableForBooking = 0 AND y.UnitChangeNo IS NULL`,
+  inApproval: `y.Stage = 'Converted' AND y.BookingStatus <> N'${CrmStatus.APPROVED}'`,
+};
+
+// The paginated list's outer WHERE: its tab (?displayStage=) and what it waits on (?focus=, a fixed condition).
+function stageAndFocusWhere(rq, query) {
+  const conds = [];
+  if (query.displayStage) { rq.input("dstage", sql.NVarChar(20), query.displayStage); conds.push("y.DisplayStage = @dstage"); }
+  if (Object.hasOwn(APPLICATION_FOCUS, query.focus)) conds.push(`(${APPLICATION_FOCUS[query.focus]})`);
+  return conds.length ? `WHERE ${conds.join(" AND ")}` : "";
+}
+
+// The columns the applications list sorts by (?sortKey=), each a fixed expression over the list's own columns —
+// never the raw parameter.
+const APPLICATION_SORT = {
+  CreatedAt: "y.CreatedAt", ApplicationNo: "y.ApplicationNo", Applicant: "y.ApplicantName", Assignee: "y.AssigneeName",
+  Status: "y.Status", Project: "COALESCE(y.BookingProjectName, y.InterestedProject)", Booking: "y.BookingNo",
+  Value: "COALESCE(y.BookingGrandTotal, y.BookingTotalValue)",
+};
+
 // Parking Booking sells standalone parking to an application, so its right lists them too.
 router.get("/", requireAnyPageRight(["crm-applications", "crm-parking-booking"], "view"), async (req, res) => {
   try {
@@ -245,7 +277,9 @@ router.get("/", requireAnyPageRight(["crm-applications", "crm-parking-booking"],
       const result = await req0.query(`${APP_SELECT} ${where} ORDER BY a.CreatedAt DESC`);
       let rows = result.recordset;
       if (forBooking) {
-        rows = rows.filter((r) => ![CrmStatus.REJECTED, CrmStatus.CANCELLED, "Expired"].includes(r.Status) && r.Stage !== "Converted");
+        // Only applications still in process: not booked, not closed (rejected, cancelled, expired, or a resale
+        // buyer's whose booking left it).
+        rows = rows.filter((r) => r.Stage === "InProcess" && r.Status !== "Expired");
       } else if (stage) {
         rows = rows.filter((r) => r.Stage === stage);
       } else if (!req.query.status && !includeConverted) {
@@ -263,35 +297,28 @@ router.get("/", requireAnyPageRight(["crm-applications", "crm-parking-booking"],
     const req0 = pool.request();
     const where = buildApplicationFilters(req0, req.query, req.projectScope);
     req0.input("offset", sql.Int, offset).input("pageSize", sql.Int, pageSize);
-    let displayStageWhere = "";
-    if (req.query.displayStage) {
-      req0.input("dstage", sql.NVarChar(20), req.query.displayStage);
-      displayStageWhere = "WHERE DisplayStage = @dstage";
-    }
+    const displayStageWhere = stageAndFocusWhere(req0, req.query);
     // Two levels of wrapping, not one: SQL Server won't let a WHERE at the
     // same query level reference a SELECT-list alias (DisplayStage) — x
     // computes it, y is where it becomes a real, filterable column. Same
     // shape the count query below already used correctly.
+    const sortCol = Object.hasOwn(APPLICATION_SORT, req.query.sortKey) ? APPLICATION_SORT[req.query.sortKey] : APPLICATION_SORT.CreatedAt;
     const result = await req0.query(`
       SELECT * FROM (
         SELECT *, ${DISPLAY_STAGE_EXPR} AS DisplayStage
         FROM (${APP_SELECT} ${where}) x
       ) y
       ${displayStageWhere}
-      ORDER BY CreatedAt DESC
+      ORDER BY ${sortCol} ${req.query.sortDir === "asc" ? "ASC" : "DESC"}, y.Id DESC
       OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY
     `);
 
     const countReq = pool.request();
     const countWhere = buildApplicationFilters(countReq, req.query, req.projectScope);
-    let countDisplayStageWhere = "";
-    if (req.query.displayStage) {
-      countReq.input("dstage", sql.NVarChar(20), req.query.displayStage);
-      countDisplayStageWhere = "WHERE DisplayStage = @dstage";
-    }
+    const countDisplayStageWhere = stageAndFocusWhere(countReq, req.query);
     const countResult = await countReq.query(`
       SELECT COUNT(*) AS Total FROM (
-        SELECT ${DISPLAY_STAGE_EXPR} AS DisplayStage
+        SELECT *, ${DISPLAY_STAGE_EXPR} AS DisplayStage
         FROM (${APP_SELECT} ${countWhere}) x
       ) y
       ${countDisplayStageWhere}
@@ -305,6 +332,24 @@ router.get("/", requireAnyPageRight(["crm-applications", "crm-parking-booking"],
   } catch (e) {
     console.error("[crm-applications] GET error:", e.message);
     res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /focus-counts — how many in-process applications wait on each thing (APPLICATION_FOCUS), under the list's
+// filters, so the needs-attention tiles count every matching row, not one page.
+router.get("/focus-counts", requirePageRight("crm-applications", "view"), async (req, res) => {
+  try {
+    const req0 = getPool().request();
+    const where = buildApplicationFilters(req0, req.query, req.projectScope);
+    const sums = Object.entries(APPLICATION_FOCUS).map(([k, cond]) => `SUM(CASE WHEN ${cond} THEN 1 ELSE 0 END) AS ${k}`).join(", ");
+    const r = await req0.query(`
+      SELECT ${sums} FROM (
+        SELECT *, ${DISPLAY_STAGE_EXPR} AS DisplayStage FROM (${APP_SELECT} ${where}) x
+      ) y WHERE y.DisplayStage = 'InProcess'`);
+    res.json(Object.fromEntries(Object.keys(APPLICATION_FOCUS).map((k) => [k, Number(r.recordset[0]?.[k]) || 0])));
+  } catch (e) {
+    console.error("[crm-applications] GET /focus-counts error:", e.message);
+    res.status(500).json({ error: "Could not count the applications." });
   }
 });
 

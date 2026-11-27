@@ -371,10 +371,13 @@ const FinanceDashboard = () => {
                     { label: "Invoices to approve", value: data.invoices.pendingApprovalCount, sub: "waiting for approval", path: "/finance/invoice", red: n0(data.invoices.pendingApprovalCount) > 0 },
                     { label: "Payments to approve", value: n0(data.paymentsMade.pendingApprovalCount), sub: "waiting for approval", path: "/payments", red: n0(data.paymentsMade.pendingApprovalCount) > 0 },
                   ].map((b, i) => (
-                    <button key={b.label} onClick={() => navigate(b.path)} style={{ textAlign: "left", padding: "12px 14px", borderLeft: i ? "1px solid var(--rule-soft)" : 0 }}>
+                    <button key={b.label} onClick={() => navigate(b.path)} style={{ display: "flex", flexDirection: "column", alignItems: "stretch", textAlign: "left", padding: "12px 14px", borderLeft: i ? "1px solid var(--rule-soft)" : 0 }}>
                       <span className="label link" style={{ color: "var(--ink)" }}>{b.label}</span>
-                      <span className="figure" style={{ display: "block", fontSize: 24, marginTop: 6, color: b.red ? "var(--red)" : undefined }}>{fmtInt(b.value)}</span>
-                      <span style={{ display: "block", fontSize: 12, color: "var(--graphite)", marginTop: 2 }}>{b.sub}</span>
+                      {/* Number + caption sit on the cell's bottom, so a label that wraps doesn't push its number below the others. */}
+                      <span style={{ marginTop: "auto", paddingTop: 6 }}>
+                        <span className="figure" style={{ display: "block", fontSize: 24, color: b.red ? "var(--red)" : undefined }}>{fmtInt(b.value)}</span>
+                        <span style={{ display: "block", fontSize: 12, color: "var(--graphite)", marginTop: 2 }}>{b.sub}</span>
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -384,7 +387,7 @@ const FinanceDashboard = () => {
                     { label: "Invoices overdue", count: n0(data.overdue.invoiceCount), amount: n0(data.overdue.invoiceAmount), sub: "approved, nothing paid yet", path: "/finance/invoice" },
                     { label: "Payments overdue", count: n0(data.overdue.paymentCount), amount: n0(data.overdue.paymentAmount), sub: "past the payment date, not approved yet", path: "/payments" },
                   ].map((b, i) => (
-                    <button key={b.label} onClick={() => navigate(b.path)} style={{ textAlign: "left", padding: "12px 14px", borderLeft: i ? "1px solid var(--rule-soft)" : 0 }}>
+                    <button key={b.label} onClick={() => navigate(b.path)} style={{ display: "flex", flexDirection: "column", alignItems: "stretch", justifyContent: "flex-start", textAlign: "left", padding: "12px 14px", borderLeft: i ? "1px solid var(--rule-soft)" : 0 }}>
                       <span className="label link" style={{ color: b.count ? "var(--red)" : "var(--ink)" }}>{b.label}</span>
                       <span style={{ display: "flex", alignItems: "baseline", gap: 10, marginTop: 6 }}>
                         <span className="figure" style={{ fontSize: 24, color: b.count ? "var(--red)" : undefined }}>{fmtInt(b.count)}</span>

@@ -109,7 +109,8 @@ function EligibleOrderPicker({
         o.DocNo.toLowerCase().includes(q) ||
         o.FromProjectName?.toLowerCase().includes(q) ||
         o.ToProjectName?.toLowerCase().includes(q) ||
-        o.ToCompanyName?.toLowerCase().includes(q),
+        o.ToCompanyName?.toLowerCase().includes(q) ||
+        o.BuyerName?.toLowerCase().includes(q),
     );
   }, [orders, search]);
 
@@ -124,7 +125,7 @@ function EligibleOrderPicker({
         {selected ? (
           <div className="flex items-center gap-2 min-w-0">
             <span className={`${HR_NUM} font-semibold text-foreground`}>{selected.DocNo}</span>
-            <span className="text-muted-foreground text-xs truncate">· {selected.ToCompanyName}</span>
+            <span className="text-muted-foreground text-xs truncate">· {selected.BuyerName || selected.ToCompanyName}</span>
           </div>
         ) : (
           <span className="text-muted-foreground">Select an approved sale order…</span>
@@ -170,7 +171,9 @@ function EligibleOrderPicker({
                     <div className="min-w-0">
                       <p className={`${HR_NUM} text-sm font-semibold text-foreground`}>{o.DocNo}</p>
                       <p className="text-xs text-muted-foreground truncate mt-0.5">
-                        {o.ToCompanyName} · {o.FromProjectName} → {o.ToProjectName}
+                        {o.BuyerName
+                          ? `${o.BuyerName} · from ${o.FromProjectName}`
+                          : `${o.ToCompanyName} · ${o.FromProjectName} → ${o.ToProjectName}`}
                       </p>
                     </div>
                     <div className="text-right shrink-0">

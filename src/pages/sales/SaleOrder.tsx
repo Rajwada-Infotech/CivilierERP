@@ -7,9 +7,8 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { SheetShell } from "@/components/sheet/Sheet";
 import { KEY_INK, KEY_LINE } from "@/components/sheet/sheetParts";
 import { HR_HEAD, HR_NUM } from "@/components/hrpayroll/HrUi";
-import { SheetBox, SheetTabs, TH, TD, ICON_ACT, ICON_ACT_RED } from "@/components/maintenance/maintParts";
+import { SheetBox, TH, TD, ICON_ACT, ICON_ACT_RED } from "@/components/maintenance/maintParts";
 import {
-  ArrowLeftRight,
   Warehouse,
   Search,
   ChevronDown,
@@ -20,7 +19,6 @@ import {
   AlertCircle,
   CheckCircle2,
   Send,
-  ClipboardList,
   IndianRupee,
   Eye,
   Printer,
@@ -29,7 +27,9 @@ import { toast } from "sonner";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
-import { GLAccountSelect } from "@/components/finance/GLAccountSelect";
+import { LedgerHeadPicker } from "@/pages/finance/journalVoucher/LedgerHeadPicker";
+import { getJournalVoucherLedgerOptions } from "@/api/journalVoucherApi";
+import { getItems as getItemMaster } from "@/api/itemMasterApi";
 import { getGodowns, type Godown } from "@/api/godownsApi";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { getInventoryMaster } from "@/api/inventoryMasterApi";
@@ -37,6 +37,7 @@ import {
   createSaleOrder,
   getSaleOrders,
   deleteSaleOrder,
+  getSaleOrderPosting,
   type SaleOrder as SaleOrderDoc,
 } from "@/api/saleOrdersApi";
 
@@ -67,12 +68,8 @@ interface SOItem {
   rate: string;
   availableQty: number;
   remarks: string;
-  // Which revenue GL Head this item's sale posts to once invoiced — see
-  // GLAccountSelect (dbo.AccountHeadMaster WHERE LHeadType='GL'). Persisted
-  // per-item (not per-order) since one Sale Order can mix items that book
-  // to different revenue heads.
-  glHeadId: number | null;
-  glHeadLabel: string | null;
+  /** GST % on the line — defaults from the item's own GST in Item Master, can be changed. */
+  gstRate: string;
 }
 
 interface AvailableItem {
@@ -90,9 +87,15 @@ const emptyItem = (): SOItem => ({
   rate: "",
   availableQty: 0,
   remarks: "",
-  glHeadId: null,
-  glHeadLabel: null,
+  gstRate: "",
 });
+
+/** One line's figures: basic (qty × rate), tax, total. */
+const lineFigures = (it: { qty: string; rate: string; gstRate: string }) => {
+  const basic = (parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0);
+  const tax = (basic * (parseFloat(it.gstRate) || 0)) / 100;
+  return { basic, tax, total: basic + tax };
+};
 
 // ─── Sheet styles (docs/DESIGN.md) ────────────────────────────────────────────
 const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
@@ -263,6 +266,7 @@ function SOItemRow({
   onRemove,
   availableItems,
   isLoadingStock,
+  gstOf,
 }: {
   item: SOItem;
   idx: number;
@@ -270,6 +274,7 @@ function SOItemRow({
   onRemove: (idx: number) => void;
   availableItems: AvailableItem[];
   isLoadingStock: boolean;
+  gstOf: (itemId: string) => number;
 }) {
   const [search, setSearch] = useState(item.itemName || "");
   const [open, setOpen] = useState(false);
@@ -302,14 +307,14 @@ function SOItemRow({
       itemName: a.itemName,
       uom: a.uom,
       availableQty: a.available,
+      gstRate: String(gstOf(a.itemId)),
     });
     setSearch(a.itemName);
     setOpen(false);
   };
 
   const qtyNum = parseFloat(item.qty) || 0;
-  const rateNum = parseFloat(item.rate) || 0;
-  const amount = qtyNum * rateNum;
+  const { total: amount } = lineFigures(item);
   const overLimit = qtyNum > item.availableQty && item.availableQty > 0;
 
   return (
@@ -428,7 +433,7 @@ function SOItemRow({
         </div>
 
         {/* Rate */}
-        <div className="col-span-2 relative">
+        <div className="col-span-1 relative">
           <span className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none">
             <IndianRupee size={11} />
           </span>
@@ -444,7 +449,22 @@ function SOItemRow({
           />
         </div>
 
-        {/* Amount */}
+        {/* GST % */}
+        <div className="col-span-1">
+          <input
+            type="number"
+            min="0"
+            max="100"
+            step="any"
+            value={item.gstRate}
+            onChange={(e) => onUpdate(idx, { gstRate: e.target.value })}
+            placeholder="GST %"
+            disabled={!item.itemId}
+            className={`${CELL} border-foreground/30 ${HR_NUM}`}
+          />
+        </div>
+
+        {/* Amount (incl. GST) */}
         <div className="col-span-2 flex items-center h-9">
           <span className={`text-xs font-semibold text-foreground truncate ${HR_NUM}`}>
             {item.itemId ? fmtAmt(amount) : "—"}
@@ -459,18 +479,62 @@ function SOItemRow({
         </div>
       </div>
 
-      {/* GL Head — which revenue ledger this item posts to once invoiced */}
-      <div className="flex items-center gap-2 pl-8">
-        <span className={`${LBL} shrink-0`}>GL Head</span>
-        <div className="flex-1 max-w-xs">
-          <GLAccountSelect
-            value={item.glHeadId}
-            onChange={(id, label) => onUpdate(idx, { glHeadId: id, glHeadLabel: label })}
-            placeholder="Default revenue account"
-            className="!py-1.5 !text-xs"
-          />
-        </div>
+    </div>
+  );
+}
+
+// ─── Posting: the ledger entry for a sale ────────────────────────────────────
+function SaleOrderPostingPanel({ id }: { id: number }) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["sale-order-posting", id],
+    queryFn: () => getSaleOrderPosting(id),
+    staleTime: 30_000,
+  });
+  const note =
+    data?.state === "posted"
+      ? `Posted on approval${data.voucherDate ? ` · ${fmtDate(data.voucherDate)}` : ""}`
+      : data?.state === "preview"
+        ? "Not posted yet — this is what final approval will post"
+        : data?.state === "rejected"
+          ? "Rejected — nothing was posted"
+          : null;
+  const debit = (data?.rows ?? []).filter((r) => r.side === "debit").reduce((s, r) => s + r.amount, 0);
+  const credit = (data?.rows ?? []).filter((r) => r.side === "credit").reduce((s, r) => s + r.amount, 0);
+  const GRID = "grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] gap-2 px-4";
+
+  return (
+    <div className="p-5 sm:p-6 space-y-3">
+      <div className="flex items-baseline justify-between gap-3">
+        <p className={HR_HEAD}>Journal entry{data?.voucherNo ? ` · ${data.voucherNo}` : ""}</p>
+        {note && <span className="text-[0.6875rem] text-muted-foreground">{note}</span>}
       </div>
+      {isLoading ? (
+        <div className="border border-dashed border-foreground/40 py-10 text-center text-xs text-muted-foreground">Loading posting…</div>
+      ) : error ? (
+        <div className="border border-destructive/40 py-6 text-center text-xs text-destructive">{(error as Error).message}</div>
+      ) : data?.state === "none" ? (
+        <div className="border border-dashed border-foreground/40 py-10 text-center text-xs text-muted-foreground">{data.reason}</div>
+      ) : (
+        <div className={`bg-card border border-foreground ${data?.state === "posted" ? "" : "opacity-80"}`}>
+          <div className={`${GRID} py-2.5 border-b border-foreground ${LBL}`}>
+            <span>Account</span>
+            <span className="text-right">Debit (₹)</span>
+            <span className="text-right">Credit (₹)</span>
+          </div>
+          {(data?.rows ?? []).map((r, i) => (
+            <div key={i} className={`${GRID} py-3 border-b border-foreground/15 last:border-0 items-center`}>
+              <span className="text-xs text-foreground truncate">{r.label}</span>
+              <span className={`text-xs text-right text-foreground ${HR_NUM}`}>{r.side === "debit" ? fmtAmt(r.amount) : ""}</span>
+              <span className={`text-xs text-right text-foreground ${HR_NUM}`}>{r.side === "credit" ? fmtAmt(r.amount) : ""}</span>
+            </div>
+          ))}
+          <div className={`${GRID} py-3 border-t-2 border-foreground text-xs font-bold`}>
+            <span className={LBL}>Total</span>
+            <span className={`text-right ${HR_NUM}`}>{fmtAmt(debit)}</span>
+            <span className={`text-right ${HR_NUM}`}>{fmtAmt(credit)}</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -494,7 +558,12 @@ function SaleOrderHistory() {
   useEffect(() => {
     if (!isFetching && page > 1 && data && orders.length === 0) setPage(1);
   }, [isFetching, page, data, orders.length]);
-  const [viewingOrder, setViewingOrder] = useState<SaleOrderDoc | null>(null);
+  const [viewingOrder, setViewingOrderRaw] = useState<SaleOrderDoc | null>(null);
+  const [viewTab, setViewTab] = useState<"details" | "posting">("details");
+  const setViewingOrder = (o: SaleOrderDoc | null) => {
+    setViewTab("details");
+    setViewingOrderRaw(o);
+  };
 
   // One request for every visible row's approval trail instead of one per
   // row — see useApprovalTrailsBulk's own comment.
@@ -520,7 +589,7 @@ function SaleOrderHistory() {
 
   return (
     <SheetBox
-      title="Sale Order History"
+      title="Sale orders"
       note={total ? `${fmtNum(total)} orders` : undefined}
       flush
       action={
@@ -529,12 +598,12 @@ function SaleOrderHistory() {
         </button>
       }
     >
-      <p className="px-4 pt-3 text-xs text-muted-foreground">Recent inter-company / inter-project sale orders</p>
+      <p className="px-4 pt-3 text-xs text-muted-foreground">Materials sold from our godowns to buyers</p>
       <div className="overflow-x-auto mt-2">
         <table className="w-full text-xs">
           <thead>
             <tr>
-              {["Doc No", "Date", "From", "To", "Items", "Amount", "Status", "By", ""].map((h) => (
+              {["Doc No", "Date", "From", "Buyer", "Items", "Amount", "Status", "By", ""].map((h) => (
                 <th key={h} className={`${TH} ${h === "Amount" ? "text-right" : ""}`}>
                   {h}
                 </th>
@@ -570,10 +639,17 @@ function SaleOrderHistory() {
                     </span>
                   </td>
                   <td className={TD}>
-                    <span className="block text-xs font-semibold text-foreground">{o.ToCompanyName}</span>
-                    <span className="block text-[0.625rem] text-muted-foreground">
-                      {o.ToProjectName} · {o.ToGodownName}
-                    </span>
+                    {o.BuyerName ? (
+                      <span className="block text-xs font-semibold text-foreground">{o.BuyerName}</span>
+                    ) : (
+                      // An older transfer order: it went to another of our projects.
+                      <>
+                        <span className="block text-xs font-semibold text-foreground">{o.ToCompanyName || "—"}</span>
+                        <span className="block text-[0.625rem] text-muted-foreground">
+                          Transfer · {o.ToProjectName} · {o.ToGodownName}
+                        </span>
+                      </>
+                    )}
                   </td>
                   <td className={`${TD} ${HR_NUM} text-muted-foreground whitespace-nowrap`}>
                     {o.SaleItems.length} item{o.SaleItems.length !== 1 ? "s" : ""}
@@ -667,6 +743,25 @@ function SaleOrderHistory() {
               </div>
             </div>
 
+            {/* Details | Posting */}
+            <div className="flex border-b border-foreground print:hidden">
+              {(["details", "posting"] as const).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setViewTab(t)}
+                  aria-pressed={viewTab === t}
+                  className={`h-9 px-5 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] border-r border-foreground/20 ${
+                    viewTab === t ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {t === "details" ? "Details" : "Posting"}
+                </button>
+              ))}
+            </div>
+
+            {viewTab === "posting" ? (
+              <SaleOrderPostingPanel id={viewingOrder.SaleOrderID} />
+            ) : (
             <div className="p-5 sm:p-6 space-y-6">
               {/* Meta grid */}
               <div className="grid grid-cols-2 sm:grid-cols-3 border-t border-l border-foreground/20">
@@ -678,11 +773,14 @@ function SaleOrderHistory() {
                     label: "From",
                     value: `${viewingOrder.FromCompanyName} · ${viewingOrder.FromProjectName} · ${viewingOrder.FromGodownName}`,
                   },
-                  {
-                    label: "To",
-                    value: `${viewingOrder.ToCompanyName} · ${viewingOrder.ToProjectName} · ${viewingOrder.ToGodownName}`,
-                  },
-                  { label: "Stock Posted", value: viewingOrder.PostedToStock ? "Yes" : "Not yet" },
+                  viewingOrder.BuyerName
+                    ? { label: "Buyer", value: viewingOrder.BuyerName }
+                    : {
+                        label: "To (transfer)",
+                        value: `${viewingOrder.ToCompanyName} · ${viewingOrder.ToProjectName} · ${viewingOrder.ToGodownName}`,
+                      },
+                  { label: "Stock taken out", value: viewingOrder.PostedToStock ? "Yes" : "Not yet" },
+                  ...(viewingOrder.BuyerName ? [{ label: "Posted to ledger", value: viewingOrder.GLPosted ? "Yes" : "Not yet" }] : []),
                 ].map(({ label, value, num }) => (
                   <div key={label} className="px-3 py-2.5 border-r border-b border-foreground/20 min-w-0">
                     <p className={`${LBL} mb-0.5`}>{label}</p>
@@ -707,8 +805,8 @@ function SaleOrderHistory() {
                   <table className="w-full text-xs">
                     <thead>
                       <tr>
-                        {["Item", "Qty", "UOM", "Rate", "Amount", "Remarks"].map((h) => (
-                          <th key={h} className={`${TH} ${["Qty", "Rate", "Amount"].includes(h) ? "text-right" : ""}`}>
+                        {["Item", "Qty", "UOM", "Rate", "GST %", "Amount"].map((h) => (
+                          <th key={h} className={`${TH} ${["Qty", "Rate", "GST %", "Amount"].includes(h) ? "text-right" : ""}`}>
                             {h}
                           </th>
                         ))}
@@ -721,10 +819,10 @@ function SaleOrderHistory() {
                           <td className={`${TD} ${HR_NUM} text-right`}>{fmtNum(it.qty)}</td>
                           <td className={TD}>{it.uom || "—"}</td>
                           <td className={`${TD} ${HR_NUM} text-right`}>{it.rate ? fmtAmt(it.rate) : "—"}</td>
+                          <td className={`${TD} ${HR_NUM} text-right`}>{it.gstRate != null ? `${fmtNum(it.gstRate)}%` : "—"}</td>
                           <td className={`${TD} ${HR_NUM} text-right font-semibold`}>
-                            {fmtAmt(it.amount ?? it.qty * it.rate)}
+                            {fmtAmt(it.total ?? it.amount ?? it.qty * it.rate)}
                           </td>
-                          <td className={`${TD} text-muted-foreground`}>{it.remarks || "—"}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -740,12 +838,19 @@ function SaleOrderHistory() {
                     <p className="text-muted-foreground">{viewingOrder.Remarks}</p>
                   </div>
                 )}
-                <div className="text-right sm:ml-auto">
+                <div className="text-right sm:ml-auto space-y-1">
+                  {viewingOrder.BasicAmount != null && (
+                    <>
+                      <p className={`text-xs text-muted-foreground ${HR_NUM}`}>Basic {fmtAmt(viewingOrder.BasicAmount)}</p>
+                      <p className={`text-xs text-muted-foreground ${HR_NUM}`}>GST {fmtAmt(viewingOrder.TaxAmount ?? 0)}</p>
+                    </>
+                  )}
                   <p className={`${LBL} mb-0.5`}>Total Amount</p>
                   <p className={`text-xl font-bold text-foreground ${HR_NUM}`}>{fmtAmt(viewingOrder.TotalAmount)}</p>
                 </div>
               </div>
             </div>
+            )}
           </div>
         </div>,
         document.body,
@@ -759,15 +864,12 @@ export default function SaleOrder() {
   const rights = usePageRights("sale-order");
   const qc = useQueryClient();
 
-  const [activeTab, setActiveTab] = useState<"create" | "history">("create");
 
   const [fromCompanyId, setFromCompanyId] = useState("");
   const [fromProjectId, setFromProjectId] = useState("");
   const [fromGodownId, setFromGodownId] = useState<number | null>(null);
 
-  const [toCompanyId, setToCompanyId] = useState("");
-  const [toProjectId, setToProjectId] = useState("");
-  const [toGodownId, setToGodownId] = useState<number | null>(null);
+  const [buyerId, setBuyerId] = useState<number | null>(null);
 
   const [items, setItems] = useState<SOItem[]>([emptyItem()]);
   const [remarks, setRemarks] = useState("");
@@ -809,21 +911,28 @@ export default function SaleOrder() {
         .map((p) => ({ value: String(p.id), label: p.label })),
     [allProjects, fromCompanyId],
   );
-  const toProjectOptions = useMemo(
-    () =>
-      allProjects
-        .filter((p) => String(p.company_id ?? "") === toCompanyId)
-        .map((p) => ({ value: String(p.id), label: p.label })),
-    [allProjects, toCompanyId],
-  );
+
+  // The buyer: any ledger — the Journal Voucher's list.
+  const { data: ledgerOptions = [] } = useQuery({
+    queryKey: ["jv-ledger-options"],
+    queryFn: getJournalVoucherLedgerOptions,
+    staleTime: 120_000,
+  });
+
+  // Each item's GST % from Item Master, the default for a new line.
+  const { data: itemMaster = [] } = useQuery({ queryKey: ["item-master-all"], queryFn: getItemMaster, staleTime: 300_000 });
+  const gstOf = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const i of itemMaster as any[]) {
+      const igst = Number(i.M_IGST) || 0;
+      m.set(String(i.M_Id).toLowerCase(), igst || (Number(i.M_CGST) || 0) + (Number(i.M_SGST) || 0));
+    }
+    return (itemId: string) => m.get(String(itemId).toLowerCase()) ?? 0;
+  }, [itemMaster]);
 
   const fromProjectGodowns = useMemo(
     () => allGodowns.filter((g) => String(g.ProjectID ?? "") === fromProjectId),
     [allGodowns, fromProjectId],
-  );
-  const toProjectGodowns = useMemo(
-    () => allGodowns.filter((g) => String(g.ProjectID ?? "") === toProjectId),
-    [allGodowns, toProjectId],
   );
 
   // Auto-resolve the godown once a project has exactly one linked godown.
@@ -837,14 +946,6 @@ export default function SaleOrder() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fromProjectId]);
 
-  useEffect(() => {
-    if (toProjectGodowns.length === 1) {
-      setToGodownId(toProjectGodowns[0].GodownID);
-    } else {
-      setToGodownId(null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [toProjectId]);
 
   const { data: fromStockData, isLoading: isLoadingStock } = useQuery({
     queryKey: ["inventory-master", today, fromGodownId],
@@ -870,15 +971,13 @@ export default function SaleOrder() {
     mutationFn: createSaleOrder,
     onSuccess: (res) => {
       setSuccessMsg(
-        `Sale order ${res.DocNo} created — ${fmtAmt(res.TotalAmount)} total.`,
+        `Sale order ${res.DocNo} created — ${fmtAmt(res.TotalAmount)} total, sent for approval.`,
       );
       setErrorMsg("");
       setFromCompanyId("");
       setFromProjectId("");
       setFromGodownId(null);
-      setToCompanyId("");
-      setToProjectId("");
-      setToGodownId(null);
+      setBuyerId(null);
       setItems([emptyItem()]);
       setRemarks("");
       qc.invalidateQueries({ queryKey: ["inventory-master"] });
@@ -896,13 +995,17 @@ export default function SaleOrder() {
     setItems((prev) => prev.filter((_, i) => i !== idx));
   const addItem = () => setItems((prev) => [...prev, emptyItem()]);
 
-  const totalAmount = useMemo(
+  const totals = useMemo(
     () =>
-      items.reduce((sum, it) => {
-        const q = parseFloat(it.qty) || 0;
-        const r = parseFloat(it.rate) || 0;
-        return sum + q * r;
-      }, 0),
+      items
+        .filter((it) => it.itemId)
+        .reduce(
+          (t, it) => {
+            const f = lineFigures(it);
+            return { basic: t.basic + f.basic, tax: t.tax + f.tax, total: t.total + f.total };
+          },
+          { basic: 0, tax: 0, total: 0 },
+        ),
     [items],
   );
 
@@ -919,24 +1022,10 @@ export default function SaleOrder() {
 
   const canSubmit =
     !!fromGodownId &&
-    !!toGodownId &&
-    fromGodownId !== toGodownId &&
+    !!buyerId &&
     hasValidItem &&
     !hasOverLimit &&
     !createMut.isPending;
-
-  const handleSwap = () => {
-    const fc = fromCompanyId,
-      fp = fromProjectId,
-      fg = fromGodownId;
-    setFromCompanyId(toCompanyId);
-    setFromProjectId(toProjectId);
-    setFromGodownId(toGodownId);
-    setToCompanyId(fc);
-    setToProjectId(fp);
-    setToGodownId(fg);
-    setItems([emptyItem()]);
-  };
 
   const handleSubmit = () => {
     setErrorMsg("");
@@ -948,16 +1037,14 @@ export default function SaleOrder() {
         qty: parseFloat(it.qty),
         uom: it.uom,
         rate: parseFloat(it.rate) || 0,
+        gstRate: parseFloat(it.gstRate) || 0,
         remarks: it.remarks,
-        glHeadId: it.glHeadId,
       }));
     createMut.mutate({
       FromCompanyID: parseInt(fromCompanyId),
       FromProjectID: parseInt(fromProjectId),
       FromGodownID: fromGodownId!,
-      ToCompanyID: parseInt(toCompanyId),
-      ToProjectID: parseInt(toProjectId),
-      ToGodownID: toGodownId!,
+      BuyerLHeadId: buyerId!,
       SaleItems: validItems,
       Remarks: remarks,
     });
@@ -967,18 +1054,12 @@ export default function SaleOrder() {
     setFromCompanyId("");
     setFromProjectId("");
     setFromGodownId(null);
-    setToCompanyId("");
-    setToProjectId("");
-    setToGodownId(null);
+    setBuyerId(null);
     setItems([emptyItem()]);
     setRemarks("");
     setErrorMsg("");
   };
 
-  const tabs = [
-    ...(rights.canCreate ? [{ value: "create" as const, label: <><Send size={12} /> New Sale Order</> }] : []),
-    { value: "history" as const, label: <><ClipboardList size={12} /> History</> },
-  ];
 
   // Columns of the items grid header (same spans as SOItemRow).
   const ITEM_HEAD: [string, string][] = [
@@ -987,7 +1068,8 @@ export default function SaleOrder() {
     ["Avail", "col-span-1"],
     ["Qty", "col-span-1"],
     ["UOM", "col-span-1"],
-    ["Rate", "col-span-2"],
+    ["Rate", "col-span-1"],
+    ["GST %", "col-span-1"],
     ["Amount", "col-span-2"],
     ["", "col-span-1"],
   ];
@@ -999,13 +1081,10 @@ export default function SaleOrder() {
       <SheetShell
         eyebrow="CivilierERP · Sales"
         title="Sale Order"
-        subtitle="Transfer items between company projects with a fixed sale rate"
+        subtitle="Sell our materials from a project godown to a buyer"
       >
-        <SheetTabs<"create" | "history"> tabs={tabs} value={activeTab} onChange={setActiveTab} />
-
-        {activeTab === "history" && <SaleOrderHistory />}
-
-        {activeTab === "create" && (
+        {/* The new-order form on top (for those who may create), the order list below it. */}
+        {rights.canCreate && (
           <div className="space-y-4">
             {successMsg && (
               <div className="px-4 py-3 bg-primary/10 text-primary border border-primary/30 flex items-center gap-2 text-sm">
@@ -1027,7 +1106,7 @@ export default function SaleOrder() {
             {/* ── From / To panels ─────────────────────────────────────────────── */}
             <div className="flex flex-col lg:flex-row items-stretch gap-3">
               <SidePanel
-                title="Source — From"
+                title="Sold from"
                 companyOptions={companyOptions}
                 companyId={fromCompanyId}
                 onCompanyChange={(v) => {
@@ -1044,35 +1123,18 @@ export default function SaleOrder() {
                 onGodownChange={setFromGodownId}
               />
 
-              <div className="flex items-center justify-center">
-                <button onClick={handleSwap} title="Swap source and destination" className={`${KEY_LINE} h-8 px-3`}>
-                  <ArrowLeftRight size={12} /> <span className="lg:hidden">Swap</span>
-                </button>
+              <div className="flex-1 min-w-0 bg-card border border-foreground p-4 space-y-3">
+                <p className={HR_HEAD}>Buyer</p>
+                <div className="space-y-1.5">
+                  <p className={LBL}>Sold to</p>
+                  <LedgerHeadPicker value={buyerId} options={ledgerOptions} onChange={setBuyerId} />
+                </div>
+                <p className="text-[0.6875rem] text-muted-foreground">
+                  Any ledger — a customer, a supplier, a project or a person. On approval the stock goes out of the godown and the
+                  sale is posted: the buyer is debited, and the selling company's own sales ledger and GST Output are credited.
+                </p>
               </div>
-
-              <SidePanel
-                title="Destination — To"
-                companyOptions={companyOptions}
-                companyId={toCompanyId}
-                onCompanyChange={(v) => {
-                  setToCompanyId(v);
-                  setToProjectId("");
-                  setToGodownId(null);
-                }}
-                projectOptions={toProjectOptions}
-                projectId={toProjectId}
-                onProjectChange={setToProjectId}
-                godowns={toProjectGodowns}
-                godownId={toGodownId}
-                onGodownChange={setToGodownId}
-              />
             </div>
-
-            {fromGodownId && toGodownId && fromGodownId === toGodownId && (
-              <p className="text-xs text-destructive flex items-center gap-1">
-                <AlertCircle size={11} /> Source and destination godown must be different.
-              </p>
-            )}
 
             {/* ── Items Table ───────────────────────────────────────────────────── */}
             {fromGodownId && (
@@ -1096,7 +1158,7 @@ export default function SaleOrder() {
               >
                 <div className="p-4 space-y-2">
                   <p className="text-xs text-muted-foreground mb-2">
-                    Search items available in the source godown, then set the sale rate
+                    Search items in stock in this godown, then set the rate and GST %
                   </p>
                   <div className="grid grid-cols-12 gap-2 px-3 mb-1">
                     {ITEM_HEAD.map(([h, span], i) => (
@@ -1115,6 +1177,7 @@ export default function SaleOrder() {
                       onRemove={removeItem}
                       availableItems={availableItems}
                       isLoadingStock={isLoadingStock}
+                      gstOf={gstOf}
                     />
                   ))}
 
@@ -1126,9 +1189,19 @@ export default function SaleOrder() {
                 </div>
 
                 <div className="px-4 py-4 border-t border-foreground space-y-3">
-                  <div className="flex items-baseline justify-end gap-3">
-                    <span className={LBL}>Total Sale Value</span>
-                    <span className={`text-lg font-bold text-foreground ${HR_NUM}`}>{fmtAmt(totalAmount)}</span>
+                  <div className="flex flex-col items-end gap-1">
+                    <div className="flex items-baseline gap-3">
+                      <span className={LBL}>Basic</span>
+                      <span className={`text-sm text-foreground ${HR_NUM}`}>{fmtAmt(totals.basic)}</span>
+                    </div>
+                    <div className="flex items-baseline gap-3">
+                      <span className={LBL}>GST</span>
+                      <span className={`text-sm text-foreground ${HR_NUM}`}>{fmtAmt(totals.tax)}</span>
+                    </div>
+                    <div className="flex items-baseline gap-3">
+                      <span className={LBL}>Total amount</span>
+                      <span className={`text-lg font-bold text-foreground ${HR_NUM}`}>{fmtAmt(totals.total)}</span>
+                    </div>
                   </div>
                   <div>
                     <label className={`${LBL} block mb-1.5`}>Remarks</label>
@@ -1166,14 +1239,18 @@ export default function SaleOrder() {
 
             {!fromGodownId && (
               <div className="border border-dashed border-foreground/30 py-16 text-center">
-                <p className="text-sm text-foreground">Select a source company, project and godown to begin</p>
+                <p className="text-sm text-foreground">Select the company, project and godown you are selling from</p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Then pick the destination side and add items with a rate
+                  Then pick the buyer and add items with a rate and GST %
                 </p>
               </div>
             )}
           </div>
         )}
+
+        <div className={rights.canCreate ? "mt-6" : ""}>
+          <SaleOrderHistory />
+        </div>
       </SheetShell>
     </>
   );

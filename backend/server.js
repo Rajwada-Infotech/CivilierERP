@@ -170,6 +170,7 @@ const ALL_ROUTES = [
   { path: "/api/dpr-tag-master", file: "./routes/dprTagMaster" },
   { path: "/api/dpr-floor-master", file: "./routes/dprFloorMaster" },
   { path: "/api/engineering-activity-master", file: "./routes/engineeringActivityMaster" },
+  { path: "/api/equipment-master", file: "./routes/equipmentMaster" },
   { path: "/api/bank-master", file: "./routes/bankMaster" },
   { path: "/api/partner-master", file: "./routes/partnerMaster" },
   { path: "/api/billing-terms", file: "./routes/billingTerms" },

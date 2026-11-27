@@ -9,13 +9,15 @@ const { projectPredicate, projectParamGuard, assertProjectAllowed } = require(".
 // Any :id route — refuse a stock update whose project is outside the user's scope.
 router.param("id", projectParamGuard("SELECT ProjectId FROM dbo.StockUpdate WHERE StockUpdateId = @id"));
 const authenticateToken = require("../middleware/auth");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requireAnyPageRight } = require("../middleware/requirePageRight");
+// Material → Stock Update and Sales → Setup → Stock Update are the same entry, one stock ledger; either right lets you in.
+const STOCK_UPDATE_PAGES = ["stock-update", "sales-stock-update"];
 const allowRoles = require("../middleware/role");
 const { bumpCacheVersion } = require("../redis");
 const { parseId } = require("../middleware/validateRequest");
 
 // GET / — history of stock updates, newest first.
-router.get("/", authenticateToken, requirePageRight("stock-update", "view"), async (req, res) => {
+router.get("/", authenticateToken, requireAnyPageRight(STOCK_UPDATE_PAGES, "view"), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -40,7 +42,7 @@ router.get("/", authenticateToken, requirePageRight("stock-update", "view"), asy
 });
 
 // GET /:id — one update with its items.
-router.get("/:id", authenticateToken, requirePageRight("stock-update", "view"), async (req, res) => {
+router.get("/:id", authenticateToken, requireAnyPageRight(STOCK_UPDATE_PAGES, "view"), async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
@@ -72,7 +74,7 @@ router.get("/:id", authenticateToken, requirePageRight("stock-update", "view"), 
 
 // POST / — save: header + items + a StockLedger IN row per item, in one
 // transaction so the ledger can never get ahead of (or behind) the record.
-router.post("/", authenticateToken, requirePageRight("stock-update", "create"), async (req, res) => {
+router.post("/", authenticateToken, requireAnyPageRight(STOCK_UPDATE_PAGES, "create"), async (req, res) => {
   const { UpdateDate, CompanyId, ProjectId, GodownId, Remarks, items } = req.body || {};
   if (!assertProjectAllowed(req, res, ProjectId)) return;
   const companyId = parseInt(CompanyId, 10);
@@ -171,7 +173,7 @@ router.post("/", authenticateToken, requirePageRight("stock-update", "create"), 
 // but only after checking every item whose quantity is being reduced or
 // removed still leaves that item's godown balance non-negative, same
 // safety check DELETE below already applies to a full removal.
-router.put("/:id", authenticateToken, requirePageRight("stock-update", "edit"), async (req, res) => {
+router.put("/:id", authenticateToken, requireAnyPageRight(STOCK_UPDATE_PAGES, "edit"), async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid id" });
   const { UpdateDate, Remarks, items } = req.body || {};

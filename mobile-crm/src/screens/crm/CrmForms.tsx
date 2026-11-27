@@ -6,11 +6,11 @@
 //   NewTicketScreen    raise a service ticket on a booking (crmServiceTickets.js POST /)
 // NotePrompt is the small "why / what was done" box the ticket screen uses.
 import { useEffect, useRef, useState, useCallback } from "react";
-import { ActivityIndicator, Linking, Modal, Pressable, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, KeyboardAvoidingView, Linking, Modal, Platform, Pressable, ScrollView, Switch, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { Check, FileText, Phone, Search, Square, User } from "lucide-react-native";
+import { BellRing, Check, FileText, Pause, Phone, Play, Search, Square, User } from "lucide-react-native";
 import { useAuth } from "@/auth/AuthContext";
 import { fetchWithAuth } from "@/services/fetchWithAuth";
 import { crmGet, crmSend, getBookingPayments, type Row } from "@/api/crmApi";
@@ -24,6 +24,7 @@ import { openDocument } from "@/utils/documents";
 import type { MainStackParamList } from "@/navigation/MainStack";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
+import { useBrand } from "@/theme/ThemeContext";
 import { CERT_STATUS_LABEL, CERT_TYPE_LABEL, OUTCOME_LABEL, WELCOME_OUTCOMES } from "./crmRegisters";
 import { ActionKey, CRM, Empty, Kv, LinkRow, Pill, Section, fmtDate, joinDot, money, words } from "./ui";
 import * as DocumentPicker from "expo-document-picker";
@@ -3497,5 +3498,353 @@ export function CrmAutoProjectSetupScreen() {
         selectedKey={projectId} onSelect={(k) => { setProjectId(k ?? ""); setProjPick(false); }}
         onClose={() => setProjPick(false)} />
     </ScrollView>
+  );
+}
+
+// ── Booking Reminders ──────────────────────────────────────────────────────────────────────────────────────────────
+// Shows this booking's active reminders (name, reminder number, last sent, escalated), the current pause if any,
+// and Pause / Resume actions — the same routes and logic as the web's BookingReminders (CrmReminderSetup.tsx).
+// Renders nothing when no reminders are running or paused for this booking.
+const API_REM = "/api/crm/reminders";
+const fmtReminderTime = (d: unknown): string => {
+  if (!d) return "—";
+  const dt = new Date(String(d));
+  if (isNaN(dt.getTime())) return "—";
+  return dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) + " " +
+    dt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+};
+
+export function BookingRemindersSection({ bookingId, canEdit, bookingNo }: { bookingId: number; canEdit: boolean; bookingNo?: string }) {
+  const b = useBrand();
+  const qc = useQueryClient();
+  const [pausing, setPausing] = useState(false);
+  const [reason, setReason] = useState("");
+  const [hasEndDate, setHasEndDate] = useState(false);
+  const [until, setUntil] = useState<string>("");
+  const [busy, setBusy] = useState(false);
+  const [sending, setSending] = useState(false);
+
+  const liveQ = useQuery<{ rows: Row[] }>({
+    queryKey: ["crm-reminder-live", bookingId],
+    queryFn: () => crmGet(`${API_REM}/live?bookingId=${bookingId}`),
+    enabled: bookingId > 0,
+    retry: false,
+  });
+  const pausesQ = useQuery<{ rows: Row[] }>({
+    queryKey: ["crm-reminder-pauses", bookingId],
+    queryFn: () => crmGet(`${API_REM}/pauses?bookingId=${bookingId}`),
+    enabled: bookingId > 0,
+    retry: false,
+  });
+
+  const recentQ = useQuery<{ rows: RecentSend[] }>({
+    queryKey: ["crm-reminder-recent", bookingId],
+    queryFn: () => crmGet(`${API_REM}/recent?bookingId=${bookingId}`),
+    enabled: bookingId > 0,
+    retry: false,
+  });
+  const lastSend = recentQ.data?.rows?.[0];
+  const loading = liveQ.isLoading || pausesQ.isLoading;
+  const live: Row[] = liveQ.data?.rows ?? [];
+  const activePause: Row | undefined = (pausesQ.data?.rows ?? []).find((p: Row) => p.IsLive);
+
+  // Don't render until we know there is something to show; silently handle query errors.
+  if (loading || (!live.length && !activePause && !canEdit)) return null;
+
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["crm-reminder-live", bookingId] });
+    qc.invalidateQueries({ queryKey: ["crm-reminder-pauses", bookingId] });
+  };
+
+  const doPause = async () => {
+    if (busy) return;
+    if (!reason.trim()) { toast.error("Say why the reminders are paused."); return; }
+    setBusy(true);
+    try {
+      await crmSend(`${API_REM}/pauses`, "POST", { BookingId: bookingId, RuleId: null, Reason: reason, PausedUntil: (hasEndDate && until) || null });
+      toast.success("Reminders paused");
+      setPausing(false); setReason(""); setHasEndDate(false); setUntil("");
+      refresh();
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  const doResume = async () => {
+    if (!activePause || busy) return;
+    setBusy(true);
+    try {
+      await crmSend(`${API_REM}/pauses/${activePause.Id}/end`, "PUT");
+      toast.success("Reminders resumed");
+      refresh();
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  const cancelPause = () => { if (busy) return; setPausing(false); setReason(""); setHasEndDate(false); setUntil(""); };
+  const sendKey = canEdit ? (
+    <View style={{ flexDirection: "row", marginTop: 8 }}>
+      <ActionKey outline label="Send reminder" icon={BellRing} onPress={() => setSending(true)} />
+    </View>
+  ) : null;
+
+  const noRight = bookingNo ? (
+    <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: b.textFaint }}>{bookingNo}</Text>
+  ) : undefined;
+
+  return (
+    <Section title="Reminders" icon={BellRing} right={noRight}>
+      {sending ? <SendReminderSheet bookingId={bookingId} onClose={() => setSending(false)} /> : null}
+      {!live.length && !activePause ? (
+        <Text style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: b.textSecondary }}>No automatic reminder is running for this booking.</Text>
+      ) : null}
+      {lastSend ? (
+        <Text style={{ fontSize: 12, fontFamily: lastSend.Today ? fonts.body.medium : fonts.body.regular, color: lastSend.Today ? b.textPrimary : b.textSecondary, marginBottom: 4 }}>
+          {`Last reminded: ${recentLine(lastSend)}${lastSend.Today ? " (today)" : ""}`}
+        </Text>
+      ) : null}
+      {/* Active pause banner */}
+      {activePause ? (
+        <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10,
+          backgroundColor: b.warningSoft, borderRadius: 10, padding: 12, marginBottom: 4 }}>
+          <Pause size={14} color={b.warning} style={{ marginTop: 2 }} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 13, fontFamily: fonts.heading.semibold, color: b.warning }}>
+              {"Paused"}{activePause.PausedUntil ? ` until ${fmtDate(String(activePause.PausedUntil))}` : " indefinitely"}
+            </Text>
+            {activePause.Reason ? (
+              <Text style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: b.warning, marginTop: 3 }}>
+                {String(activePause.Reason)}
+              </Text>
+            ) : null}
+            {activePause.PausedByName ? (
+              <Text style={{ fontSize: 11.5, fontFamily: fonts.body.regular, color: b.textFaint, marginTop: 3 }}>
+                {"Paused by "}{String(activePause.PausedByName)}
+              </Text>
+            ) : null}
+          </View>
+        </View>
+      ) : null}
+
+      {/* One row per running reminder rule */}
+      {live.map((x: Row, i: number) => (
+        <View key={`${x.RuleId}-${x.EntityKey}`}
+          style={{ paddingVertical: 10, borderTopWidth: i === 0 && !activePause ? 0 : 1, borderTopColor: colors.border }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            <Text style={{ fontSize: 13.5, fontFamily: fonts.heading.semibold, color: b.textPrimary }}>
+              {String(x.RuleName || "Reminder")}
+            </Text>
+            <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, backgroundColor: b.accentSoft }}>
+              <Text style={{ fontSize: 11.5, fontFamily: fonts.heading.semibold, color: b.accent, fontVariant: ["tabular-nums"] }}>
+                {"Reminder #"}{x.ReminderNo ?? "—"}
+              </Text>
+            </View>
+            {x.Escalated ? (
+              <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, backgroundColor: `${colors.destructive}1f` }}>
+                <Text style={{ fontSize: 11.5, fontFamily: fonts.heading.semibold, color: colors.destructive }}>Escalated</Text>
+              </View>
+            ) : null}
+            {x.SentToday ? (
+              <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, backgroundColor: `${b.success}1f` }}>
+                <Text style={{ fontSize: 11.5, fontFamily: fonts.heading.semibold, color: b.success }}>Sent today</Text>
+              </View>
+            ) : null}
+          </View>
+          <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: b.textSecondary, marginTop: 4 }}>
+            {`Last sent ${fmtReminderTime(x.LastAt)}`}
+            {x.RemindersSent != null ? ` · ${x.RemindersSent} sent` : ""}
+            {x.Deliveries != null ? `, ${x.Deliveries} deliveries` : ""}
+            {Number(x.Problems) > 0 ? ` · ${x.Problems} problem${Number(x.Problems) === 1 ? "" : "s"}` : ""}
+          </Text>
+        </View>
+      ))}
+
+      {/* Pause / Resume */}
+      {canEdit ? (
+        activePause ? (
+          <View style={{ flexDirection: "row", marginTop: 8, opacity: busy ? 0.5 : 1 }}>
+            <ActionKey outline label={busy ? "Resuming…" : "Resume reminders"} icon={Play} onPress={doResume} />
+          </View>
+        ) : pausing ? (
+          <View style={{ marginTop: 8, gap: 10 }}>
+            <RemarksField label="Reason" required value={reason} onChangeText={setReason}
+              placeholder="Why pause? e.g. Customer on an agreed payment plan" />
+            {/* "Pause until" is opt-in: toggle it on to pick an end date; leave off for indefinite */}
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+              paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+              <Text style={{ fontSize: 13.5, fontFamily: fonts.body.regular, color: b.textPrimary }}>Resume automatically on a date</Text>
+              <Switch value={hasEndDate} onValueChange={(v) => { setHasEndDate(v); if (!v) setUntil(""); }}
+                trackColor={{ false: colors.border, true: b.accent }} thumbColor="#fff" />
+            </View>
+            {hasEndDate ? (
+              <DateField label="Resume on" value={until || null} onChange={(d) => setUntil(d)} />
+            ) : (
+              <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: b.textFaint }}>
+                {"Paused indefinitely — someone must manually resume. The booking stays pending; nothing is sent while paused."}
+              </Text>
+            )}
+            <View style={{ flexDirection: "row", gap: 8, opacity: busy ? 0.5 : 1 }}>
+              <ActionKey outline label="Cancel" onPress={cancelPause} />
+              <ActionKey label={busy ? "Pausing…" : "Pause"} onPress={doPause} />
+            </View>
+          </View>
+        ) : live.length ? (
+          <View style={{ flexDirection: "row", marginTop: 8 }}>
+            <ActionKey outline label="Pause reminders" icon={Pause} onPress={() => setPausing(true)} />
+          </View>
+        ) : null
+      ) : null}
+      {pausing ? null : sendKey}
+    </Section>
+  );
+}
+
+// ── Send a reminder by hand ─────────────────────────────────────────────────────────────────────────────────────────
+// The same server routes and wording as the web's SendReminderDialog (CrmReminderSetup.tsx): suggestions from this
+// booking's active reminders with its own figures, or a message written here; {fields} filled from the booking.
+const CHANNEL_LABEL: Record<string, string> = { App: "Customer app", SMS: "SMS", WhatsApp: "WhatsApp", Email: "E-mail" };
+type Compose = {
+  booking: { id: number; bookingNo: string; customer: string; project: string; unit: string };
+  contact: { mobile: string | null; email: string | null };
+  facts: Record<string, string | number>; channels: string[]; ready: Record<string, boolean>;
+  suggestions: { ruleId: number; ruleName: string; reminderNo: number; overdueDays: number | null; title: string; body: string; facts: Record<string, string | number> }[];
+  recent: RecentSend[];
+};
+type RecentSend = { At: string; Kind: "Automatic" | "By hand"; Name: string | null; Detail: string | null; ByName: string | null; Today: boolean };
+const recentLine = (r: RecentSend) => `${fmtReminderTime(r.At)} · ${r.Kind === "By hand" ? `by hand${r.ByName ? ` (${r.ByName})` : ""}` : `${r.Name || "automatic"} · ${CHANNEL_LABEL[r.Detail || ""] || r.Detail || ""}`}`;
+// An SMS is 160 characters (70 with Indian-language letters); longer ones go as several, each charged.
+const smsParts = (t: string) => { const uni = /[^\x00-\x7F]/.test(t); const one = uni ? 70 : 160, many = uni ? 67 : 153; return t.length <= one ? 1 : Math.ceil(t.length / many); };
+const fillFields = (text: string, facts: Record<string, unknown>) => text.replace(/\{(\w+)\}/g, (all, k) => (facts[k] != null && facts[k] !== "" ? String(facts[k]) : all));
+
+export function SendReminderSheet({ bookingId, onClose }: { bookingId: number; onClose: () => void }) {
+  const b = useBrand();
+  const qc = useQueryClient();
+  const q = useQuery<Compose>({ queryKey: ["crm-reminder-compose", bookingId], queryFn: () => crmGet(`${API_REM}/compose?bookingId=${bookingId}`), retry: false });
+  const [pick, setPick] = useState<number | "own" | null>(null);
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [channels, setChannels] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const d = q.data;
+  const reach = (ch: string): string | null => {
+    if (!d) return null;
+    if (!d.ready[ch]) return `${CHANNEL_LABEL[ch] || ch} is not set up in Communicator`;
+    if (ch === "Email" && !d.contact.email) return "No e-mail on record";
+    if ((ch === "SMS" || ch === "WhatsApp") && !d.contact.mobile) return "No mobile on record";
+    return null;
+  };
+  useEffect(() => {
+    if (!d || pick !== null) return;
+    const first = d.suggestions[0];
+    setPick(first ? 0 : "own");
+    if (first) { setTitle(first.title); setBody(first.body); }
+    setChannels(d.channels.filter((c) => !reach(c)));
+  }, [d]); // eslint-disable-line react-hooks/exhaustive-deps
+  const choose = (i: number | "own") => {
+    setPick(i);
+    if (i === "own" || !d) { setTitle(""); setBody(""); return; }
+    setTitle(d.suggestions[i].title); setBody(d.suggestions[i].body);
+  };
+  const facts = { ...(d?.facts || {}), ...(typeof pick === "number" ? d?.suggestions[pick]?.facts : d?.suggestions[0]?.facts) };
+  const go = async () => {
+    if (!d || busy) return;
+    setBusy(true);
+    try {
+      const out = await crmSend<{ results: { channel: string; status: string; detail?: string }[] }>(`${API_REM}/send`, "POST",
+        { bookingId, channels, title, body, ruleId: typeof pick === "number" ? d.suggestions[pick].ruleId : null });
+      const sent = out.results.filter((r) => r.status === "Sent").map((r) => CHANNEL_LABEL[r.channel] || r.channel);
+      const missed = out.results.filter((r) => r.status !== "Sent").map((r) => `${CHANNEL_LABEL[r.channel] || r.channel}: ${r.detail || r.status}`);
+      if (sent.length) { toast.success(`Reminder sent on ${sent.join(", ")}${missed.length ? ` · ${missed.join(" · ")}` : ""}`); qc.invalidateQueries({ queryKey: ["crm-reminder-live", bookingId] }); qc.invalidateQueries({ queryKey: ["crm-reminder-recent", bookingId] }); qc.invalidateQueries({ queryKey: ["crm-reminder-compose", bookingId] }); onClose(); }
+      else toast.error(`Not sent · ${missed.join(" · ")}`);
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  const box = (on: boolean) => ({ borderWidth: 1, borderRadius: 12, padding: 12, borderColor: on ? b.accent : colors.border, backgroundColor: on ? b.accentSoft : "transparent" });
+  const input = { borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 12, color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 13.5 };
+  const can = !!d && channels.length > 0 && !!title.trim() && !!body.trim() && !busy;
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", padding: 16 }}>
+        <View style={{ maxHeight: "92%", backgroundColor: colors.card, borderRadius: 18, borderWidth: 1, borderColor: colors.border }}>
+          <ScrollView contentContainerStyle={{ padding: 18, gap: 10 }} keyboardShouldPersistTaps="handled">
+            <Text style={{ fontSize: 16, fontFamily: fonts.heading.bold, color: colors.foreground }}>{`Send a reminder${d ? ` · ${d.booking.bookingNo}` : ""}`}</Text>
+            <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>
+              {d ? `${d.booking.customer} · ${[d.booking.project, d.booking.unit].filter(Boolean).join(" · ")}` : "To the booking's customer."}
+            </Text>
+            {q.isLoading ? <ActivityIndicator color={CRM} /> : null}
+            {q.isError ? <Text style={{ fontSize: 12.5, color: colors.destructive }}>{(q.error as Error).message}</Text> : null}
+            {d ? (<>
+              {d.recent.some((x) => x.Today) ? (
+                <View style={{ borderRadius: 12, padding: 12, backgroundColor: b.warningSoft }}>
+                  <Text style={{ fontSize: 13, fontFamily: fonts.heading.semibold, color: b.warning }}>Already reminded today</Text>
+                  {d.recent.filter((x) => x.Today).map((x, i) => <Text key={i} style={{ fontSize: 12, fontFamily: fonts.body.regular, color: b.warning, marginTop: 2 }}>{recentLine(x)}</Text>)}
+                </View>
+              ) : null}
+              <Text style={{ fontSize: 13, fontFamily: fonts.heading.semibold, color: colors.foreground, marginTop: 4 }}>1. What to say</Text>
+              {d.suggestions.map((s, i) => (
+                <Pressable key={s.ruleId} onPress={() => choose(i)} style={box(pick === i)}>
+                  <Text style={{ fontSize: 13, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{s.ruleName}</Text>
+                  <Text style={{ fontSize: 11.5, fontFamily: fonts.body.regular, color: colors.mutedForeground, fontVariant: ["tabular-nums"] }}>
+                    {`Reminder ${s.reminderNo}${s.overdueDays ? ` · ${s.overdueDays} days overdue` : ""}`}
+                  </Text>
+                  <Text numberOfLines={2} style={{ fontSize: 12, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 4 }}>{s.body}</Text>
+                </Pressable>
+              ))}
+              <Pressable onPress={() => choose("own")} style={box(pick === "own")}>
+                <Text style={{ fontSize: 13, fontFamily: fonts.heading.semibold, color: colors.foreground }}>Write my own</Text>
+              </Pressable>
+              {!d.suggestions.length ? (
+                <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>Nothing is pending for this booking under the reminders set up — write your own message.</Text>
+              ) : null}
+              <TextInput value={title} onChangeText={setTitle} maxLength={200} placeholder="Title" placeholderTextColor={`${colors.mutedForeground}99`} style={input} />
+              <TextInput value={body} onChangeText={setBody} maxLength={1000} multiline placeholder="Message" placeholderTextColor={`${colors.mutedForeground}99`}
+                style={{ ...input, minHeight: 110, textAlignVertical: "top" }} />
+              <Text style={{ fontSize: 11, fontFamily: fonts.body.regular, color: colors.mutedForeground, textAlign: "right", fontVariant: ["tabular-nums"] }}>
+                {`${fillFields(body, facts).length}/1000${channels.includes("SMS") ? ` · SMS: ${smsParts(fillFields(body, facts))} part${smsParts(fillFields(body, facts)) === 1 ? "" : "s"}` : ""}`}
+              </Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                {Object.keys(facts).map((k) => (
+                  <Pressable key={k} onPress={() => setBody((t) => `${t}{${k}}`)} style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: colors.border }}>
+                    <Text style={{ fontSize: 11.5, color: colors.mutedForeground }}>{`{${k}}`}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              {/\{\w+\}/.test(`${title}${body}`) ? (
+                <View style={{ borderRadius: 12, padding: 12, backgroundColor: b.accentSoft }}>
+                  <Text style={{ fontSize: 11, fontFamily: fonts.body.medium, color: colors.mutedForeground, textTransform: "uppercase" }}>The customer reads</Text>
+                  <Text style={{ fontSize: 13, fontFamily: fonts.heading.semibold, color: colors.foreground, marginTop: 4 }}>{fillFields(title, facts)}</Text>
+                  <Text style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: colors.foreground, marginTop: 2 }}>{fillFields(body, facts)}</Text>
+                </View>
+              ) : null}
+              <Text style={{ fontSize: 13, fontFamily: fonts.heading.semibold, color: colors.foreground, marginTop: 4 }}>2. Where to send it</Text>
+              {d.channels.map((ch) => {
+                const why = reach(ch);
+                const on = channels.includes(ch) && !why;
+                return (
+                  <Pressable key={ch} disabled={!!why} onPress={() => setChannels((c) => (c.includes(ch) ? c.filter((x) => x !== ch) : [...c, ch]))}
+                    style={{ ...box(on), flexDirection: "row", gap: 10, alignItems: "center", opacity: why ? 0.55 : 1 }}>
+                    {on ? <Check size={16} color={b.accent} /> : <Square size={16} color={colors.mutedForeground} />}
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 13, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{CHANNEL_LABEL[ch] || ch}</Text>
+                      <Text style={{ fontSize: 11.5, color: colors.mutedForeground }}>{why || (ch === "Email" ? d.contact.email : ch === "App" ? "Customer's phone, if signed in" : d.contact.mobile)}</Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+              {d.recent.length > 0 && !d.recent.every((x) => x.Today) ? (
+                <Text style={{ fontSize: 11.5, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>{`Last reminded: ${recentLine(d.recent[0])}`}</Text>
+              ) : null}
+            </>) : null}
+            <View style={{ flexDirection: "row", gap: 10, marginTop: 6 }}>
+              <Pressable onPress={onClose} style={{ flex: 1, alignItems: "center", paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.border }}>
+                <Text style={{ fontSize: 13, fontFamily: fonts.heading.semibold, color: colors.foreground }}>Cancel</Text>
+              </Pressable>
+              <Pressable disabled={!can} onPress={go} style={{ flex: 1, alignItems: "center", paddingVertical: 12, borderRadius: 12, backgroundColor: CRM, opacity: can ? 1 : 0.5 }}>
+                {busy ? <ActivityIndicator color="#fff" /> : <Text style={{ fontSize: 13, fontFamily: fonts.heading.semibold, color: "#fff" }}>Send Reminder</Text>}
+              </Pressable>
+            </View>
+          </ScrollView>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
   );
 }

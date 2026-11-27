@@ -9,7 +9,7 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { parseId } = require("../middleware/validateRequest");
-const { loadSituations, situationList, SCHEMA_MIGRATIONS, runReminders, checkRule, resendLog, businessOffsetMinutes, businessDate, schemaReady } = require("../services/crmReminderEngine");
+const { loadSituations, situationList, SCHEMA_MIGRATIONS, runReminders, checkRule, resendLog, businessOffsetMinutes, businessDate, schemaReady, composeForBooking, sendByHand, recentCustomerReminders, HAND_CHANNELS } = require("../services/crmReminderEngine");
 const { messagingStatus, PROVIDER_CHANNEL } = require("../services/messageProviders");
 const { crmProjectGuards, projectPredicate, assertBookingAllowed, assertProjectAllowed } = require("../services/projectScope");
 
@@ -535,6 +535,54 @@ router.post("/pauses", requireAnyPageRight(BOOKING_PAGES, "edit"), async (req, r
     await audit(getPool(), { ruleId, bookingId, action: "Paused", detail: reason.slice(0, 500), by: actorId(req) });
     res.status(201).json({ success: true, id: r.recordset[0].Id });
   } catch (e) { fail(res, e, "POST /pauses"); }
+});
+
+// ── Send a reminder by hand (Bookings list row, a booking's Reminders section) ──────────────────────────────────────
+const SEND_PAGES = [...BOOKING_PAGES, "crm-bookings"];
+router.get("/compose", requireAnyPageRight(SEND_PAGES, "view"), async (req, res) => {
+  const bookingId = parseId(String(req.query.bookingId ?? ""));
+  if (bookingId === null) return res.status(400).json({ error: "Choose the booking." });
+  try {
+    if (!(await assertBookingAllowed(req, res, bookingId))) return;
+    const c = await composeForBooking(bookingId);
+    if (!c) return res.status(404).json({ error: "Booking not found" });
+    let ready = {};
+    try {
+      const status = await messagingStatus();
+      ready = Object.fromEntries(Object.entries(PROVIDER_CHANNEL).map(([ch, key]) => [ch, !!status.find((x) => x.channel === key)?.ready]));
+    } catch (e) { console.error("[crm-reminders] messaging status:", e.message); }
+    res.json({ ...c, ready: { App: true, ...ready } });
+  } catch (e) { fail(res, e, "GET /compose"); }
+});
+
+router.get("/recent", requireAnyPageRight(SEND_PAGES, "view"), async (req, res) => {
+  const bookingId = parseId(String(req.query.bookingId ?? ""));
+  if (bookingId === null) return res.status(400).json({ error: "Choose the booking." });
+  try {
+    if (!(await assertBookingAllowed(req, res, bookingId))) return;
+    res.json({ rows: await recentCustomerReminders(getPool(), bookingId, 3) });
+  } catch (e) { fail(res, e, "GET /recent"); }
+});
+
+router.post("/send", requireAnyPageRight(SEND_PAGES, "edit"), async (req, res) => {
+  const b = req.body || {};
+  const bookingId = parseId(String(b.bookingId ?? ""));
+  const channels = [...new Set(Array.isArray(b.channels) ? b.channels : [])];
+  const title = String(b.title || "").trim(), body = String(b.body || "").trim();
+  if (bookingId === null) return res.status(400).json({ error: "Choose the booking." });
+  if (!channels.length || channels.some((c) => !HAND_CHANNELS.includes(c))) return res.status(400).json({ error: `Choose where to send it: ${HAND_CHANNELS.join(", ")}.` });
+  if (!title || !body) return res.status(400).json({ error: "Write the title and the message." });
+  if (title.length > 200 || body.length > 1000) return res.status(400).json({ error: "The title is at most 200 characters and the message 1000." });
+  try {
+    if (!(await assertBookingAllowed(req, res, bookingId))) return;
+    const ruleId = b.ruleId ? parseId(String(b.ruleId)) : null;
+    const out = await sendByHand({ bookingId, channels, title, body, ruleId });
+    if (out.error) return res.status(out.status).json({ error: out.error });
+    const detail = out.result.results.map((r) => `${r.channel}: ${r.status === "NotSent" ? "Not sent" : r.status}`).join(" · ");
+    await audit(getPool(), { ruleId, bookingId, action: "Sent by hand", detail: `${out.result.title} — ${detail}`.slice(0, 500),
+      snapshot: out.result, by: actorId(req) });
+    res.json({ success: true, ...out.result });
+  } catch (e) { fail(res, e, "POST /send"); }
 });
 
 router.put("/pauses/:id/end", requireAnyPageRight(BOOKING_PAGES, "edit"), async (req, res) => {

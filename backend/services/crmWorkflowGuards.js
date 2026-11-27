@@ -264,6 +264,20 @@ async function validateAgreementPreparationPrerequisites(pool, bookingId) {
  * Call sites: crmWelcomeCalls.js (after Outcome='Welcomed') and
  * crmCustomerBankDetails.js (after details saved).
  */
+/** Catch-up: every approved booking with no agreement whose prerequisites are all met gets it now. Returns how many. */
+async function startReadyAgreements(pool) {
+  const rows = (await pool.request().query(`
+    SELECT b.Id FROM dbo.CrmBooking b
+    WHERE b.IsActive = 1 AND b.Status = N'Approved'
+      AND NOT EXISTS (SELECT 1 FROM dbo.CrmAgreement g WHERE g.BookingId = b.Id AND g.Status <> 'Cancelled')`)).recordset;
+  let started = 0;
+  for (const { Id } of rows) {
+    try { if (await maybeAutoCreateAgreement(pool, Id, null)) started++; }
+    catch (e) { console.error(`[startReadyAgreements] booking ${Id}:`, e.message); }
+  }
+  return started;
+}
+
 async function maybeAutoCreateAgreement(pool, bookingId, actorUserId) {
   const existing = await pool.request().input("bid", sql.Int, bookingId)
     .query("SELECT Id FROM dbo.CrmAgreement WHERE BookingId = @bid AND Status <> 'Cancelled'");
@@ -1467,6 +1481,7 @@ module.exports = { AGREEMENT_STEP_KEYS, agreementStepConditions, agreementStepFl
   resolveOcCcGate,
   validateAgreementPreparationPrerequisites,
   maybeAutoCreateAgreement,
+  startReadyAgreements,
   maybeAutoCreateLegalMilestone,
   maybeAutoCreateSalesDeed, requestStandingSaleDeedDocument,
   getProjectSaleGate,
