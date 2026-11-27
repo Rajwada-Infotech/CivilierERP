@@ -730,20 +730,38 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                               </span>
                             );
                           }
+                          // Number on top, its unit underneath (clipped with "…" if long) so it stays inside the
+                          // column — "METRIC TON / activity unit" on one line used to run into the UOM column.
+                          const per = `${row.uomName || ""} / ${act.uomName ? String(act.uomName).toLowerCase() : "activity unit"}`.trim();
                           return (
                             <span
-                              title={`${fmtQty(q)} ÷ ${fmtQty(basis.value)} (activity qty)`}
-                              style={{
-                                fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
-                                fontVariantNumeric: "tabular-nums",
-                                fontSize: 12.5,
-                                fontWeight: 600,
-                                color: "hsl(var(--foreground))",
-                              }}
+                              title={`${fmtQty(q)} ÷ ${fmtQty(basis.value)} (activity qty) = ${fmtQty(q / basis.value)} ${per}`}
+                              style={{ display: "block", minWidth: 0, lineHeight: 1.25 }}
                             >
-                              {fmtQty(q / basis.value)}
-                              <span style={{ fontSize: 9.5, fontWeight: 500, color: "hsl(var(--muted-foreground))" }}>
-                                {` ${row.uomName || ""} / activity unit`}
+                              <span
+                                style={{
+                                  display: "block",
+                                  fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
+                                  fontVariantNumeric: "tabular-nums",
+                                  fontSize: 12.5,
+                                  fontWeight: 600,
+                                  color: "hsl(var(--foreground))",
+                                }}
+                              >
+                                {fmtQty(q / basis.value)}
+                              </span>
+                              <span
+                                style={{
+                                  display: "block",
+                                  fontSize: 9.5,
+                                  fontWeight: 500,
+                                  color: "hsl(var(--muted-foreground))",
+                                  whiteSpace: "nowrap",
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                }}
+                              >
+                                {per}
                               </span>
                             </span>
                           );
