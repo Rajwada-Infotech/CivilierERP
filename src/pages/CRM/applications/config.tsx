@@ -77,6 +77,22 @@ export const PAGE_SIZE = 20;
 export interface ApplicationListFilters {
   search: string; status: string; displayStage: string;
   companyId: string; projectId: string; blockId: string;
+  sortKey?: string; sortDir?: "asc" | "desc";
+  focus?: string;
+}
+
+// What an in-process application is waiting on: the server's APPLICATION_FOCUS keys, in the order they are worked.
+export const FOCUS_KEYS = ["draft", "noProperty", "unitUnavailable", "readyToBook", "inApproval"] as const;
+export type FocusKey = (typeof FOCUS_KEYS)[number];
+export async function fetchFocusCounts(filters: Omit<ApplicationListFilters, "displayStage" | "focus">): Promise<Record<FocusKey, number> | null> {
+  const q = new URLSearchParams();
+  if (filters.search) q.set("search", filters.search);
+  if (filters.status && filters.status !== "All") q.set("status", filters.status);
+  if (filters.companyId) q.set("companyId", filters.companyId);
+  if (filters.projectId) q.set("projectId", filters.projectId);
+  if (filters.blockId) q.set("blockId", filters.blockId);
+  const res = await fetchWithAuth(`${API}/focus-counts?${q}`);
+  return res.ok ? res.json() : null;
 }
 
 // The management page's own paginated list — server-side filtered on
@@ -95,6 +111,8 @@ export async function fetchApplicationsList(filters: ApplicationListFilters, pag
   if (filters.companyId) q.set("companyId", filters.companyId);
   if (filters.projectId) q.set("projectId", filters.projectId);
   if (filters.blockId) q.set("blockId", filters.blockId);
+  if (filters.sortKey) { q.set("sortKey", filters.sortKey); q.set("sortDir", filters.sortDir || "desc"); }
+  if (filters.focus) q.set("focus", filters.focus);
   // Throws, so a failed load shows as one instead of an empty list.
   const res = await fetchWithAuth(`${API}?${q}`);
   const data = await res.json().catch(() => ({}));

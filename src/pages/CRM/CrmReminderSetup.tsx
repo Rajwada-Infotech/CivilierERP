@@ -740,11 +740,14 @@ export const BookingReminders: React.FC<{ bookingId: number; canEdit: boolean }>
   const [reason, setReason] = useState("");
   const [until, setUntil] = useState("");
   const [busy, setBusy] = useState(false);
+  const [sending, setSending] = useState(false);
   const liveQ = useQuery<{ rows: any[] }>({ queryKey: [PAGE_KEY, "booking-live", bookingId], queryFn: () => getJson(`${API}/live?bookingId=${bookingId}`), enabled: bookingId > 0, retry: false });
   const pausesQ = useQuery<{ rows: any[] }>({ queryKey: [PAGE_KEY, "booking-pauses", bookingId], queryFn: () => getJson(`${API}/pauses?bookingId=${bookingId}`), enabled: bookingId > 0, retry: false });
+  const recentQ = useQuery<{ rows: RecentSend[] }>({ queryKey: [PAGE_KEY, "booking-recent", bookingId], queryFn: () => getJson(`${API}/recent?bookingId=${bookingId}`), enabled: bookingId > 0, retry: false });
   const live = liveQ.data?.rows || [];
+  const lastSend = recentQ.data?.rows?.[0];
   const pause = (pausesQ.data?.rows || []).find((p) => p.IsLive);
-  if (!live.length && !pause) return null;
+  if (!live.length && !pause && !canEdit) return null;
   const refresh = () => qc.invalidateQueries({ queryKey: [PAGE_KEY] });
   const doPause = async () => {
     setBusy(true);
@@ -762,10 +765,16 @@ export const BookingReminders: React.FC<{ bookingId: number; canEdit: boolean }>
     <section className="bg-card px-4 py-3 text-xs" style={{ border: RULE }}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="flex items-center gap-1.5 text-sm font-semibold"><BellRing size={14} /> Reminders</p>
-        {canEdit && (pause
-          ? <button type="button" onClick={doResume} disabled={busy} className={`${KEY_LINE} h-7 px-2 text-xs`}><Play size={11} className="mr-1" />Resume</button>
-          : !pausing && <button type="button" onClick={() => setPausing(true)} className={`${KEY_LINE} h-7 px-2 text-xs`}><Pause size={11} className="mr-1" />Pause</button>)}
+        {canEdit && <div className="flex gap-1.5">
+          <button type="button" onClick={() => setSending(true)} className={`${KEY_LINE} h-7 px-2 text-xs`}><BellRing size={11} className="mr-1" />Send reminder</button>
+          {pause
+            ? <button type="button" onClick={doResume} disabled={busy} className={`${KEY_LINE} h-7 px-2 text-xs`}><Play size={11} className="mr-1" />Resume</button>
+            : live.length > 0 && !pausing && <button type="button" onClick={() => setPausing(true)} className={`${KEY_LINE} h-7 px-2 text-xs`}><Pause size={11} className="mr-1" />Pause</button>}
+        </div>}
       </div>
+      {sending && <SendReminderDialog bookingId={bookingId} onClose={() => setSending(false)} />}
+      {!live.length && !pause && <p className="mt-2 text-muted-foreground">No automatic reminder is running for this booking.</p>}
+      {lastSend && <p className="mt-2 text-muted-foreground">Last reminded: <span className={cn(lastSend.Today && "font-medium text-foreground")}>{recentLine(lastSend)}{lastSend.Today ? " (today)" : ""}</span></p>}
       {pause && <p className="mt-2 text-amber-700 dark:text-amber-400">Paused{pause.PausedUntil ? ` until ${fmtDay(pause.PausedUntil)}` : ""}: {pause.Reason}{pause.PausedByName ? ` · ${pause.PausedByName}` : ""}</p>}
       {live.map((x) => (
         <p key={`${x.RuleId}-${x.EntityKey}`} className="mt-2">
@@ -785,6 +794,144 @@ export const BookingReminders: React.FC<{ bookingId: number; canEdit: boolean }>
         </div>
       )}
     </section>
+  );
+};
+
+// ── Send a reminder by hand: from a booking row or its Reminders section ─────────────────────────────────────────────
+// Suggests what this booking's active reminders would say now (its own figures and next reminder number), or a message
+// written here; {fields} are filled from the booking. Channels the customer can't be reached on are shown, not offered.
+type Compose = {
+  booking: { id: number; bookingNo: string; customer: string; project: string; unit: string; status: string };
+  contact: { mobile: string | null; email: string | null };
+  facts: Record<string, string | number>; channels: string[]; ready: Record<string, boolean>;
+  suggestions: { ruleId: number; ruleName: string; situation: string; reminderNo: number; overdueDays: number | null; title: string; body: string; facts: Record<string, string | number> }[];
+  recent: RecentSend[];
+};
+type RecentSend = { At: string; Kind: "Automatic" | "By hand"; Name: string | null; Detail: string | null; ByName: string | null; Today: boolean };
+const recentLine = (r: RecentSend) => `${fmtTime(r.At)} · ${r.Kind === "By hand" ? `by hand${r.ByName ? ` (${r.ByName})` : ""}` : `${r.Name || "automatic"} · ${CHANNEL_LABEL[r.Detail || ""] || r.Detail || ""}`}`;
+// An SMS is 160 characters (70 with Indian-language letters); longer ones go as several, each charged.
+const smsParts = (t: string) => { const uni = /[^\x00-\x7F]/.test(t); const one = uni ? 70 : 160, many = uni ? 67 : 153; return t.length <= one ? 1 : Math.ceil(t.length / many); };
+const fill = (text: string, facts: Record<string, unknown>) => text.replace(/\{(\w+)\}/g, (all, k) => (facts[k] != null && facts[k] !== "" ? String(facts[k]) : all));
+
+export const SendReminderDialog: React.FC<{ bookingId: number; onClose: () => void }> = ({ bookingId, onClose }) => {
+  const qc = useQueryClient();
+  const q = useQuery<Compose>({ queryKey: [PAGE_KEY, "compose", bookingId], queryFn: () => getJson(`${API}/compose?bookingId=${bookingId}`), retry: false });
+  const [pick, setPick] = useState<number | "own" | null>(null);
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [channels, setChannels] = useState<string[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const d = q.data;
+  const reach = (ch: string): string | null => {
+    if (!d) return null;
+    if (!d.ready[ch]) return `${CHANNEL_LABEL[ch] || ch} is not set up in Communicator`;
+    if (ch === "Email" && !d.contact.email) return "No e-mail on record";
+    if ((ch === "SMS" || ch === "WhatsApp") && !d.contact.mobile) return "No mobile on record";
+    return null;
+  };
+  // First open: the most pressing suggestion, and every channel the customer can be reached on.
+  React.useEffect(() => {
+    if (!d || pick !== null) return;
+    const first = d.suggestions[0];
+    setPick(first ? 0 : "own");
+    if (first) { setTitle(first.title); setBody(first.body); }
+    setChannels(d.channels.filter((c) => !reach(c)));
+  }, [d]); // eslint-disable-line react-hooks/exhaustive-deps
+  const choose = (i: number | "own") => {
+    setPick(i);
+    if (i === "own") { setTitle(""); setBody(""); return; }
+    setTitle(d!.suggestions[i].title); setBody(d!.suggestions[i].body);
+  };
+  const facts = { ...(d?.facts || {}), ...(typeof pick === "number" ? d?.suggestions[pick]?.facts : d?.suggestions[0]?.facts) };
+  const fieldKeys = Object.keys(facts);
+  const chosen = channels || [];
+  const go = async () => {
+    setBusy(true);
+    try {
+      const out = await send(`${API}/send`, "POST", { bookingId, channels: chosen, title, body, ruleId: typeof pick === "number" ? d!.suggestions[pick].ruleId : null });
+      const sent = out.results.filter((r: any) => r.status === "Sent").map((r: any) => CHANNEL_LABEL[r.channel] || r.channel);
+      const missed = out.results.filter((r: any) => r.status !== "Sent").map((r: any) => `${CHANNEL_LABEL[r.channel] || r.channel}: ${r.detail || r.status}`);
+      if (sent.length) toast.success(`Reminder sent on ${sent.join(", ")}`, missed.length ? { description: missed.join(" · ") } : undefined);
+      else toast.error("Not sent", { description: missed.join(" · ") });
+      qc.invalidateQueries({ queryKey: [PAGE_KEY] });
+      if (sent.length) onClose();
+    } catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setBusy(false); }
+  };
+  return (
+    <GridDialog onClose={onClose} icon={BellRing} width="max-w-2xl" title={`Send a reminder${d ? ` · ${d.booking.bookingNo}` : ""}`}
+      description={d ? `${d.booking.customer} · ${[d.booking.project, d.booking.unit].filter(Boolean).join(" · ")}` : "To the booking's customer."}
+      footer={<><button type="button" onClick={onClose} className={GRID_BTN}>Cancel</button>
+        <button type="button" onClick={go} disabled={busy || !d || !chosen.length || !title.trim() || !body.trim()} className={GRID_BTN_BRAND}>{busy ? "Sending…" : "Send Reminder"}</button></>}>
+      {q.isLoading && <p className="text-xs text-muted-foreground">Reading this booking…</p>}
+      {q.isError && <p role="alert" className="text-xs text-destructive">{translateError((q.error as Error).message)}</p>}
+      {d && (<div onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !busy && chosen.length && title.trim() && body.trim()) go(); }}>
+        {d.recent.some((r) => r.Today) && (
+          <div role="status" className="mb-3 px-3 py-2 text-xs rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300">
+            <p className="font-semibold">Already reminded today</p>
+            {d.recent.filter((r) => r.Today).map((r, i) => <p key={i}>{recentLine(r)}</p>)}
+          </div>
+        )}
+        <GridFormSection title="1. What to say">
+          <div className="grid gap-2 sm:col-span-2">
+            {d.suggestions.map((s, i) => (
+              <button key={s.ruleId} type="button" onClick={() => choose(i)}
+                className={cn("text-left px-3 py-2 text-xs rounded-md border", pick === i ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50")}>
+                <span className="flex flex-wrap items-center gap-x-2 font-medium">{s.ruleName}
+                  <span className={cn(NUM, "text-muted-foreground font-normal")}>Reminder {s.reminderNo}{s.overdueDays ? ` · ${s.overdueDays} days overdue` : ""}</span></span>
+                <span className="block text-muted-foreground mt-0.5 line-clamp-2">{s.body}</span>
+              </button>
+            ))}
+            <button type="button" onClick={() => choose("own")}
+              className={cn("text-left px-3 py-2 text-xs rounded-md border", pick === "own" ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50")}>
+              <span className="font-medium flex items-center gap-1.5"><Pencil size={12} /> Write my own</span>
+            </button>
+            {!d.suggestions.length && <p className="text-xs text-muted-foreground">Nothing is pending for this booking under the reminders set up — write your own message.</p>}
+          </div>
+          <GridFormField label="Title" required wide>
+            <input className={GRID_INPUT} value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} placeholder="e.g. Payment reminder · {BookingNo}" />
+          </GridFormField>
+          <GridFormField label="Message" required wide>
+            <textarea className={cn(GRID_INPUT, "h-auto py-2")} rows={4} value={body} onChange={(e) => setBody(e.target.value)} maxLength={1000} />
+            <p className={cn(NUM, "mt-1 text-[0.6875rem] text-muted-foreground text-right")}>
+              {fill(body, facts).length}/1000{chosen.includes("SMS") ? ` · SMS: ${smsParts(fill(body, facts))} part${smsParts(fill(body, facts)) === 1 ? "" : "s"}` : ""}
+            </p>
+          </GridFormField>
+          <div className="sm:col-span-2 flex flex-wrap gap-1">
+            {fieldKeys.map((k) => (
+              <button key={k} type="button" onClick={() => setBody((b) => `${b}{${k}}`)} title={String(facts[k] ?? "")}
+                className="px-1.5 py-0.5 text-[0.6875rem] rounded border border-border text-muted-foreground hover:text-foreground">{`{${k}}`}</button>
+            ))}
+          </div>
+          {/\{\w+\}/.test(`${title}${body}`) && (
+            <div className="sm:col-span-2 px-3 py-2 text-xs rounded-md bg-muted/40" style={{ border: RULE_SOFT }}>
+              <p className={LBL}>The customer reads</p>
+              <p className="font-medium mt-1">{fill(title, facts)}</p>
+              <p className="mt-0.5 whitespace-pre-line">{fill(body, facts)}</p>
+            </div>
+          )}
+        </GridFormSection>
+        <GridFormSection title="2. Where to send it">
+          <div className="sm:col-span-2 grid gap-1.5 sm:grid-cols-2">
+            {d.channels.map((ch) => {
+              const why = reach(ch);
+              const on = chosen.includes(ch);
+              return (
+                <label key={ch} className={cn("flex items-start gap-2 px-3 py-2 text-xs rounded-md border", why ? "opacity-60 border-border" : on ? "border-primary bg-primary/5" : "border-border")}>
+                  <input type="checkbox" disabled={!!why} checked={on && !why} className="mt-0.5"
+                    onChange={() => setChannels((c) => (c || []).includes(ch) ? (c || []).filter((x) => x !== ch) : [...(c || []), ch])} />
+                  <span><span className="font-medium">{CHANNEL_LABEL[ch] || ch}</span>
+                    <span className="block text-muted-foreground">{why || (ch === "Email" ? d.contact.email : ch === "App" ? "Customer's phone, if signed in" : d.contact.mobile)}</span></span>
+                </label>
+              );
+            })}
+          </div>
+        </GridFormSection>
+        {d.recent.length > 0 && !d.recent.every((r) => r.Today) && (
+          <p className="mt-2 text-[0.6875rem] text-muted-foreground">Last reminded: {recentLine(d.recent[0])}</p>
+        )}
+      </div>)}
+    </GridDialog>
   );
 };
 

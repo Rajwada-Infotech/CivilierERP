@@ -489,6 +489,100 @@ async function resendLog(logId) {
   return { result };
 }
 
+// The channels a reminder sent by hand can go to: the customer channels of a rule, less Portal (it shows logged rule
+// reminders only).
+const HAND_CHANNELS = ["App", "SMS", "WhatsApp", "Email"];
+
+/**
+ * Send a reminder by hand: for one booking, the messages its active rules would send now — the same pending check,
+ * wording and {fields} as the hourly run, with this booking's own figures and its next reminder number — plus the
+ * booking's facts (for wording typed by hand) and where the customer can be reached.
+ */
+async function composeForBooking(bookingId, { today = new Date() } = {}) {
+  const pool = getPool();
+  const b = (await pool.request().input("id", sql.Int, bookingId).query(`
+    SELECT b.Id AS BookingId, b.BookingNo, b.BookingDate, b.ProjectId, b.ProjectName, b.UnitNo, b.AssignedTo, b.Status,
+           a.ApplicantName, a.Mobile, a.Email
+    FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId WHERE b.Id = @id`)).recordset[0];
+  if (!b) return null;
+  const situations = await loadSituations(pool);
+  const rules = (await pool.request().input("pid", sql.Int, b.ProjectId).query(
+    "SELECT * FROM dbo.CrmReminderRule WHERE IsActive = 1 AND (ProjectId IS NULL OR ProjectId = @pid) ORDER BY Name")).recordset;
+  const ctx = newCtx(today);
+  const suggestions = [];
+  for (const rule of rules) {
+    const sit = situations[rule.Situation];
+    if (!sit || !sit.starts.includes(rule.StartFrom)) continue;
+    const channels = (await pool.request().input("rule", sql.Int, rule.Id).query(
+      "SELECT * FROM dbo.CrmReminderChannel WHERE RuleId = @rule AND Audience = N'Customer' AND IsActive = 1")).recordset;
+    if (!channels.length) continue;
+    const row = (await sit.pending(pool, { ...rule, ProjectId: b.ProjectId }, ctx)).find((r) => r.bookingId === bookingId);
+    if (!row || !row.starts[rule.StartFrom]) continue;
+    const start = row.starts[rule.StartFrom];
+    const sent = (await pool.request().input("rule", sql.Int, rule.Id).input("key", sql.NVarChar(60), row.key).query(`
+      SELECT MAX(Occurrence) AS N FROM dbo.CrmReminderLog WHERE RuleId = @rule AND EntityKey = @key AND Stage = N'Remind' AND Status = N'Sent'`)).recordset[0]?.N || 0;
+    const facts = { ...row.facts, StartDate: day(start), DaysSinceStart: daysBetween(start, today), ReminderNo: sent + 1 };
+    // One suggestion per wording: the App's title and message first, else the first channel written.
+    const pick = channels.find((c) => c.Channel === "App") || channels[0];
+    suggestions.push({
+      ruleId: rule.Id, ruleName: rule.Name, situation: sit.label, customerScreen: sit.customerScreen, reminderNo: sent + 1,
+      overdueDays: rule.StartFrom === "DueDate" ? Math.max(0, facts.DaysSinceStart) : null,
+      title: render(pick.Title, facts) || rule.Name, body: render(pick.Body, facts), facts,
+    });
+  }
+  return {
+    booking: { id: b.BookingId, bookingNo: b.BookingNo, customer: b.ApplicantName, project: b.ProjectName, unit: b.UnitNo, status: b.Status },
+    contact: { mobile: b.Mobile || null, email: b.Email || null },
+    facts: commonFacts(b), channels: HAND_CHANNELS, suggestions, recent: await recentCustomerReminders(pool, bookingId),
+  };
+}
+
+/** The customer's last reminders on a booking — automatic (delivered) and by hand — newest first, with whether today. */
+async function recentCustomerReminders(pool, bookingId, take = 5) {
+  const r = await pool.request().input("bid", sql.Int, bookingId).input("take", sql.Int, take).input("biz", sql.Int, businessOffsetMinutes()).query(`
+    DECLARE @shift INT = @biz - DATEDIFF(MINUTE, SYSUTCDATETIME(), SYSDATETIME());
+    SELECT TOP (@take) x.*, CAST(CASE WHEN CAST(DATEADD(MINUTE, @shift, x.At) AS DATE) = CAST(DATEADD(MINUTE, @biz, SYSUTCDATETIME()) AS DATE) THEN 1 ELSE 0 END AS BIT) AS Today
+    FROM (
+      SELECT l.SentAt AS At, N'Automatic' AS Kind, r.Name AS Name, l.Channel AS Detail, NULL AS ByName
+      FROM dbo.CrmReminderLog l JOIN dbo.CrmReminderRule r ON r.Id = l.RuleId
+      WHERE l.BookingId = @bid AND l.Audience = N'Customer' AND l.Status = N'Sent'
+      UNION ALL
+      SELECT a.ChangedAt, N'By hand', NULL, a.Detail, u.name
+      FROM dbo.CrmReminderAudit a LEFT JOIN dbo.users u ON u.id = a.ChangedBy
+      WHERE a.BookingId = @bid AND a.Action = N'Sent by hand'
+    ) x ORDER BY x.At DESC`);
+  return r.recordset;
+}
+
+/** Sends a hand-written or chosen reminder to the booking's customer on the channels picked; one result per channel. */
+async function sendByHand({ bookingId, channels, title, body, ruleId = null }) {
+  const pool = getPool();
+  const c = await composeForBooking(bookingId);
+  if (!c) return { status: 404, error: "Booking not found" };
+  // A chosen suggestion fills its own figures and opens its own page in the app; a message written by hand uses the
+  // most pressing one's figures.
+  const chosen = c.suggestions.find((s) => s.ruleId === ruleId) || c.suggestions[0];
+  const facts = { ...c.facts, ...(chosen?.facts || {}) };
+  const screen = chosen?.customerScreen || SITUATIONS.instalmentDue.customerScreen;
+  const subject = render(title, facts).trim(), text = render(body, facts).trim();
+  const results = [];
+  for (const channel of channels) {
+    let r;
+    try {
+      if (channel === "App") {
+        const p = await sendToBookingCustomers(bookingId, { title: subject, body: text, data: { type: "portal", event: "reminder", screen } });
+        r = p.sent > 0 ? { status: "Sent" } : { status: "NotSent", detail: "No phone signed in to the customer's app" };
+      } else {
+        const s = await sendAutoCommunication(pool, { bookingId, channel, subject, summary: `Reminder: ${subject}`, content: text,
+          toMobile: channel === "Email" ? null : c.contact.mobile, toEmail: channel === "Email" ? c.contact.email : null });
+        r = s.ok ? { status: "Sent" } : { status: s.skipped ? "NotSent" : "Failed", detail: s.error };
+      }
+    } catch (err) { r = { status: "Failed", detail: err.message }; }
+    results.push({ channel, ...r });
+  }
+  return { result: { title: subject, body: text, results } };
+}
+
 let timer = null;
 let running = false;
 function startCrmReminderEngine() {
@@ -516,5 +610,6 @@ async function situationList(pool = getPool()) {
 
 module.exports = {
   SITUATIONS, loadSituations, situationList, SCHEMA_MIGRATIONS, runReminders, checkRule, resendLog, startCrmReminderEngine, stopCrmReminderEngine,
+  composeForBooking, sendByHand, recentCustomerReminders, HAND_CHANNELS,
   render, withinHours, businessOffsetMinutes, businessDate, schemaReady,
 };

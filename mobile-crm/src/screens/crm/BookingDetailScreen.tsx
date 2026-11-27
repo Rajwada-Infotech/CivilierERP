@@ -13,7 +13,7 @@ import { fetchWithAuth } from "@/services/fetchWithAuth";
 import { useRoute, type RouteProp } from "@react-navigation/native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { ArrowLeftRight, Banknote, Car, Check, CheckCircle2, ChevronRight, FileText, Handshake, KeyRound, Landmark, Lock, PhoneCall, RefreshCw, Scale, Smartphone, Ticket, UserCheck, Wallet, XCircle } from "lucide-react-native";
+import { ArrowLeftRight, Banknote, BellRing, Car, Check, CheckCircle2, ChevronRight, FileText, Handshake, KeyRound, Landmark, Lock, PhoneCall, RefreshCw, Scale, Smartphone, Ticket, UserCheck, Wallet, XCircle } from "lucide-react-native";
 import { useAuth } from "@/auth/AuthContext";
 import { crmGet, crmSend, getBooking, getBookingLifecycle, getBookingPayments, type Row } from "@/api/crmApi";
 import { toast } from "@/components/Toast";
@@ -24,7 +24,7 @@ import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { ActionKey, CRM, ContactKeys, Empty, HeroSurface, Kv, LinkRow, ON_HERO, Section, Tap, fmtDate, joinDot, money, Pill, useCardStyle, words } from "./ui";
 import { useCrmOpen } from "./CrmRegisterScreen";
-import { ApplyOnAccountPrompt, ChangeUnitDialog, GenerateInvoiceDialog, Chips, NotePrompt, OwnershipChangeDialog, ResaleDealDialog, milestoneMissing, nextOpenMilestone } from "./CrmForms";
+import { ApplyOnAccountPrompt, BookingRemindersSection, ChangeUnitDialog, GenerateInvoiceDialog, Chips, NotePrompt, OwnershipChangeDialog, ResaleDealDialog, SendReminderSheet, milestoneMissing, nextOpenMilestone } from "./CrmForms";
 
 // A booking that no longer takes money here (the web's "closed" plan).
 const CLOSED = ["Cancelled", "UnitChanged", "Rejected"];
@@ -167,6 +167,9 @@ export default function BookingDetailScreen() {
   };
   // Change unit: the web booking page's menu item (staff who may edit bookings, not for a plot sale).
   const [changeUnit, setChangeUnit] = useState(false);
+  // Send a reminder to the customer: the web Bookings row menu's item (same rights as the server's send route).
+  const canSendReminder = live && (canDoAction("crm-bookings", "edit") || canDoAction("crm-payments", "edit") || canDoAction("crm-reminder-setup", "edit"));
+  const [sendReminder, setSendReminder] = useState(false);
   // Resale / buy-back: open a case on this booking (crm-resales create right).
   const canResale = live && canDoAction("crm-resales", "create");
   const [resaleDialog, setResaleDialog] = useState(false);
@@ -477,6 +480,7 @@ export default function BookingDetailScreen() {
                 </>
               )}
       </> },
+    canSendReminder && { key: "remind", label: "Send reminder", icon: BellRing, go: () => setSendReminder(true) },
     canEditBooking && b && !b.IsPlotSale && { key: "unit", label: "Change unit", icon: ArrowLeftRight, go: () => setChangeUnit(true) },
     canResale && { key: "resale", label: "Resale / Buy-back", icon: RefreshCw, go: () => setResaleDialog(true) },
     canOwnership && { key: "ownership", label: "Ownership change", icon: UserCheck, go: () => setOwnershipDialog(true) },
@@ -817,8 +821,13 @@ export default function BookingDetailScreen() {
             </Section>
           ) : null}
 
+          {/* 6. Reminders for this booking (Reminder Setup or Payment Milestones right) */}
+          {(canAccessPage("crm-reminder-setup") || seesMoney) ? (
+            <BookingRemindersSection bookingId={id} bookingNo={head.BookingNo as string | undefined} canEdit={canDoAction("crm-payments", "edit") || canDoAction("crm-reminder-setup", "edit")} />
+          ) : null}
+
           {!moneyOnly ? <>
-          {/* 6. Journey: steps as chips — done, now, then the rest */}
+          {/* 7. Journey: steps as chips — done, now, then the rest */}
           {steps.length ? (
             <Section title="Journey" right={<Text style={{ fontSize: 12, fontFamily: fonts.body.medium, color: colors.mutedForeground }}>{`${doneCount} of ${steps.length} done`}</Text>}>
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
@@ -959,6 +968,7 @@ export default function BookingDetailScreen() {
             </Section>
           ) : null}
           </> : null}
+          {sendReminder ? <SendReminderSheet bookingId={id} onClose={() => setSendReminder(false)} /> : null}
           {changeUnit && b ? <ChangeUnitDialog booking={{ ...pb, ...b }} onClose={() => setChangeUnit(false)} /> : null}
       {resaleDialog ? <ResaleDealDialog bookingId={id} sellerId={customer ? Number(customer.Id) : undefined} onClose={() => setResaleDialog(false)} /> : null}
       {ownershipDialog ? <OwnershipChangeDialog bookingId={id} fromCustomerId={customer ? Number(customer.Id) : undefined} onClose={() => setOwnershipDialog(false)} /> : null}
