@@ -165,6 +165,11 @@ router.get("/item-options", authenticateToken, async (req, res) => {
       WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'M_CostCenterId'
     `);
     const hasCC = ccCheck.recordset[0].cnt > 0;
+    const activeCheck = await pool.request().query(`
+      SELECT COUNT(1) AS cnt FROM sys.columns
+      WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'M_IsActive'
+    `);
+    const hasActive = activeCheck.recordset[0].cnt > 0;
 
     const req2 = pool.request();
     const godownFilter = godownId
@@ -174,6 +179,7 @@ router.get("/item-options", authenticateToken, async (req, res) => {
 
     const result = await req2.query(`
       SELECT img.M_Id, img.M_Name, img.M_Group,
+             ${hasActive ? "ISNULL(img.M_IsActive, 1) AS M_IsActive," : "CAST(1 AS BIT) AS M_IsActive,"}
              ${hasCC ? "img.M_CostCenterId," : "NULL AS M_CostCenterId,"}
              ${hasCC ? "cc.Name AS CostCenterName," : "NULL AS CostCenterName,"}
              ISNULL(SUM(CASE WHEN sl.Type='IN'  THEN sl.Qty ELSE 0 END), 0)
@@ -200,7 +206,7 @@ router.get("/item-options", authenticateToken, async (req, res) => {
         ${godownFilter}
       ${hasCC ? "LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = img.M_CostCenterId" : ""}
       WHERE  (img.Parent_Id IS NOT NULL OR img.M_IdentityCode = 1)
-      GROUP  BY img.M_Id, img.M_Name, img.M_Group${hasUOM ? ", img.M_UOM" : ""}${hasCC ? ", img.M_CostCenterId, cc.Name" : ""}
+      GROUP  BY img.M_Id, img.M_Name, img.M_Group${hasActive ? ", img.M_IsActive" : ""}${hasUOM ? ", img.M_UOM" : ""}${hasCC ? ", img.M_CostCenterId, cc.Name" : ""}
       ORDER  BY img.M_Name
     `);
     res.json(result.recordset);

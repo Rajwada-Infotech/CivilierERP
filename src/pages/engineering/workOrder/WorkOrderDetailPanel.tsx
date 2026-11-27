@@ -643,7 +643,7 @@ export const WorkOrderDetailPanel: React.FC<{
                           "Activity",
                           "Unit",
                           "Rate/Unit",
-                          "Area",
+                          "Qty",
                           "Labour",
                           "Materials",
                           "Total",

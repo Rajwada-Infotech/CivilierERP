@@ -51,7 +51,7 @@ export function ImportForm({ onClose }: { onClose: () => void }) {
     [godownsData, companyId, projectId],
   );
   // Only Item Master items marked Fixed Asset belong in fixed-asset inventory.
-  const items = useMemo(() => ensureArray<DbItem>(allItems).filter((i) => i.M_Type === "Fixed Asset"), [allItems]);
+  const items = useMemo(() => ensureArray<DbItem>(allItems).filter((i) => i.M_Type === "Fixed Asset" && i.M_IsActive !== false), [allItems]);
 
   const qty = parseFloat(quantity);
   const unitRate = parseFloat(rate);

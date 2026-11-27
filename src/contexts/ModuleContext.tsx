@@ -8,6 +8,24 @@ import React, {
 import { useLocation } from "react-router-dom";
 import type { Module } from "@/contexts/module.utils";
 import { isModuleId, moduleFromPath } from "@/contexts/moduleFromPath";
+import {
+  type SetupItem,
+  financeSetupItems, salesSetupItems, maintenanceSetupItems, hrPayrollSetupItems, materialSetupItems,
+  fixedAssetSetupItems, followupSetupItems, engineeringSetupItems, civilWorkDprSetupItems,
+  salesAutomationSetupItems, crmSetupItems, legalSetupItems, adminSetupItems,
+} from "@/components/layout/setupMenus";
+
+// Each module's Setup menu. A shared path like /masters/engineering-activity names no module, so the module whose
+// Setup menu lists it wins over the remembered one (pressing Back after a module shortcut otherwise left the
+// previous module's sidebar on screen).
+const SETUP_BY_MODULE: [NonNullable<Module>, SetupItem[]][] = [
+  ["finance", financeSetupItems], ["sales", salesSetupItems], ["maintenance", maintenanceSetupItems],
+  ["hr-payroll", hrPayrollSetupItems], ["material", materialSetupItems], ["fixed-asset", fixedAssetSetupItems],
+  ["followup", followupSetupItems], ["engineering", engineeringSetupItems], ["civilworkdpr", civilWorkDprSetupItems],
+  ["sales-automation", salesAutomationSetupItems], ["crm", crmSetupItems], ["legal", legalSetupItems], ["admin", adminSetupItems],
+];
+const setupOwners = (path: string) =>
+  SETUP_BY_MODULE.filter(([, items]) => items.some((i) => i.path === path)).map(([m]) => m);
 
 // Module/MODULE_DASHBOARD_ROUTES now live in module.utils.ts and are NOT
 // re-exported here — this file only exports components/hooks. Mixing
@@ -115,7 +133,10 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
       // Ambiguous path (e.g. /masters/*, /reports) — trust localStorage if valid,
       // but do NOT force a module when there's nothing stored
       const stored = sessionStorage.getItem("activeModule");
-      setActiveModuleState(stored && isModuleId(stored) ? stored : null);
+      const owners = setupOwners(location.pathname);
+      const next = owners.length && !(stored && owners.includes(stored as NonNullable<Module>)) ? owners[0] : stored && isModuleId(stored) ? stored : null;
+      setActiveModuleState(next);
+      if (next && next !== stored) sessionStorage.setItem("activeModule", next);
     } else {
       setActiveModuleState(resolved);
       sessionStorage.setItem("activeModule", resolved);

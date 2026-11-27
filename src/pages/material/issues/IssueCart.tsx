@@ -94,7 +94,7 @@ export function IssueCart({ m }: { m: IssuesState }) {
                         placeholder={loadingItems ? "Loading…" : "Select item"}
                         searchPlaceholder="Search items…"
                         className={isOver ? "border-destructive" : ""}
-                        options={(itemOptions as any[]).map((item) => ({
+                        options={(itemOptions as any[]).filter((item) => item.M_IsActive !== false || String(item.M_Id) === String(ci.ItemId)).map((item) => ({
                           value: String(item.M_Id),
                           label: `${item.M_Name} — Stock: ${Number(item.AvailableStock).toFixed(2)}${item.M_Group ? ` · ${item.M_Group}` : ""}`,
                         }))}
