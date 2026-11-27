@@ -107,6 +107,8 @@ export interface ItemOption {
   name: string;
   code: string;
   uomCode: string;
+  /** false = disabled in Item Master: kept on lines that already use it, left out of the picker otherwise. */
+  isActive?: boolean;
 }
 export interface ActivityOption {
   id: string;

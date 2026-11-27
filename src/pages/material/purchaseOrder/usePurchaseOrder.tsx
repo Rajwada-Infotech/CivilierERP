@@ -299,7 +299,7 @@ export function usePurchaseOrder() {
         poType: poTypeFilter || undefined,
         includeShortClosed: true,
         projectId: projectFilter ? Number(projectFilter) : undefined,
-        itemId: itemFilter ? Number(itemFilter) : undefined,
+        itemId: itemFilter || undefined,
         groupBy: "project",
       }),
   });

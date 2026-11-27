@@ -193,7 +193,7 @@ export const getPurchaseOrders = (
     fyId?: number;
     includeShortClosed?: boolean;
     projectId?: number;
-    itemId?: number;
+    itemId?: string;
     groupBy?: "project";
   } = {},
 ) => {
@@ -206,7 +206,7 @@ export const getPurchaseOrders = (
   if (fyId) params.set("fyId", String(fyId));
   if (includeShortClosed) params.set("includeShortClosed", "1");
   if (projectId) params.set("projectId", String(projectId));
-  if (itemId) params.set("itemId", String(itemId));
+  if (itemId) params.set("itemId", itemId);
   if (groupBy) params.set("groupBy", groupBy);
   return fetchWithAuth(`/purchase-orders?${params.toString()}`)
     .then((r) => handleResponse<POListResponse>(r))

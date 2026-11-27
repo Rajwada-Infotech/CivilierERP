@@ -891,9 +891,14 @@ const listPurchaseOrders = async (req, res) => {
       if (!includeShortClosed) whereConditions.push("ISNULL(po.Status, '') != 'Short Closed'");
       if (companyId) whereConditions.push("po.CompanyId = @companyId");
       if (projectId) whereConditions.push("po.ProjectId = @projectId");
-      // Item filter: POs with at least one line of this item.
-      const itemId = parseInt(req.query.itemId, 10) || null;
-      if (itemId) whereConditions.push("EXISTS (SELECT 1 FROM dbo.PurchaseOrderItems poi WHERE poi.PurchaseOrderID = po.PurchaseOrderID AND poi.ItemId = @itemId)");
+      // Item filter: POs with at least one line of this item. Item ids are GUID strings (PurchaseOrderItems.ItemId
+      // is NVARCHAR); lines saved without an id match on the item's name.
+      const itemId = typeof req.query.itemId === "string" && /^[\w-]{1,100}$/.test(req.query.itemId) ? req.query.itemId : null;
+      if (itemId)
+        whereConditions.push(`EXISTS (SELECT 1 FROM dbo.PurchaseOrderItems poi WHERE poi.PurchaseOrderID = po.PurchaseOrderID
+          AND (LTRIM(RTRIM(poi.ItemId)) = @itemId
+               OR (NULLIF(LTRIM(RTRIM(poi.ItemId)), '') IS NULL
+                   AND poi.ItemName = (SELECT TOP 1 M_Name FROM dbo.Item_Master_Group WHERE CAST(M_Id AS NVARCHAR(100)) = @itemId))))`);
       if (req.projectScope) whereConditions.push(projectPredicate(req.projectScope, "po.ProjectId", "").trim());
       const whereClause = whereConditions.length
         ? `WHERE ${whereConditions.join(" AND ")}`
@@ -910,7 +915,7 @@ const listPurchaseOrders = async (req, res) => {
         .input("poTypeFilter", sql.NVarChar(20), poTypeFilter)
         .input("companyId", sql.Int, companyId)
         .input("projectId", sql.Int, projectId)
-        .input("itemId", sql.Int, itemId).query(`
+        .input("itemId", sql.NVarChar(100), itemId).query(`
         ${
           groupByProject
             ? `

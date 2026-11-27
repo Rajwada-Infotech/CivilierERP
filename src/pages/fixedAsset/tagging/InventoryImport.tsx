@@ -40,7 +40,8 @@ export function InventoryImport({
 
   const downloadTemplate = async () => {
     try {
-      const [items, setups] = await Promise.all([getItems(), getActiveDepreciationSetups()]);
+      const [allItems, setups] = await Promise.all([getItems(), getActiveDepreciationSetups()]);
+      const items = allItems.filter((i) => i.M_IsActive !== false);
       await downloadFaInventoryTemplate(mode, {
         assetCategories: [...new Set(setups.map((s) => s.AssetCategory.trim()).filter(Boolean))].sort(),
         companies,
@@ -62,7 +63,8 @@ export function InventoryImport({
     try {
       const rawRows = await readFaImportFile(file);
       if (rawRows.length === 0) return void toast.error("The file has no data rows.");
-      const [itemMaster, setups] = await Promise.all([getItems(), getActiveDepreciationSetups()]);
+      const [allItems, setups] = await Promise.all([getItems(), getActiveDepreciationSetups()]);
+      const itemMaster = allItems.filter((i) => i.M_IsActive !== false);
       setRows(
         validateFaImportRows(rawRows, {
           mode,

@@ -3,6 +3,7 @@ import { Plus, X, Package, Settings2 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import React from "react";
 import { BoqItem, BoqActivity, UomOption, ItemOption, ActivityOption, ActivityGroupOption, fmt, calcAmount, activityBasis, fmtQty, blankItem, blankActivity } from "./config";
+import { SearchableSelect } from "@/components/SearchableSelect";
 
 export type LineMode = "item" | "activity";
 
@@ -411,9 +412,16 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                           {(isItem ? row.itemName : row.activityName) || "—"}
                         </span>
                       ) : isItem ? (
-                        <Select
+                        <SearchableSelect
+                          sheet
                           value={row.itemId ? String(row.itemId) : ""}
-                          onValueChange={(val) => {
+                          placeholder="— Select item —"
+                          searchPlaceholder="Search items…"
+                          className="h-8 text-xs"
+                          options={itemOptions
+                            .filter((o) => o.isActive !== false || o.id === String(row.itemId ?? ""))
+                            .map((o) => ({ value: o.id, label: o.name }))}
+                          onChange={(val) => {
                             const sel = itemOptions.find((o) => o.id === val);
                             if (!sel) return;
                             const matchedUom = uoms.find(
@@ -435,22 +443,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                               ),
                             );
                           }}
-                        >
-                          <SelectTrigger className="h-8 text-xs border-foreground/30 w-full">
-                            <SelectValue placeholder="— Select item —" />
-                          </SelectTrigger>
-                          <SelectContent className="z-[300] max-h-60">
-                            {itemOptions.map((o) => (
-                              <SelectItem
-                                key={o.id}
-                                value={o.id}
-                                className="text-xs"
-                              >
-                                {o.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        />
                       ) : (
                         <Select
                           disabled={!rowGroupId(row)}

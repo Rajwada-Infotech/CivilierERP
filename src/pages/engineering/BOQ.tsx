@@ -344,6 +344,7 @@ export default function BOQ() {
           name: it.M_Name ?? "",
           code: it.M_code ?? "",
           uomCode: it.M_UOM ?? "",
+          isActive: it.M_IsActive !== false,
         })),
       );
 
@@ -529,7 +530,7 @@ export default function BOQ() {
             docTypes,
             finYears: finYears.map((f) => ({ year: f.year })),
             uoms,
-            items: itemOptions,
+            items: itemOptions.filter((o) => o.isActive !== false),
             activities: activityOptions,
             groups: activityGroups,
           }}
