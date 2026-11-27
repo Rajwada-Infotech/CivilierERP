@@ -310,7 +310,8 @@ async function createSaleInvoiceInternal(pool, payload, userEmail, issuedByEmail
       .request()
       .input("SaleOrderID", sql.Int, parseInt(SaleOrderID, 10)).query(`
         SELECT SaleOrderID, DocNo, ToCompanyID, ToProjectID,
-               FromCompanyID, FromProjectID, TotalAmount, Status, SaleItems
+               FromCompanyID, FromProjectID, TotalAmount, Status, SaleItems,
+               BuyerLHeadId, GLPosted
         FROM   dbo.SaleOrders
         WHERE  SaleOrderID = @SaleOrderID
       `);
@@ -337,11 +338,15 @@ async function createSaleInvoiceInternal(pool, payload, userEmail, issuedByEmail
     // LHeadCode 'PRJ-<projectId>-CUST'), so this reuses that existing head
     // rather than inventing a second, parallel way to represent the same
     // project as a billable party.
-    const custHeadRes = await pool
-      .request()
-      .input("Code", sql.NVarChar(20), `PRJ-${soRaw.ToProjectID}-CUST`)
-      .query("SELECT TOP 1 LHeadId FROM dbo.AccountHeadMaster WHERE LHeadCode = @Code");
-    const customerHeadId = custHeadRes.recordset[0]?.LHeadId ?? null;
+    // A sale to a buyer bills the buyer's own ledger; an older transfer order bills the destination project's.
+    let customerHeadId = soRaw.BuyerLHeadId ?? null;
+    if (!customerHeadId) {
+      const custHeadRes = await pool
+        .request()
+        .input("Code", sql.NVarChar(20), `PRJ-${soRaw.ToProjectID}-CUST`)
+        .query("SELECT TOP 1 LHeadId FROM dbo.AccountHeadMaster WHERE LHeadCode = @Code");
+      customerHeadId = custHeadRes.recordset[0]?.LHeadId ?? null;
+    }
     if (!customerHeadId) {
       const err = new Error(
         `No billing ledger found for the destination project on Sale Order ${soRaw.DocNo}. Re-save that project in Project Master to provision one.`,
@@ -365,7 +370,10 @@ async function createSaleInvoiceInternal(pool, payload, userEmail, issuedByEmail
       ProjectId: soRaw.FromProjectID,
       TotalAmount: soRaw.TotalAmount,
       fy_id: null,
-      GLItems: Array.isArray(glItems) ? glItems : [],
+      // The sale was already posted to the ledger when the order was approved (Dr buyer / Cr Sales A/c / Cr GST
+      // Output) — the invoice must not post it a second time.
+      GLItems: soRaw.GLPosted ? [] : Array.isArray(glItems) ? glItems : [],
+      AlreadyPosted: !!soRaw.GLPosted,
     };
   }
 
@@ -508,7 +516,9 @@ async function createSaleInvoiceInternal(pool, payload, userEmail, issuedByEmail
     // not two. An untagged item just isn't posted (no default "Sales
     // Revenue" system ledger exists yet) — logged via recordGLPosting so an
     // under-posted invoice is findable rather than silently wrong.
-    if (Array.isArray(so.GLItems) && so.GLItems.length > 0) {
+    if (so.AlreadyPosted) {
+      await recordGLPosting("sale-invoice", newId, { none: true, reason: "Posted when its Sale Order was approved" }, userEmail);
+    } else if (Array.isArray(so.GLItems) && so.GLItems.length > 0) {
       try {
         const buckets = new Map();
         for (const it of so.GLItems) {

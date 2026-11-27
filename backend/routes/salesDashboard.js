@@ -69,10 +69,11 @@ router.get("/", cache("sales-dashboard", 60, { dropOnAnyWrite: true }), async (r
           so.OrderDate,
           so.TotalAmount,
           so.Status,
-          tc.name AS ToCompanyName,
+          COALESCE(buyer.LHeadName, tc.name) AS ToCompanyName,
           so.CreatedAt
         FROM dbo.SaleOrders so
         LEFT JOIN dbo.enterprise tc ON tc.id = so.ToCompanyID
+        LEFT JOIN dbo.AccountHeadMaster buyer ON buyer.LHeadId = so.BuyerLHeadId
         WHERE (@CompanyId IS NULL OR so.FromCompanyID = @CompanyId)
         ORDER BY so.CreatedAt DESC
       `),

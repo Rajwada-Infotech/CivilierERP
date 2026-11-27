@@ -273,8 +273,9 @@ function EditStockUpdateDialog({ id, onClose }: { id: number; onClose: () => voi
   );
 }
 
-export default function StockUpdate() {
-  const rights = usePageRights("stock-update");
+/** Material → Stock Update, and the same page under Sales → Setup (its own page right, same stock ledger). */
+export default function StockUpdate({ module = "Material", pageKey = "stock-update" }: { module?: "Material" | "Sales"; pageKey?: string } = {}) {
+  const rights = usePageRights(pageKey);
   const { currentUser } = useAuth();
   const isSuperAdmin = isSuperAdminRole(currentUser?.role);
   const qc = useQueryClient();
@@ -424,8 +425,8 @@ export default function StockUpdate() {
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "Material", "Stock Update"]} />
-      <SheetShell eyebrow="CivilierERP · Material" title="Stock update" subtitle="Add items to a project godown and raise its stock, for opening counts and corrections.">
+      <Breadcrumbs items={["Dashboard", module, "Stock Update"]} />
+      <SheetShell eyebrow={`CivilierERP · ${module}`} title="Stock update" subtitle="Add items to a project godown and raise its stock, for opening counts and corrections.">
         {rights.canCreate && (
           <div className="bg-card mb-6" style={{ border: RULE }}>
             <div className="px-5 py-3" style={{ borderBottom: RULE }}>

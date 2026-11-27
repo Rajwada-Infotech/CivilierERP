@@ -8,6 +8,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button";
 import { fetchNextDocNumber } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { DateInput } from "@/components/ui/date-input";
+import { useQuery } from "@tanstack/react-query";
+import { getEquipment } from "@/api/equipmentMasterApi";
+import { BoqEquipmentLine, EquipmentOption, rowToEquipment } from "./config";
+import { type LineTab } from "./LineEditor";
 import { BoqItem, BoqActivity, BoqRecord, Company, Project, DocType, UomOption, ItemOption, ActivityOption, ActivityGroupOption, apiFetch, rowToItem, rowToActivity, buildPayload, Field, FormState, defaultForm, recordToForm } from "./config";
 import { LineEditor } from "./LineEditor";
 
@@ -61,7 +65,18 @@ export const FormModal: React.FC<FormModalProps> = ({
   const [activities, setActivities] = useState<BoqActivity[]>(
     (record?.BoqActivities ?? []).map(rowToActivity),
   );
-  const [lineTab, setLineTab] = useState<"items" | "activities">("activities");
+  const [equipment, setEquipment] = useState<BoqEquipmentLine[]>((record?.BoqEquipment ?? []).map(rowToEquipment));
+  const [lineTab, setLineTab] = useState<LineTab>("activities");
+  // The Equipment tab's picker: every Equipment Master record (switched-off ones stay on lines that already use them).
+  const { data: equipmentRaw = [] } = useQuery({ queryKey: ["equipment-options"], queryFn: () => getEquipment(), staleTime: 120_000 });
+  const equipmentOptions: EquipmentOption[] = equipmentRaw.map((e) => ({
+    id: String(e.id),
+    name: e.name,
+    code: e.code ?? "",
+    uom: e.uom ?? "",
+    rate: e.rate,
+    isActive: Boolean(e.isActive),
+  }));
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -175,7 +190,7 @@ export const FormModal: React.FC<FormModalProps> = ({
     if (!validate()) return;
     setSaving(true);
     try {
-      const payload = buildPayload(form, items, activities, activityOptions, activityGroups);
+      const payload = buildPayload(form, items, activities, activityOptions, activityGroups, equipment);
       if (isEdit) {
         if (amend && (await amend.intercept(record!.BoqID, payload))) return;
         await apiFetch(`/boq/${record!.BoqID}`, {
@@ -207,6 +222,7 @@ export const FormModal: React.FC<FormModalProps> = ({
     (s, r) => s + (parseFloat(String(r.amount)) || 0),
     0,
   );
+  const equipmentTotal = equipment.reduce((s, r) => s + (Number(r.amount) || 0), 0);
 
   return (
     <div
@@ -563,13 +579,13 @@ export const FormModal: React.FC<FormModalProps> = ({
                   color: "hsl(var(--muted-foreground))",
                 }}
               >
-                Items & Activities
+                Activities, items & equipment
               </span>
             </div>
 
             <LineEditor
-              mode={lineTab === "items" ? "item" : "activity"}
-              rows={lineTab === "items" ? items : activities}
+              mode={lineTab === "items" ? "item" : lineTab === "equipment" ? "equipment" : "activity"}
+              rows={lineTab === "items" ? items : lineTab === "equipment" ? equipment : activities}
               uoms={uoms}
               itemOptions={itemOptions}
               activityOptions={pickableActivities}
@@ -577,8 +593,10 @@ export const FormModal: React.FC<FormModalProps> = ({
               boqActivities={activities}
               itemsTotal={itemsTotal}
               activitiesTotal={activitiesTotal}
+              equipmentTotal={equipmentTotal}
+              equipmentOptions={equipmentOptions}
               onChange={
-                lineTab === "items" ? (setItems as any) : (setActivities as any)
+                lineTab === "items" ? (setItems as any) : lineTab === "equipment" ? (setEquipment as any) : (setActivities as any)
               }
               onTabChange={setLineTab}
             />

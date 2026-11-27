@@ -10,8 +10,8 @@ import { KEY_INK, KEY_LINE, KEY_RED } from "@/components/sheet/sheetParts";
 import { SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
-import { BoqRecord, Company, Project, UomOption, apiFetch, fmt, fmtDate, rowToItem, rowToActivity, DetailRow, canEditBoq, canOpenBoqEdit } from "./config";
-import { LineEditor } from "./LineEditor";
+import { BoqRecord, Company, Project, UomOption, apiFetch, fmt, fmtDate, rowToItem, rowToActivity, rowToEquipment, DetailRow, canEditBoq, canOpenBoqEdit } from "./config";
+import { LineEditor, type LineTab } from "./LineEditor";
 import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -44,7 +44,7 @@ export const DetailModal: React.FC<DetailModalProps> = ({
   canPrint,
   canEdit,
 }) => {
-  const [lineTab, setLineTab] = useState<"items" | "activities">("activities");
+  const [lineTab, setLineTab] = useState<LineTab>("activities");
   const [acting, setActing] = useState(false);
   const [creatingMR, setCreatingMR] = useState(false);
   const navigate = useNavigate();
@@ -279,16 +279,19 @@ export const DetailModal: React.FC<DetailModalProps> = ({
 
           {/* Line items viewer */}
           <LineEditor
-            mode={lineTab === "items" ? "item" : "activity"}
+            mode={lineTab === "items" ? "item" : lineTab === "equipment" ? "equipment" : "activity"}
             rows={
               lineTab === "items"
                 ? (record.BoqItems ?? []).map(rowToItem)
-                : (record.BoqActivities ?? []).map(rowToActivity)
+                : lineTab === "equipment"
+                  ? (record.BoqEquipment ?? []).map(rowToEquipment)
+                  : (record.BoqActivities ?? []).map(rowToActivity)
             }
             uoms={uoms}
             boqActivities={(record.BoqActivities ?? []).map(rowToActivity)}
             itemsTotal={itemsTotal}
             activitiesTotal={activitiesTotal}
+            equipmentTotal={(record.BoqEquipment ?? []).reduce((s: number, r: any) => s + (parseFloat(r.LineAmount) || 0), 0)}
             onChange={() => {}}
             readOnly
             onTabChange={setLineTab}

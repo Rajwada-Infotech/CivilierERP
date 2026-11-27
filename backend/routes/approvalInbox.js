@@ -919,7 +919,7 @@ function buildInboxQueries(module, projectScope = null) {
           so.OrderDate                                AS RecordDate,
           ISNULL(so.Status, 'Draft')                  AS Status,
           fc.name                                      AS ContractorName,
-          tc.name                                      AS SupplierName,
+          COALESCE(buyer.LHeadName, tc.name)           AS SupplierName,
           so.TotalAmount                               AS Amount,
           CAST(NULL AS DECIMAL(18,2))                  AS GrnTotalAmount,
           CAST(NULL AS DECIMAL(18,2))                  AS GrnBasicAmount,
@@ -968,9 +968,11 @@ function buildInboxQueries(module, projectScope = null) {
           ISNULL(so.UpdatedAt, so.CreatedAt)           AS LastModified
         FROM dbo.SaleOrders so
         JOIN dbo.enterprise fc ON fc.id = so.FromCompanyID
-        JOIN dbo.enterprise tc ON tc.id = so.ToCompanyID
         JOIN dbo.Godowns fg ON fg.GodownID = so.FromGodownID
-        JOIN dbo.Godowns tg ON tg.GodownID = so.ToGodownID
+        -- A sale to a buyer has no To side (older transfer orders do).
+        LEFT JOIN dbo.enterprise tc ON tc.id = so.ToCompanyID
+        LEFT JOIN dbo.Godowns tg ON tg.GodownID = so.ToGodownID
+        LEFT JOIN dbo.AccountHeadMaster buyer ON buyer.LHeadId = so.BuyerLHeadId
         WHERE so.Status = 'Pending'
       `);
     }

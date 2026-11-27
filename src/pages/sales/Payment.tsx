@@ -161,7 +161,8 @@ function SaleOrderPicker({
       (o) =>
         o.DocNo.toLowerCase().includes(q) ||
         o.FromProjectName?.toLowerCase().includes(q) ||
-        o.ToProjectName?.toLowerCase().includes(q),
+        o.ToProjectName?.toLowerCase().includes(q) ||
+        o.BuyerName?.toLowerCase().includes(q),
     );
   }, [orders, search]);
 
@@ -177,7 +178,7 @@ function SaleOrderPicker({
           <div className="flex items-center gap-2 min-w-0">
             <span className={`${HR_NUM} font-semibold text-foreground`}>{selected.DocNo}</span>
             <span className="text-muted-foreground text-xs truncate">
-              · {selected.FromProjectName} → {selected.ToProjectName}
+              · {selected.BuyerName ? `${selected.FromProjectName} → ${selected.BuyerName}` : `${selected.FromProjectName} → ${selected.ToProjectName}`}
             </span>
           </div>
         ) : (
@@ -224,7 +225,7 @@ function SaleOrderPicker({
                     <div className="min-w-0">
                       <p className={`${HR_NUM} text-sm font-semibold text-foreground`}>{o.DocNo}</p>
                       <p className="text-xs text-muted-foreground truncate mt-0.5">
-                        {o.FromProjectName} · {o.FromGodownName} → {o.ToProjectName} · {o.ToGodownName}
+                        {o.FromProjectName} · {o.FromGodownName} → {o.BuyerName || `${o.ToProjectName} · ${o.ToGodownName}`}
                       </p>
                     </div>
                     <div className="text-right shrink-0">
@@ -480,11 +481,13 @@ export default function Payment() {
     if (!canSubmit || !selectedOrder || !selectedBank) return;
     mutation.mutate({
       RPReceivedFrom: selectedOrder.DocNo,
-      RPCustomerName: selectedOrder.ToCompanyName,
-      RPProjectName: selectedOrder.ToProjectName,
+      // A sale to a buyer: the buyer pays, against the project the goods were sold from. An older transfer order:
+      // the receiving project pays.
+      RPCustomerName: selectedOrder.BuyerName ?? selectedOrder.ToCompanyName,
+      RPProjectName: selectedOrder.BuyerName ? selectedOrder.FromProjectName : selectedOrder.ToProjectName,
       RPCompanyName: selectedOrder.FromCompanyName,
       RPCompanyId: selectedOrder.FromCompanyID ?? null,
-      RPProjectId: selectedOrder.ToProjectID ?? null,
+      RPProjectId: selectedOrder.BuyerName ? selectedOrder.FromProjectID ?? null : selectedOrder.ToProjectID ?? null,
       RPDocDate: payDate,
       RPMode: mode,
       RPAmount: parseFloat(amount),
@@ -547,7 +550,9 @@ export default function Payment() {
                   <div className="grid grid-cols-2 sm:grid-cols-4 border-t border-l border-foreground/20">
                     {[
                       { label: "From", value: selectedOrder.FromProjectName, sub: selectedOrder.FromGodownName },
-                      { label: "To", value: selectedOrder.ToProjectName, sub: selectedOrder.ToGodownName },
+                      selectedOrder.BuyerName
+                        ? { label: "Buyer", value: selectedOrder.BuyerName, sub: undefined }
+                        : { label: "To", value: selectedOrder.ToProjectName, sub: selectedOrder.ToGodownName },
                       { label: "Order Date", value: fmtDate(selectedOrder.OrderDate), num: true },
                       { label: "Order Value", value: fmtAmt(selectedOrder.TotalAmount), num: true, big: true },
                     ].map((c) => (
@@ -750,7 +755,7 @@ export default function Payment() {
                         <span className={`${HR_NUM} font-bold text-foreground`}>{fmtAmt(o.TotalAmount)}</span>
                       </div>
                       <p className="text-muted-foreground mt-0.5 truncate">
-                        {o.FromProjectName} → {o.ToProjectName}
+                        {o.FromProjectName} → {o.BuyerName || o.ToProjectName}
                       </p>
                     </button>
                   ))}
