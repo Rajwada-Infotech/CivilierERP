@@ -2,6 +2,7 @@ import { DataTable } from "@/components/ui/DataTable";
 import { Search, ChevronDown, ChevronRight } from "lucide-react";
 import { HEAD, KEY_LINE, RULE, FIELD, chip } from "./config";
 import type { POState } from "./usePurchaseOrder";
+import { SearchableSelect } from "@/components/SearchableSelect";
 
 const TABS = [
   { value: "", label: "All POs" },
@@ -12,7 +13,7 @@ const TABS = [
 
 // The purchase-order register: filters, the list, paging.
 export function PORegister({ m }: { m: POState }) {
-  const { page, setPage, poTypeFilter, setPoTypeFilter, collapsedProjectGroups, setCollapsedProjectGroups, projectFilter, setProjectFilter, searchQuery, setSearchQuery, isLoading, allProjects, totalPages, totalRecords, filteredList, groupedByProject, poColumns } = m;
+  const { page, setPage, poTypeFilter, setPoTypeFilter, collapsedProjectGroups, setCollapsedProjectGroups, projectFilter, setProjectFilter, itemFilter, setItemFilter, items, searchQuery, setSearchQuery, isLoading, allProjects, totalPages, totalRecords, filteredList, groupedByProject, poColumns } = m;
   return (
     <div className="bg-card" style={{ border: RULE }}>
       <div className="px-4 py-3 space-y-3" style={{ borderBottom: RULE }}>
@@ -50,6 +51,24 @@ export function PORegister({ m }: { m: POState }) {
                 </option>
               ))}
             </select>
+            <div className="w-full sm:w-56">
+              <SearchableSelect
+                sheet
+                value={itemFilter}
+                onChange={(v) => {
+                  setItemFilter(v);
+                  setPage(1);
+                }}
+                placeholder="All items"
+                searchPlaceholder="Search items…"
+                options={[
+                  { value: "", label: "All items" },
+                  ...[...items]
+                    .sort((x, y) => String(x.name).localeCompare(String(y.name)))
+                    .map((i) => ({ value: String(i.id), label: i.name })),
+                ]}
+              />
+            </div>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">

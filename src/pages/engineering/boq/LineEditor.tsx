@@ -71,7 +71,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
     44,
     ...(!isItem ? [190] : []),
     220,
-    ...(isItem ? [190, 100] : []), // For Activity, Code
+    ...(isItem ? [190] : []), // For Activity
     160,
     ...(isItem ? [96, 92] : []),
     isItem ? 140 : 110,
@@ -119,7 +119,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
   // Every mode shows 12 columns (+ delete when editable): items get "For Activity"
   // and "Per Unit Qty"; activities get "Area" and "Per Activity Price".
   // Activities also get a leading "Activity Group" column.
-  const colCount = (isItem ? 13 : 11) + (readOnly ? 0 : 1);
+  const colCount = (isItem ? 12 : 11) + (readOnly ? 0 : 1);
 
   return (
     <div
@@ -258,7 +258,6 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                   ...(!isItem ? [["Activity Group", "left"]] : []),
                   [isItem ? "Item" : "Activity", "left"],
                   ...(isItem ? [["For Activity", "left"]] : []),
-                  ...(isItem ? [["Code", "left"]] : []),
                   ["Spec / Notes", "left"],
                   ...(isItem ? [["Item Qty", "right"], ["Wastage %", "right"]] : []),
                   [isItem ? "Per Unit Qty" : "Total Qty", "right"],
@@ -315,9 +314,6 @@ export const LineEditor: React.FC<LineEditorProps> = ({
             ) : (
               (rows as any[]).map((row, idx) => {
                 const amt = parseFloat(row.amount) || 0;
-                const codeVal = isItem
-                  ? row.itemCode || ""
-                  : row.activityCode || "";
 
                 const isEven = idx % 2 === 1;
 
@@ -559,34 +555,6 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                       </td>
                     )}
 
-                    {/* Code (items only) */}
-                    {isItem && (
-                    <td
-                      style={{
-                        borderRight: "1px solid hsl(var(--foreground) / 0.2)",
-                        padding: "8px 10px",
-                      }}
-                    >
-                      <span
-                        style={{
-                          fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
-                          fontVariantNumeric: "tabular-nums",
-                          fontSize: 10,
-                          color: "hsl(var(--muted-foreground))",
-                          background: "hsl(var(--card))",
-                          border: "1px solid hsl(var(--foreground) / 0.3)",
-                          padding: "2px 5px",
-                          display: "inline-block",
-                          maxWidth: "100%",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {codeVal || <em>Auto</em>}
-                      </span>
-                    </td>
-                    )}
 
                     {/* Spec/Notes */}
                     <td

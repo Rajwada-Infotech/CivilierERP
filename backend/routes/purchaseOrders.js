@@ -891,6 +891,9 @@ const listPurchaseOrders = async (req, res) => {
       if (!includeShortClosed) whereConditions.push("ISNULL(po.Status, '') != 'Short Closed'");
       if (companyId) whereConditions.push("po.CompanyId = @companyId");
       if (projectId) whereConditions.push("po.ProjectId = @projectId");
+      // Item filter: POs with at least one line of this item.
+      const itemId = parseInt(req.query.itemId, 10) || null;
+      if (itemId) whereConditions.push("EXISTS (SELECT 1 FROM dbo.PurchaseOrderItems poi WHERE poi.PurchaseOrderID = po.PurchaseOrderID AND poi.ItemId = @itemId)");
       if (req.projectScope) whereConditions.push(projectPredicate(req.projectScope, "po.ProjectId", "").trim());
       const whereClause = whereConditions.length
         ? `WHERE ${whereConditions.join(" AND ")}`
@@ -906,7 +909,8 @@ const listPurchaseOrders = async (req, res) => {
         .input("sourceSaleInvoiceId", sql.Int, sourceSaleInvoiceId)
         .input("poTypeFilter", sql.NVarChar(20), poTypeFilter)
         .input("companyId", sql.Int, companyId)
-        .input("projectId", sql.Int, projectId).query(`
+        .input("projectId", sql.Int, projectId)
+        .input("itemId", sql.Int, itemId).query(`
         ${
           groupByProject
             ? `
