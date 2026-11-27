@@ -51,7 +51,11 @@ async function runDueDemandCheck() {
   // Same hourly pass: Pre-Possession follows the money, for the pages that show its saved status.
   try { await require("./crmWorkflowGuards").refreshPrePossessionStatus(pool); }
   catch (e) { logger.error({ event: "CRM_PRE_POSSESSION_REFRESH_FAILED", err: e.message }, "Pre-Possession refresh failed"); }
-  return { raised };
+  // Same pass: an agreement whose last prerequisite came in some way that didn't start it starts here.
+  let agreements = 0;
+  try { agreements = await require("./crmWorkflowGuards").startReadyAgreements(pool); }
+  catch (e) { logger.error({ event: "CRM_AGREEMENT_CATCH_UP_FAILED", err: e.message }, "Agreement catch-up failed"); }
+  return { raised, agreements };
 }
 
 let timer = null;
@@ -59,7 +63,7 @@ function startDueDemandEngine() {
   const run = () => {
     runDueDemandCheck()
       .then((s) => {
-        if (s.raised) logger.info({ event: "CRM_DEMAND_AUTO_RAISE_DONE", ...s }, "Due demands raised");
+        if (s.raised || s.agreements) logger.info({ event: "CRM_DEMAND_AUTO_RAISE_DONE", ...s }, "Due demands raised / agreements started");
       })
       .catch((e) => logger.error({ event: "CRM_DEMAND_AUTO_RAISE_RUN_FAILED", err: e.message }, "Due demand check failed"));
   };

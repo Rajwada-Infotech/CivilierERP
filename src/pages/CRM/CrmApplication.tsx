@@ -6,14 +6,14 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
-import { SheetShell, SheetMark, statusTone } from "@/components/sheet/Sheet";
+import { SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { SentBackNote, useSentBack, useSentBackStates, SENT_BACK_STATE } from "@/components/crm/CrmListToolbar";
 import { CorrectionBanner, checklistStep, useCorrections } from "./applications/config";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
-import { Plus, ChevronRight, CheckCircle2, Clock, XCircle, Building2, IdCard, ExternalLink, ChevronLeft, Trash2, FileText, User, Phone, FileBadge, MapPin, IndianRupee, Users2, Briefcase, PlayCircle, Ban, Lock, Wallet, AlertTriangle, MoreHorizontal } from "lucide-react";
+import { Plus, ChevronRight, CheckCircle2, Clock, XCircle, Building2, IdCard, ExternalLink, ChevronLeft, Trash2, FileText, User, Phone, FileBadge, MapPin, IndianRupee, Users2, Briefcase, PlayCircle, Ban, Lock, Wallet, AlertTriangle, MoreHorizontal, RefreshCw, Download } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -23,14 +23,23 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { MultiSelectDropdown } from "@/components/ui/MultiSelectDropdown";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import { ApprovalActions } from "@/components/ApprovalActions";
-import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import {
+  CrmGrid, GridColumnChooser, GridSavedViews, GridSearch, GridTabs, exportGrid, useGridPrefs,
+  GRID_BTN, GRID_CARD, GRID_KEY_BRAND, GRID_MENU_GLASS, GRID_PAGE_SIZES, GRID_SHEET_KEYS, GridStatusPill, type GridCol,
+} from "@/components/crm/CrmDataTable";
+const { KEY_INK, KEY_LINE, KEY_RED, LBL, RULE, RULE_SOFT } = GRID_SHEET_KEYS;
+import type { CrmSort } from "@/hooks/useCrmListState";
+import { SentBackPanel } from "@/components/crm/CrmListToolbar";
+import { Initials, asName } from "./payments/parts";
+import { fmtShort } from "./payments/config";
+import { cn } from "@/lib/utils";
 import { usePriceQuote, inr } from "@/lib/crmPriceQuote";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmInvoiceList } from "@/components/crm/CrmInvoiceList";
 import { DateInput } from "@/components/ui/date-input";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
-import { API, EMPTY_FORM, BANK_DETAIL_API, PARKING_API, EXTRA_CHARGE_API, CO_APPLICANT_API, PAY_MODES, STATUSES, appTone, RULE, RULE_SOFT, LBL, KEY_INK, KEY_LINE, KEY_RED, fetchProjectBanks, fetchAllBanks, PAGE_SIZE, type ApplicationListFilters, fetchApplicationsList, fetchStageCounts, fetchAppDetail, STAGES, type Stage, stageLabel, stageIcon, fetchCustomers, fetchLeadOptions, fetchCompanies, fetchProjects, fetchUnits, fetchPlots, fetchBrokers, fetchPaymentPlans, fetchBlockPlanTags, type RateTier, fetchBrokerageRateTiers, inputCls, labelCls } from "./applications/config";
+import { API, EMPTY_FORM, BANK_DETAIL_API, PARKING_API, EXTRA_CHARGE_API, CO_APPLICANT_API, PAY_MODES, STATUSES, appTone, fetchProjectBanks, fetchAllBanks, type ApplicationListFilters, fetchApplicationsList, fetchStageCounts, fetchFocusCounts, FOCUS_KEYS, type FocusKey, fetchAppDetail, STAGES, type Stage, stageLabel, fetchCustomers, fetchLeadOptions, fetchCompanies, fetchProjects, fetchUnits, fetchPlots, fetchBrokers, fetchPaymentPlans, fetchBlockPlanTags, type RateTier, fetchBrokerageRateTiers, inputCls, labelCls } from "./applications/config";
 import { GstBreakdownBox, QuoteSchedule, gstReason } from "./applications/GstBreakdown";
 import { CoApplicantStep } from "./applications/CoApplicantStep";
 import { ApplicationFormPdfDialog } from "./applications/ApplicationFormPdfDialog";
@@ -63,9 +72,12 @@ const CrmApplication: React.FC = () => {
   const [statusFilter, setStatusFilter] = useUrlParam("status", "All", STATUS_FILTERS);
   // In the address, so a refresh or a shared link keeps it.
   const [activeStage, setActiveStage] = useUrlParam<Stage>("stage", "InProcess", STAGES);
+  // What the In Process list is narrowed to (a needs-attention tile); in the address like the stage.
+  const [focus, setFocus] = useUrlParam<FocusKey | "">("focus", "", ["", ...FOCUS_KEYS]);
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(PAGE_SIZE);
+  const [pageSize, setPageSize] = useState<number>(GRID_PAGE_SIZES[0]);
+  const [sort, setSort] = useState<CrmSort>({ key: "CreatedAt", dir: "desc" });
   const [dialogOpen, setDialogOpen] = useState(false);
   const [step, setStep] = useState(1);
   const wizardStepsRef = useRef<HTMLDivElement>(null);
@@ -143,8 +155,9 @@ const CrmApplication: React.FC = () => {
   };
 
   const effectiveStatusFilter = activeStage === "Converted" ? "All" : statusFilter;
-  const listFilters: ApplicationListFilters = { search, status: effectiveStatusFilter, displayStage: activeStage, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId };
-  const hasAppliedFilters = !!(search || effectiveStatusFilter !== "All" || cpb.companyId || cpb.projectId || cpb.blockId);
+  const activeFocus = activeStage === "InProcess" ? focus : "";
+  const listFilters: ApplicationListFilters = { search, status: effectiveStatusFilter, displayStage: activeStage, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId, sortKey: sort.key, sortDir: sort.dir, focus: activeFocus || undefined };
+  const hasAppliedFilters = !!(search || effectiveStatusFilter !== "All" || cpb.companyId || cpb.projectId || cpb.blockId || activeFocus);
   const emptyQueueMessage = hasAppliedFilters
     ? "No applications match these filters. Clear filters or try a broader search."
     : activeStage === "Converted"
@@ -152,7 +165,7 @@ const CrmApplication: React.FC = () => {
       : activeStage === "NotConverted"
         ? "No rejected or cancelled applications yet."
         : "No applications in process yet.";
-  const { data: listData, isLoading, isError, error, refetch: refetchApplications } = useQuery({
+  const { data: listData, isLoading, isFetching, isError, error, refetch: refetchApplications } = useQuery({
     queryKey: ["crm-apps", listFilters, page, pageSize],
     queryFn: () => fetchApplicationsList(listFilters, page, pageSize),
     placeholderData: (prev) => prev,
@@ -163,8 +176,14 @@ const CrmApplication: React.FC = () => {
   // always matches "how many total match everything except which tab is
   // active", independent of pagination.
   const { data: stageCounts = { InProcess: 0, Converted: 0, NotConverted: 0 } } = useQuery({
-    queryKey: ["crm-apps-stage-counts", search, effectiveStatusFilter, cpb],
+    queryKey: ["crm-apps", "stage-counts", search, effectiveStatusFilter, cpb],
     queryFn: () => fetchStageCounts({ search, status: effectiveStatusFilter, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
+    placeholderData: (prev) => prev,
+  });
+  const { data: focusCounts } = useQuery({
+    queryKey: ["crm-apps", "focus-counts", search, effectiveStatusFilter, cpb],
+    queryFn: () => fetchFocusCounts({ search, status: effectiveStatusFilter, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
+    enabled: activeStage === "InProcess",
     placeholderData: (prev) => prev,
   });
   // Any filter change resets back to page 1 — otherwise a narrower result
@@ -177,6 +196,7 @@ const CrmApplication: React.FC = () => {
     // Status filters apply to the application record. The Converted queue is
     // grouped by booking progress, so it must not inherit a hidden filter.
     if (stage === "Converted") setStatusFilter("All");
+    if (stage !== "InProcess") setFocus("");
   };
   useEffect(() => {
     // Normalize shared links such as ?stage=Converted&status=Pending too.
@@ -1188,64 +1208,22 @@ const CrmApplication: React.FC = () => {
       setCreatingBookingId(null);
     }
   };
-  const convertedColumns: ColumnDef<any, unknown>[] = [
-    { accessorKey: "ApplicationNo", header: "Application", size: 120,
-      cell: (i) => (
-        <button type="button" onClick={() => openApplication(i.row.original.Id)} className="text-left font-heading tabular-nums text-xs font-semibold text-primary hover:underline">
-          {i.getValue() as string}
-          {i.row.original.UnitChangeNo && <span className="block text-[0.6875rem] font-medium font-sans text-sky-700 dark:text-sky-400 whitespace-nowrap">Unit change {i.row.original.UnitChangeNo}</span>}
-        </button>
-      ) },
-    // Applicant and contact stay together in one scan-friendly column;
-    // mobile uses the focused application card below.
-    { accessorKey: "ApplicantName", header: "Applicant", size: 190,
-      cell: (i) => (
-        <div>
-          <button type="button" onClick={() => openApplication(i.row.original.Id)} className="block w-full text-left font-medium text-foreground break-words">
-            <ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} />
-          </button>
-          {i.row.original.Mobile
-            ? <span className="text-xs text-muted-foreground">{i.row.original.Mobile}</span>
-            : <span className="text-xs text-muted-foreground">No mobile on file</span>}
-        </div>
-      ) },
-    // Booked-on date sits under the booking so the row fits a laptop screen.
-    { accessorKey: "BookingNo", header: "Booking", size: 170,
-      cell: (i) => (
-        <button type="button" onClick={() => openApplication(i.row.original.Id)} className="w-full text-left">
-          <span className="block font-heading tabular-nums text-xs font-semibold text-foreground">{i.row.original.BookingNo}</span>
-          <span className="block text-[0.6875rem] text-muted-foreground tabular-nums">{i.row.original.BookingDate ? String(i.row.original.BookingDate).slice(0, 10) : "—"}</span>
-          <SheetMark text={i.row.original.BookingStatus || "—"} tone={i.row.original.BookingStatus ? appTone(i.row.original.BookingStatus) : "none"} />
-        </button>
-      ) },
-    { id: "unitProject", header: "Unit / Project", size: 200, enableSorting: false,
-      cell: (i) => (
-        <button type="button" onClick={() => openApplication(i.row.original.Id)} className="text-left text-xs">
-          {[i.row.original.BookingProjectName, i.row.original.BookingUnitNo].filter(Boolean).join(" · ") || "—"}
-        </button>
-      ) },
-    { accessorKey: "BookingTotalValue", header: "Value", size: 150,
-      cell: (i) => {
-        const val = i.row.original.BookingGrandTotal ?? i.row.original.BookingTotalValue;
-        return <button type="button" onClick={() => openApplication(i.row.original.Id)} className="text-left text-xs font-medium">{val ? `₹${Number(val).toLocaleString("en-IN")}` : "—"}</button>;
-      } },
-    { id: "actions", header: "", size: 155, enableSorting: false,
-      cell: (i) => {
-        const r = i.row.original;
+  // Row actions and status, shared by the grid and the phone cards.
+  const convertedActions = (r: any) => {
         const canRequestCxl = (canEditApplications || canRequestBookingCancellation) && r.BookingId
           && r.BookingStatus !== CrmStatus.CANCELLED && r.DeedStatus !== "Registered";
         return (
           <div className="flex items-center gap-1.5">
             {r.BookingId && <button type="button" onClick={() => navigate(`/crm/bookings?view=${r.BookingId}`)} className={`${KEY_LINE} h-7 px-2`}>
-              <Building2 size={12} /> Open booking
+              <ExternalLink size={12} /> Open booking
             </button>}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button aria-label={`More actions for ${r.ApplicationNo || "this application"}`} className="h-7 w-7 inline-flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-primary/10" title="More actions">
+                <button aria-label={`More actions for ${r.ApplicationNo || "this application"}`} className="h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted" title="More actions">
                   <MoreHorizontal size={15} />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56 rounded-none">
+              <DropdownMenuContent align="end" className={cn("w-56", GRID_MENU_GLASS)}>
                 <DropdownMenuItem onClick={() => openApplication(r.Id)} className="gap-2"><FileText size={14} /> View details</DropdownMenuItem>
               {r.Stage === "Converted" && (
                 <DropdownMenuItem onClick={() => setPdfDialogApp({ id: r.Id, no: r.ApplicationNo })} className="gap-2"><FileText size={14} /> Application form (PDF)</DropdownMenuItem>
@@ -1267,8 +1245,7 @@ const CrmApplication: React.FC = () => {
             </DropdownMenu>
           </div>
         );
-      } },
-  ];
+  };
 
   // Each application's booking sent back / resubmitted — for the row's Correct / Recheck button.
   const sentBackByApp = useSentBackStates("ApplicationId");
@@ -1280,50 +1257,7 @@ const CrmApplication: React.FC = () => {
       .map((r) => checklistStep(r.ItemKey));
     return steps.length ? Math.min(...steps) : undefined;
   };
-  const inProcessColumns: ColumnDef<any, unknown>[] = [
-    // Columns are combined so status and actions fit a laptop screen without
-    // scrolling sideways; nothing shown before is dropped.
-    { accessorKey: "ApplicationNo", header: "Application", size: 120,
-      cell: (i) => (
-        <div>
-          <button type="button" onClick={() => openApplication(i.row.original.Id)} className="text-left font-heading tabular-nums text-xs font-semibold text-foreground hover:underline">{i.getValue() as string}</button>
-          {i.row.original.UnitChangeNo && <div className="text-[0.6875rem] font-medium text-sky-700 dark:text-sky-400 whitespace-nowrap">Unit change {i.row.original.UnitChangeNo}</div>}
-          <div className="text-[0.6875rem] text-muted-foreground tabular-nums">{i.row.original.CreatedAt ? String(i.row.original.CreatedAt).slice(0, 10) : "—"}</div>
-        </div>
-      ) },
-    { /* Applicant and contact stay together in one scan-friendly column;
-       mobile uses the focused application card below. */
-      accessorKey: "ApplicantName", header: "Applicant", size: 180,
-      cell: (i) => (
-        <div>
-          <button type="button" onClick={() => openApplication(i.row.original.Id)} className="block w-full text-left font-medium text-foreground break-words">
-            <ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} />
-          </button>
-          {i.row.original.Mobile
-            ? <span className="text-xs text-muted-foreground">{i.row.original.Mobile}</span>
-            : <span className="text-xs text-muted-foreground">No mobile on file</span>}
-        </div>
-      ) },
-    { id: "interestedProject", header: "Interested in", size: 170, enableSorting: false,
-      cell: (i) => {
-        const r = i.row.original;
-        const typeBit = [r.BhkPreference, r.PropertyType].filter(Boolean).join(" · ") || r.UnitTypeFromMaster || "";
-        return (
-          <button type="button" onClick={() => openApplication(r.Id)} className="w-full text-left">
-            <span className="block">{[r.InterestedProject, typeBit].filter(Boolean).join(" · ") || "—"}</span>
-            {r.RatePerSqFt ? <span className="block text-xs text-muted-foreground tabular-nums">₹{Number(r.RatePerSqFt).toLocaleString("en-IN")}/sqft</span> : null}
-          </button>
-        );
-      } },
-    { accessorKey: "AssigneeName", header: "Assigned to", size: 130,
-      cell: (i) => (
-        <button type="button" onClick={() => openApplication(i.row.original.Id)} className="text-left text-xs">
-          {i.getValue() as string || <span className="text-muted-foreground">Unassigned</span>}
-        </button>
-      ) },
-    { accessorKey: "Status", header: "Status", size: 190,
-      cell: (i) => {
-        const r = i.row.original;
+  const statusCell = (r: any) => {
         // When a live Booking exists (Stage='Converted'), the Application's
         // DB Status is permanently 'Pending' — never updated, by design.
         // Displaying "Pending" here misleads staff into thinking the record
@@ -1337,8 +1271,8 @@ const CrmApplication: React.FC = () => {
         const hasPreferredInventory = !!(r.PreferredUnitId != null || r.PreferredUnitIdsCsv || r.PreferredPlotIdsCsv);
         return (
           // The pinned Status column is nowrap; the notes under the mark wrap.
-          <button type="button" onClick={() => openApplication(r.Id)} className="text-left space-y-0.5 whitespace-normal">
-            <span className="whitespace-nowrap"><SheetMark text={displayStatus} tone={appTone(displayStatus)} /></span>
+          <div className="space-y-1 min-w-0 [&>span]:truncate [&>span]:max-w-[17rem]">
+            <GridStatusPill status={displayStatus} />
             {/* For NotConverted applications that had a booking which was later
                 cancelled/rejected — show the dead booking number so staff know
                 this isn't the same as an application that was simply rejected
@@ -1383,15 +1317,15 @@ const CrmApplication: React.FC = () => {
               <span className="text-[0.6875rem] text-muted-foreground">
                 {r.BookingNo
                   ? `Booking ${r.BookingStatus || "closed"} — application closed`
-                  : `${r.Status} — no further action`}
+                  : r.Status === "Converted"
+                    ? "Its booking is no longer on this application — closed"
+                    : `${r.Status} — no further action`}
               </span>
             )}
-          </button>
+          </div>
         );
-      } },
-    { id: "actions", header: "", size: 150, enableSorting: false,
-      cell: (i) => {
-        const a = i.row.original;
+  };
+  const inProcessActions = (a: any) => {
         const canResume = canEditApplications && activeStage === "InProcess" && isResumeEditable(a);
         // Put the next workflow action on the row; reserve the menu for
         // secondary actions such as viewing details, PDF, cancel, and delete.
@@ -1407,7 +1341,7 @@ const CrmApplication: React.FC = () => {
         // Sent back: the preparer corrects it in the form; resubmitted: the checker looks at the booking again.
         const sb = sentBackByApp.get(a.Id);
         return (
-          <div className="flex flex-col gap-1.5 py-0.5">
+          <div className="flex items-center justify-end gap-1.5">
             <div className="flex items-center gap-1.5">
               {sb === "SentBack" && canEditApplications && (
                 <button onClick={() => loadApplicationIntoWizard(a.Id, firstCorrectionStep(a.Id))} disabled={loadingApplication} className={`${KEY_INK} h-7 px-2`}>
@@ -1436,7 +1370,7 @@ const CrmApplication: React.FC = () => {
               )}
               {activeStage === "InProcess" && a.Stage === "Converted" && a.BookingId && (
                 <button onClick={() => navigate(`/crm/bookings?view=${a.BookingId}`)} className={`${KEY_LINE} h-7 px-2`}>
-                  <Building2 size={12} /> Open booking
+                  <ExternalLink size={12} /> Open booking
                 </button>
               )}
               {canCreateBooking && (
@@ -1461,11 +1395,11 @@ const CrmApplication: React.FC = () => {
               {hasMenu && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <button aria-label={`More actions for ${a.ApplicationNo || "this application"}`} className="h-7 w-7 inline-flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-primary/10" title="More actions">
+                    <button aria-label={`More actions for ${a.ApplicationNo || "this application"}`} className="h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted" title="More actions">
                       <MoreHorizontal size={15} />
                     </button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-52 rounded-none">
+                  <DropdownMenuContent align="end" className={cn("w-56", GRID_MENU_GLASS)}>
                     <DropdownMenuItem onClick={() => openApplication(a.Id)} className="gap-2"><FileText size={14} /> View details</DropdownMenuItem>
                     {canResume && !resumeOnRow && (
                       <DropdownMenuItem onClick={() => loadApplicationIntoWizard(a.Id)} disabled={loadingApplication} className="gap-2">
@@ -1495,14 +1429,15 @@ const CrmApplication: React.FC = () => {
             </div>
           </div>
         );
-      } },
-  ];
+  };
+  const rowActions = (a: any) => (activeStage === "Converted" ? convertedActions(a) : inProcessActions(a));
 
   // Phone cards use a sales workflow hierarchy instead of turning every
   // desktop table column (campaign, source, etc.) into an equal-weight field.
   // The existing action cell is passed through so role-gated actions stay in
   // one place and behave identically in both layouts.
-  const renderMobileApplicationCard = (a: any, actionContent: React.ReactNode) => {
+  const renderMobileApplicationCard = (a: any) => {
+    const actionContent = rowActions(a);
     const hasBooking = a.Stage === "Converted";
     const hasBookingRecord = hasBooking || !!a.BookingNo;
     const hasPreferredInventory = !!(a.PreferredUnitId != null || a.PreferredUnitIdsCsv || a.PreferredPlotIdsCsv);
@@ -1571,59 +1506,166 @@ const CrmApplication: React.FC = () => {
     );
   };
 
-  usePageRights("crm-applications");
+  // ── The list: the Bookings grid — sortable on the server, columns chosen / ordered / sized per viewer, saved
+  // views, Excel export of every matching row, and phone cards. ──────────────────────────────────────────────────
+  const hasBookingRecord = (a: any) => a.Stage === "Converted" || !!a.BookingNo;
+  const appValue = (a: any) => (hasBookingRecord(a) ? Number(a.BookingGrandTotal ?? a.BookingTotalValue) || 0 : 0);
+  const appProperty = (a: any) => hasBookingRecord(a)
+    ? { project: a.BookingProjectName, unit: a.BookingUnitNo }
+    : { project: a.InterestedProject || a.ProjectMasterName, unit: a.PlotNames || a.PreferredUnitName || [a.BhkPreference, a.PropertyType].filter(Boolean).join(" · ") || a.UnitTypeFromMaster };
+  const appDate = (a: any) => (a.DateOfApply || a.CreatedAt ? String(a.DateOfApply || a.CreatedAt).slice(0, 10) : "");
+  const COLS: GridCol<any>[] = [
+    { id: "application", label: "Application", sortKey: "ApplicationNo", locked: true, csv: (a) => a.ApplicationNo,
+      cell: (a) => (
+        <div>
+          <div className="text-xs font-semibold tabular-nums text-foreground">{a.ApplicationNo}</div>
+          {a.UnitChangeNo && <div className="text-[0.6875rem] font-medium text-sky-700 dark:text-sky-400 whitespace-nowrap">Unit change {a.UnitChangeNo}</div>}
+          <div className="text-[0.6875rem] text-muted-foreground tabular-nums">{appDate(a) || "—"}</div>
+        </div>
+      ) },
+    { id: "applied", label: "Applied on", sortKey: "CreatedAt", hiddenByDefault: true, csv: appDate,
+      cell: (a) => <span className="text-xs tabular-nums">{appDate(a) || "—"}</span> },
+    { id: "applicant", label: "Applicant", sortKey: "Applicant", csv: (a) => a.ApplicantName,
+      cell: (a) => (
+        <div className="flex items-center gap-2.5 min-w-0 md:w-[10.5rem] 2xl:w-[12.5rem] whitespace-normal">
+          <Initials name={a.ApplicantName} />
+          <div className="min-w-0">
+            <div className="font-semibold text-foreground line-clamp-2 break-words capitalize">
+              <ApplicantNames name={asName(a.ApplicantName)} bookingId={a.BookingId} applicationId={a.Id} />
+            </div>
+            <div className="text-xs text-muted-foreground tabular-nums">{a.Mobile || "No mobile on file"}</div>
+          </div>
+        </div>
+      ) },
+    { id: "mobile", label: "Mobile", hiddenByDefault: true, csv: (a) => a.Mobile,
+      cell: (a) => <span className="text-xs tabular-nums">{a.Mobile || "—"}</span> },
+    { id: "property", label: "Property", sortKey: "Project",
+      csv: (a) => { const p = appProperty(a); return [p.project, p.unit].filter(Boolean).join(" / "); },
+      cell: (a) => {
+        const p = appProperty(a);
+        return (
+          <div className="min-w-0 md:max-w-[9rem] 2xl:max-w-[11rem]" title={[p.project, p.unit].filter(Boolean).join(" / ")}>
+            <div className="truncate">{p.project || "—"}</div>
+            <div className="text-xs text-muted-foreground truncate">
+              {[p.unit, !hasBookingRecord(a) && a.RatePerSqFt ? `₹${Number(a.RatePerSqFt).toLocaleString("en-IN")}/sqft` : null].filter(Boolean).join(" · ") || "Property not selected"}
+            </div>
+          </div>
+        );
+      } },
+    { id: "booking", label: "Booking", sortKey: "Booking", csv: (a) => a.BookingNo || "",
+      cell: (a) => a.BookingNo ? (
+        <div className="space-y-0.5">
+          <div className="text-xs font-semibold tabular-nums">{a.BookingNo}</div>
+          <div className="text-[0.6875rem] text-muted-foreground tabular-nums">{a.BookingDate ? String(a.BookingDate).slice(0, 10) : "—"}</div>
+        </div>
+      ) : <span className="text-xs text-muted-foreground">—</span> },
+    { id: "value", label: "Value", sortKey: "Value", align: "right", csv: (a) => appValue(a) || "",
+      cell: (a) => {
+        const v = appValue(a);
+        if (!v) return <span className="text-muted-foreground">—</span>;
+        const cleared = Number(a.BookingCleared) || 0;
+        const pct = Math.min(100, Math.round((cleared / v) * 100));
+        return (
+          <div className="space-y-1 min-w-[7.5rem] text-right">
+            <div className="font-semibold tabular-nums">{fmtShort(v)}</div>
+            <div className="h-1.5 w-full rounded-full overflow-hidden bg-muted" role="img" aria-label={`${fmtShort(cleared)} cleared of ${fmtShort(v)}`}>
+              <div className="h-full bg-emerald-500" style={{ width: `${pct}%` }} />
+            </div>
+            <div className="text-[0.625rem] text-muted-foreground tabular-nums">{fmtShort(cleared)} cleared · {pct}%</div>
+          </div>
+        );
+      } },
+    { id: "assignee", label: "Assigned to", sortKey: "Assignee", csv: (a) => a.AssigneeName || "",
+      cell: (a) => <span className="text-xs">{a.AssigneeName || <span className="text-muted-foreground">Unassigned</span>}</span> },
+    { id: "source", label: "Source", hiddenByDefault: true, csv: (a) => [a.Source, a.CampaignName, a.ChannelPartnerName].filter(Boolean).join(" · "),
+      cell: (a) => <span className="text-xs">{[a.Source, a.CampaignName, a.ChannelPartnerName].filter(Boolean).join(" · ") || "—"}</span> },
+    { id: "plan", label: "Payment plan", hiddenByDefault: true, csv: (a) => a.PaymentPlanName || "",
+      cell: (a) => <span className="text-xs">{a.PaymentPlanName || "—"}</span> },
+    { id: "status", label: "Status", sortKey: "Status", csv: (a) => a.Status,
+      cell: (a) => <div className="min-w-[11rem] max-w-[16rem]">{statusCell(a)}</div> },
+    { id: "next", label: "Next", locked: true,
+      cell: (a) => <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>{rowActions(a)}</div> },
+  ];
+  const [prefs, setPrefs] = useGridPrefs("crm-applications-cols", COLS);
+  const rights = usePageRights("crm-applications");
+  const [exporting, setExporting] = useState(false);
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const rows: any[] = [];
+      for (let p = 1; ; p++) {
+        const r = await fetchApplicationsList(listFilters, p, 200);
+        rows.push(...r.rows);
+        if (rows.length >= r.total || !r.rows.length) break;
+      }
+      exportGrid(rows, COLS.filter((c) => c.locked || !prefs.hidden.includes(c.id)), "applications");
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    } finally {
+      setExporting(false);
+    }
+  };
+  const clearFilters = () => { setSearchInput(""); setSearch(""); setStatusFilter("All"); setFocus(""); setCpb({ companyId: "", projectId: "", blockId: "" }); setPage(1); };
+  // The In Process queue's needs-attention tiles: each counts every matching application and narrows the list to it.
+  const FOCUS_TILES: { key: FocusKey; label: string; hint: string; tone: string }[] = [
+    { key: "draft", label: "Not submitted", hint: "Complete the wizard and submit", tone: "bg-slate-400" },
+    { key: "noProperty", label: "No property selected", hint: "Edit to add a unit or plot", tone: "bg-amber-500" },
+    { key: "unitUnavailable", label: "Unit unavailable", hint: "Re-pick a unit", tone: "bg-red-500" },
+    { key: "readyToBook", label: "Ready to book", hint: "Submitted — booking not yet created", tone: "bg-primary" },
+    { key: "inApproval", label: "Booking in approval", hint: "Data Review, Marketing Head, Director", tone: "bg-sky-500" },
+  ];
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "CRM", "Applications"]} />
-      <SheetShell
-        eyebrow="CivilierERP · CRM"
-        title="Applications"
-        subtitle="Create applications, track their progress, and continue unfinished work from the queue."
-        action={
-          canCreateApplications && (
-            <button onClick={openNewWizard} className={`${KEY_INK} h-9 px-4 shrink-0`}>
-              <Plus size={13} /> New application
+      <div className="space-y-4">
+        <section className="rounded-xl border border-border bg-card px-5 py-4 flex flex-wrap items-center justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">CivilierERP · CRM</p>
+            <h1 className="mt-0.5 text-xl font-semibold tracking-tight text-foreground">Applications</h1>
+            <p className="mt-0.5 text-xs text-muted-foreground">Create applications, track their progress, and continue unfinished work from the queue.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={() => qc.invalidateQueries({ queryKey: ["crm-apps"] })} disabled={isFetching}
+              className={cn(GRID_BTN, "w-9 !px-0")} title="Refresh" aria-label="Refresh">
+              <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
             </button>
-          )
-        }
-      >
-      <div className="space-y-5 crm-application-queue">
-        <div className="bg-card" style={{ border: RULE }}>
-          <div className="px-5 py-3 flex items-center justify-between gap-3" style={{ borderBottom: RULE }}>
-            <div>
-              <h2 className="text-sm font-semibold text-foreground">Application queue</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">Choose a queue, then open an application to review or continue it.</p>
-            </div>
-            <span aria-live="polite" aria-atomic="true" className="text-xs text-muted-foreground shrink-0">
+            {canCreateApplications && <button type="button" onClick={openNewWizard} className={cn(GRID_KEY_BRAND, "h-9 px-3")}><Plus size={13} /> New application</button>}
+            <span aria-live="polite" aria-atomic="true" className="ml-1 text-xs text-muted-foreground tabular-nums">
               {total.toLocaleString("en-IN")} {hasAppliedFilters ? (total === 1 ? "match" : "matches") : (total === 1 ? "application" : "applications")}
             </span>
           </div>
-          {/* overflow-y-hidden pins the vertical axis: overflow-x-auto alone turns overflow-y to auto too, and a
-              sub-pixel overflow from the badges then showed a native scrollbar on this row. */}
-          <div aria-label="Application queues" className="flex items-stretch overflow-x-auto overflow-y-hidden" style={{ borderBottom: RULE }}>
-            {STAGES.map((stg) => {
-              const Icon = stageIcon[stg];
-              const active = activeStage === stg;
-              return (
-                <button key={stg} type="button" aria-pressed={active} onClick={() => changeStage(stg)}
-                  className={`inline-flex items-center gap-2 px-4 h-11 font-heading text-[0.6875rem] font-semibold uppercase tracking-[0.1em] shrink-0 transition-colors ${active ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground hover:bg-primary/5"}`}
-                  style={{ borderRight: RULE_SOFT }}>
-                  <Icon size={13} /> {stageLabel[stg]}
-                  <span className="tabular-nums">{stageCounts[stg]}</span>
-                </button>
-              );
-            })}
-          </div>
+        </section>
+        {/* This page's entries sent back / resubmitted. */}
+        <SentBackPanel />
 
-          <div className="px-5 py-4 flex flex-wrap items-center gap-3" style={{ borderBottom: RULE }}>
-            <input type="search" aria-label="Search applications by applicant, mobile, or application number" value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && updateFilter(setSearch)(searchInput.trim())}
-              placeholder="Search name, mobile, application no…"
-              className="h-9 w-full sm:w-72 border border-foreground/40 focus:border-foreground bg-card px-3 text-xs text-foreground outline-none" />
+        <div className={cn(GRID_CARD, "rounded-xl overflow-hidden")}>
+          <GridTabs label="Application queues" active={activeStage} onChange={(k) => changeStage(k)}
+            tabs={STAGES.map((stg) => ({ key: stg, label: stageLabel[stg], count: stageCounts[stg] }))} />
+          {activeStage === "InProcess" && (
+            <div role="group" aria-label="Needs attention" className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2 px-3 py-3 border-b border-border bg-muted/30">
+              {FOCUS_TILES.map((t) => {
+                const on = focus === t.key;
+                const n = focusCounts?.[t.key];
+                return (
+                  <button key={t.key} type="button" aria-pressed={on} onClick={() => { setFocus(on ? "" : t.key); setPage(1); }}
+                    className={cn("text-left rounded-lg border px-3 py-2.5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+                      on ? "border-primary bg-primary/[0.07] shadow-sm" : "border-border bg-card hover:border-foreground/25", n === 0 && !on && "opacity-60")}>
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-1.5 text-xs font-medium text-foreground"><span className={cn("h-2 w-2 rounded-full", t.tone)} />{t.label}</span>
+                      <span className="text-lg font-semibold tabular-nums leading-none">{n ?? "–"}</span>
+                    </span>
+                    <span className="block mt-1 text-[0.6875rem] text-muted-foreground truncate">{on ? "Showing these · tap to show all" : t.hint}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <div className="px-3 py-2 flex flex-wrap items-center gap-2 border-b border-border">
+            <GridSearch value={searchInput} onChange={setSearchInput} placeholder="Search name, mobile, application no…" />
             {activeStage !== "Converted" && (
               <Select value={statusFilter} onValueChange={updateFilter(setStatusFilter)}>
-                <SelectTrigger className="w-auto min-w-[140px] h-9 rounded-none border-foreground/40 text-xs">
+                <SelectTrigger className="w-auto min-w-[150px] h-8 rounded-md text-xs" aria-label="Status">
                   <SelectValue placeholder="All statuses" />
                 </SelectTrigger>
                 <SelectContent>
@@ -1637,28 +1679,30 @@ const CrmApplication: React.FC = () => {
               </Select>
             )}
             <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
-            {hasAppliedFilters && (
-              <button onClick={() => { updateFilter(setSearchInput)(""); setSearch(""); setStatusFilter("All"); setCpb({ companyId: "", projectId: "", blockId: "" }); setPage(1); }}
-                className={`${KEY_LINE} h-9 px-3`}>Clear filters</button>
-            )}
-          </div>
-
-          {isError ? (
-            <div role="alert" className="px-5 py-10 flex flex-col items-center gap-3 text-center">
-              <p className="text-sm text-destructive">{(error as Error)?.message || "Could not load applications."}</p>
-              <button type="button" onClick={() => refetchApplications()} className={`${KEY_LINE} h-9 px-4`}>Try again</button>
+            {hasAppliedFilters && <button type="button" onClick={clearFilters} className={GRID_BTN}>Clear filters</button>}
+            <div className="ml-auto flex items-center gap-2">
+              <GridSavedViews storageKey="crm-applications-views"
+                current={{ status: statusFilter, search: searchInput.trim(), cpb, sort, pageSize }}
+                onApply={(v) => {
+                  setPageSize(GRID_PAGE_SIZES.includes(v.pageSize as typeof GRID_PAGE_SIZES[number]) ? v.pageSize : GRID_PAGE_SIZES[0]);
+                  setStatusFilter((STATUS_FILTERS.includes(v.status) ? v.status : "All") as typeof statusFilter);
+                  setSearchInput(v.search || ""); setSearch(v.search || "");
+                  setCpb(v.cpb || { companyId: "", projectId: "", blockId: "" });
+                  if (v.sort) setSort(v.sort);
+                  setPage(1);
+                }} />
+              <GridColumnChooser cols={COLS} prefs={prefs} onChange={setPrefs} />
+              {rights.canExport && <button type="button" onClick={handleExport} disabled={exporting || !total} className={GRID_BTN} title="Export to Excel">
+                <Download size={13} /> <span className="hidden md:inline">{exporting ? "Exporting…" : "Export"}</span>
+              </button>}
             </div>
-          ) : (
-            <DataTable serverPagination={{ page, pageSize, total, onPageChange: setPage, onPageSizeChange: (n) => { setPageSize(n); setPage(1); } }}
-              data={apps}
-              columns={activeStage === "Converted" ? convertedColumns : inProcessColumns}
-              mobileCardRenderer={renderMobileApplicationCard}
-              searchable={false}
-              loading={isLoading}
-              emptyMessage={emptyQueueMessage}
-              className="border-0"
-            />
-          )}
+          </div>
+          <CrmGrid cols={COLS} prefs={prefs} onPrefs={setPrefs} rows={apps} rowKey={(a: any) => a.Id} noRowNumbers mobileCardRenderer={renderMobileApplicationCard}
+            loading={isLoading} fetching={isFetching} error={isError ? translateError((error as Error)?.message || "Could not load applications.") : null} onRetry={() => refetchApplications()}
+            sort={sort} onSort={(k) => { setSort((s) => (s.key === k ? { key: k, dir: s.dir === "asc" ? "desc" : "asc" } : { key: k, dir: "asc" })); setPage(1); }}
+            onRowClick={(a: any) => openApplication(a.Id)} activeKey={viewingAppId}
+            empty={emptyQueueMessage}
+            page={page} pageSize={pageSize} total={total} onPage={setPage} onPageSize={(s) => { setPageSize(s); setPage(1); }} />
         </div>
       </div>
 
@@ -1666,7 +1710,7 @@ const CrmApplication: React.FC = () => {
           applying for (unit/parking/KYC/docs). No money changes hands or
           gets recorded here — that's entirely the Booking page's job. */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); resetWizard(); } }}>
-        <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto p-4 sm:p-6 gap-4 rounded-none" style={{ border: RULE }}>
+        <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto p-4 sm:p-6 gap-4 rounded-xl">
           <DialogHeader className="space-y-0.5">
             <DialogTitle className="font-heading text-[0.75rem] font-bold uppercase tracking-[0.14em] flex items-center gap-2">
               {/* An existing one (resumed draft, or Edit / Fix & Resubmit) has its number: not "new". */}
@@ -2422,7 +2466,7 @@ const CrmApplication: React.FC = () => {
           actions that actually change something (Resume, Approve/Reject,
           View Booking) stay on the row itself, not here. ── */}
       <Dialog open={viewingAppId != null} onOpenChange={(o) => { if (!o) closeApplication(); }}>
-        <DialogContent className="w-[96vw] max-w-6xl max-h-[92vh] overflow-y-auto rounded-none p-0 gap-0" style={{ border: RULE }}>
+        <DialogContent className="w-[96vw] max-w-6xl max-h-[92vh] overflow-y-auto rounded-xl p-0 gap-0">
           <DialogHeader className="sticky top-0 z-10 bg-background px-6 pt-5 pb-4 border-b border-border">
             <DialogTitle className="font-heading flex flex-wrap items-center gap-2 text-lg pr-8">
               {viewingAppDetail ? (
@@ -2804,7 +2848,7 @@ const CrmApplication: React.FC = () => {
           overlay sat outside the open view dialog, which blocks typing and
           clicks there. */}
       <Dialog open={!!cancellingApp} onOpenChange={(o) => { if (!o) { setCancellingApp(null); setCancelRemarks(""); } }}>
-        <DialogContent hideCloseButton elevated className="max-w-md rounded-none space-y-4" style={{ border: RULE }}>
+        <DialogContent hideCloseButton elevated className="max-w-md rounded-xl space-y-4">
             <DialogHeader><DialogTitle className="text-base font-semibold font-heading">Cancel Application?</DialogTitle></DialogHeader>
             <div className="space-y-3">
               <p className="text-sm text-muted-foreground">
@@ -2851,7 +2895,6 @@ const CrmApplication: React.FC = () => {
         />
       )}
       {ask.node}
-    </SheetShell>
     </>
   );
 };

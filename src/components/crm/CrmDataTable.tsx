@@ -243,6 +243,8 @@ export const GRID_TD = "h-9 px-3 border-b border-border/70 align-middle";
 export const GRID_KEY = "inline-flex items-center justify-center gap-1.5 text-xs font-medium rounded-md border border-border bg-card text-primary hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-40 disabled:cursor-not-allowed";
 export const GRID_KEY_BRAND = "inline-flex items-center justify-center gap-1.5 text-xs font-semibold rounded-md border border-primary bg-primary text-primary-foreground hover:bg-primary/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-40 disabled:cursor-not-allowed";
 export const GRID_KEY_DANGER = "inline-flex items-center justify-center gap-1.5 text-xs font-semibold rounded-md border border-destructive bg-destructive text-destructive-foreground hover:bg-destructive/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40 disabled:opacity-40 disabled:cursor-not-allowed";
+/** A row's ⋯ menu: light glass over the grid. */
+export const GRID_MENU_GLASS = "rounded-2xl p-1.5 border border-white/60 dark:border-white/10 bg-white/55 dark:bg-slate-900/55 backdrop-blur-2xl backdrop-saturate-150 shadow-[0_10px_40px_-8px_rgba(15,23,42,0.25)] [&_[role=menuitem]]:rounded-lg [&_[role=separator]]:bg-foreground/10";
 export const GRID_BTN = `${GRID_KEY} h-9 px-3`;
 export const GRID_BTN_BRAND = `${GRID_KEY_BRAND} h-9 px-3`;
 export const GRID_LABEL = "text-xs text-muted-foreground";

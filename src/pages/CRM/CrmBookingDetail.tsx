@@ -1,4 +1,5 @@
 import { CrmStatus, bookingWorkflowStageLabel, isBookingClosed, bookingSendBack, bookingSendBackChain, bookingSendBackChoices, CERTIFICATE_TERMS } from "@/constants/crmStatuses";
+import { BookingReminders } from "./CrmReminderSetup";
 import { round2, sumMoney } from "@/lib/crmPriceQuote";
 import { SendBackChoices } from "@/components/ApprovalActions";
 import { useCanApprove } from "@/hooks/useCanApprove";
@@ -2300,6 +2301,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     </button>
                   </div>
                 )}
+
+                <BookingReminders bookingId={Number(booking.Id)} canEdit={canEdit} />
 
                 {renderTabChecklist("Payment & Invoice")}
               </div>

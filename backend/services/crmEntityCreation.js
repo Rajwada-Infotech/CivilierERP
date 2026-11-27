@@ -880,10 +880,13 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   const appRow = await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId))
     .query("SELECT Status, IsActive, PaymentPlanId, BrokerId, BrokerageRatePercent, BrokeragePaymentPlan, ChannelPartnerId, CustomerId FROM dbo.CrmApplication WHERE Id = @aid");
   if (!appRow.recordset.length) throw new CrmCreationError("Application not found");
-  const deadApplicationStatuses = ["Rejected", "Cancelled", "Expired"];
+  // Converted: a resale / ownership-change buyer's application, which takes an existing booking (moved, never
+  // created here); once that booking leaves it, it is closed.
+  const deadApplicationStatuses = ["Rejected", "Cancelled", "Expired", "Converted"];
   if (appRow.recordset[0].IsActive === false || deadApplicationStatuses.includes(appRow.recordset[0].Status)) {
-    throw new CrmCreationError(
-      `A Booking can't be created for an application that is ${appRow.recordset[0].Status}`, 400);
+    throw new CrmCreationError(appRow.recordset[0].Status === "Converted"
+      ? "This application took over a booking in a resale or ownership change and is closed; it can't have a new booking."
+      : `A Booking can't be created for an application that is ${appRow.recordset[0].Status}`, 400);
   }
 
   if (isPlotBooking) {

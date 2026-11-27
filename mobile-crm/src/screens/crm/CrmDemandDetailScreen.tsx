@@ -27,6 +27,7 @@ import { fonts } from "@/theme/fonts";
 import { useBrand } from "@/theme/ThemeContext";
 import type { MainStackParamList } from "@/navigation/MainStack";
 import { ActionKey, CRM, Kv, Pill, Section, fmtDate, money, words } from "./ui";
+import { BookingRemindersSection } from "./CrmForms";
 
 const DEMAND_TONES: Record<string, { label: string; color: string }> = {
   Paid: { label: "Paid", color: "#10b981" },
@@ -281,6 +282,12 @@ export default function CrmDemandDetailScreen() {
             </View>
           ) : null}
         </Section>
+
+        {/* Booking's active reminders — same section as Payment Milestones */}
+        {row.BookingId && (canAccessPage("crm-reminder-setup") || canAccessPage("crm-payments")) ? (
+          <BookingRemindersSection bookingId={Number(row.BookingId)} bookingNo={row.BookingNo as string | undefined}
+            canEdit={canDoAction("crm-payments", "edit") || canDoAction("crm-reminder-setup", "edit")} />
+        ) : null}
       </ScrollView>
 
       {/* Raise Demand Modal */}
