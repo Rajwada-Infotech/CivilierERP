@@ -32,6 +32,12 @@ const LINE_CSS = `
 .boq-lines-empty-text { font-size: 12.5px; color: hsl(var(--muted-foreground)); max-width: 46ch; margin: 0; }
 .boq-lines-add { margin-top: 10px; display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 16px; border: 1px solid hsl(var(--foreground)); background: hsl(var(--foreground)); color: hsl(var(--card)); font-size: 10px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer; }
 .boq-lines-add:hover { opacity: .9; }
+/* The # and the Item / Activity name stay put while the rest of the row scrolls sideways. */
+.boq-lines-scroll .stk { position: sticky; z-index: 2; background-color: hsl(var(--background)); box-shadow: inset -1px 0 0 hsl(var(--foreground) / 0.2); }
+.boq-lines-scroll th.stk { background-color: hsl(var(--card)); z-index: 3; }
+.boq-lines-scroll tr.alt td.stk { background-image: linear-gradient(hsl(var(--foreground) / 0.03), hsl(var(--foreground) / 0.03)); }
+.boq-lines-scroll .stk-0 { left: 0; }
+.boq-lines-scroll .stk-1 { left: 44px; }
 .boq-lines-scroll { scrollbar-width: thin; scrollbar-color: hsl(var(--foreground) / 0.35) transparent; }
 .boq-lines-scroll::-webkit-scrollbar { height: 6px; }
 .boq-lines-scroll::-webkit-scrollbar-thumb { background: hsl(var(--foreground) / 0.35); }
@@ -109,8 +115,9 @@ export const LineEditor: React.FC<LineEditorProps> = ({
   const remove = (idx: number) =>
     onChange((rows as any[]).filter((_, i) => i !== idx));
 
+  // The new line goes to the TOP, so there is no scrolling down a long list to reach it.
   const add = () =>
-    onChange([...(rows as any[]), isItem ? blankItem() : blankActivity()]);
+    onChange([isItem ? blankItem() : blankActivity(), ...(rows as any[])]);
 
   const subtotal = (rows as any[]).reduce(
     (s: number, r: any) => s + (parseFloat(r.amount) || 0),
@@ -274,6 +281,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                 return (
                 <th
                   key={h}
+                  className={h === "#" ? "stk stk-0" : h === (isItem ? "Item" : "Activity") ? "stk stk-1" : undefined}
                   style={{
                     padding: "0 10px",
                     height: 38,
@@ -325,6 +333,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                 return (
                   <tr
                     key={row._key ?? row.Id ?? idx}
+                    className={isEven ? "alt" : undefined}
                     style={{
                       borderBottom: "1px solid hsl(var(--foreground) / 0.2)",
                       background: isEven
@@ -334,6 +343,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                   >
                     {/* # */}
                     <td
+                      className="stk stk-0"
                       style={{
                         textAlign: "center",
                         borderRight: "1px solid hsl(var(--foreground) / 0.2)",
@@ -406,6 +416,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
 
                     {/* Name select */}
                     <td
+                      className="stk stk-1"
                       style={{
                         borderRight: "1px solid hsl(var(--foreground) / 0.2)",
                         padding: "8px 10px",

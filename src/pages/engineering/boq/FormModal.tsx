@@ -140,7 +140,8 @@ export const FormModal: React.FC<FormModalProps> = ({
         toast.success(
           `${newRows.length} item${newRows.length > 1 ? "s" : ""} auto-added from this activity`,
         );
-        return [...prev, ...newRows];
+        // Newest on top, like a line added by hand.
+        return [...newRows, ...prev];
       });
     } catch (err) {
       // Non-fatal — activity selection itself still succeeds either way.
