@@ -98,6 +98,8 @@ export default function LandDeedSearchPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
   const pick = (id: number) => { setPickedId(id); dropLink(); };
+  // The work area is never empty: the first enquiry of the list opens by itself.
+  useEffect(() => { if (!pickedId && !start && list.length) setPickedId(list[0].EnquiryId); }, [list, pickedId, start]);
 
   // Search across every project (enquiry no, Land ID, RS / LR Dag or Khatian): the project of what is found is opened
   // by itself — one project → that project; several → All projects; one enquiry → it is picked.
@@ -127,7 +129,16 @@ export default function LandDeedSearchPage() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Legal", "Land Management", "Land Records Search"]} />
-      <LegalShell stage="search" title="Land Records Search" subtitle="Trace the land through its records: RS, then LR, then CS, then the registry deeds. Pick an enquiry, open a source and record it year by year; everything found builds the record chain." icon={SearchStatus}>
+      <LegalShell stage="search" title="Land Records Search" subtitle="Check the government records of each enquiry plot before it goes further." icon={SearchStatus}>
+        <ol className="mb-4 grid gap-px border border-border bg-border text-xs sm:grid-cols-4">
+          {[["1", "Pick an enquiry", "from the list on the left (overdue ones first)"],
+            ["2", "Search each source", "RS, LR, CS records and the registry offices — mark every year found / not found"],
+            ["3", "Record & check", "enter the records found, link CS → RS → LR, note differences and claims"],
+            ["4", "Legal review", "the legal officer reviews; when every mandatory source is complete the land can be converted"]].map(([n, t, d]) => (
+            <li key={n} className="flex gap-2 bg-card px-3 py-2"><b className="flex h-5 w-5 shrink-0 items-center justify-center bg-foreground text-[0.625rem] text-background">{n}</b>
+              <span><b className="block">{t}</b><span className="text-muted-foreground">{d}</span></span></li>
+          ))}
+        </ol>
         <div className="mb-4 flex flex-wrap items-center gap-3 border border-border bg-card px-4 py-3">
           <form className="flex min-w-[18rem] flex-1 items-center gap-2" onSubmit={(e) => { e.preventDefault(); findEverywhere(); }}>
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Enquiry no, Land ID, RS / LR Dag or Khatian, mouza — filters this list; Search looks in all projects"
@@ -172,9 +183,10 @@ export default function LandDeedSearchPage() {
                         <span className="mt-0.5 block truncate text-xs">{h.LandLocation}</span>
                         {projectId === "all" && h.ProjectName && <span className="block text-[0.6875rem] font-semibold text-muted-foreground">{h.ProjectName}</span>}
                         <span className="block text-[0.6875rem] text-muted-foreground">RS {h.RsDagNo ?? "—"} · LR {h.LrDagNo ?? "—"}{h.LandCode ? ` · ${h.LandCode}` : ""}</span>
-                        <span className="mt-1.5 flex items-center gap-2">
-                          <span className="h-1.5 flex-1 bg-muted"><span className={`block h-full ${done ? "bg-emerald-600" : h.DaysOver > 0 ? "bg-destructive" : "bg-amber-500"}`} style={{ width: `${pct}%` }} /></span>
-                          <span className="text-[0.6875rem] tabular-nums text-muted-foreground">{h.OfficesDone}/{h.OfficesTotal} · {h.Found} found</span>
+                        <span className="mt-1.5 block h-1.5 bg-muted"><span className={`block h-full ${done ? "bg-emerald-600" : h.DaysOver > 0 ? "bg-destructive" : "bg-amber-500"}`} style={{ width: `${pct}%` }} /></span>
+                        <span className="mt-1 flex justify-between text-[0.6875rem] text-muted-foreground">
+                          <span>Sources complete <b className="tabular-nums text-foreground">{h.OfficesDone} of {h.OfficesTotal}</b></span>
+                          <span>Records found <b className="tabular-nums text-foreground">{h.Found}</b></span>
                         </span>
                       </button>
                     </li>
@@ -188,7 +200,7 @@ export default function LandDeedSearchPage() {
             {/* ── Work area ── */}
             <section className="legal-cq min-w-0">
               {current ? <EnquiryWork key={current.EnquiryId} enquiry={current} canEdit={rights.canEdit && !current.LandId} onOpenEnquiries={() => navigate("/legal/land/enquiries")} />
-                : <div className="flex h-48 items-center justify-center border border-dashed border-border text-sm text-muted-foreground">Pick an enquiry from the list to search its registration offices</div>}
+                : <div className="flex h-48 items-center justify-center border border-dashed border-border text-sm text-muted-foreground">{list.length ? "Pick an enquiry from the list" : "No enquiry here — change the filter or the project"}</div>}
             </section>
           </div></div>
         )}
@@ -199,6 +211,16 @@ export default function LandDeedSearchPage() {
 
 /** The order the land is traced in: RS record, LR record, CS record, then the registry offices (deeds), then
  *  searches added by hand to this enquiry. */
+const SECTION_HINT: Record<string, string> = {
+  sources: "Open each source tab (RS → LR → CS → registry deeds → others), choose the office, then mark every year: found, not found, not applicable… When all years are marked, complete the source.",
+  parcels: "The plots this enquiry covers, and their areas compared (record, CS / RS / LR, offered, deed, surveyed).",
+  mapping: "Link the CS, RS and LR records that are the same land; differences in holder or area show as alerts.",
+  discrepancy: "Differences to investigate (holder, Dag, Khatian, area…) with severity, owner and resolution.",
+  alternative: "Patta, lease, settlement, tenancy and other claims that are not in CS / RS / LR or deeds.",
+  possession: "Who actually occupies the land — separate from the recorded owner.",
+  review: "The legal officer's review and risk level. Open discrepancies or exceptions need a review that recommends proceeding.",
+  summary: "Everything on one page with the overall status — print it or export it.",
+};
 type Section = "parcels" | "mapping" | "discrepancy" | "alternative" | "possession" | "review" | "summary";
 const SECTIONS: [Section, string][] = [["parcels", "Parcels & area"], ["mapping", "Record mapping"], ["discrepancy", "Discrepancies"], ["alternative", "Alternative history"],
   ["possession", "Possession"], ["review", "Legal review"], ["summary", "Summary"]];
@@ -284,11 +306,14 @@ function EnquiryWork({ enquiry, canEdit, onOpenEnquiries }: { enquiry: EnquiryHi
           <>
             {/* Two levels: the search (sources) and the investigation built on it */}
             <div className="flex overflow-x-auto border-b border-border bg-card px-2 pt-2" role="tablist" aria-label="Land Records Search sections">
-              {([[null, "Search sources"], ...SECTIONS] as [Section | null, string][]).map(([k, l]) => (
+              {([[null, "Search sources"], ...SECTIONS] as [Section | null, string][]).map(([k, l], i) => (
                 <button key={l} role="tab" aria-selected={extra === k} onClick={() => setExtra(k)}
-                  className={`-mb-px shrink-0 border border-b-0 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.06em] ${extra === k ? "border-border bg-muted/30" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{l}</button>
+                  className={`-mb-px flex shrink-0 items-center gap-1.5 border border-b-0 px-3 py-1.5 text-xs font-semibold ${extra === k ? "border-border bg-muted/30 text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
+                  <span className={`flex h-4 w-4 items-center justify-center text-[0.625rem] ${extra === k ? "bg-foreground text-background" : "bg-muted"}`}>{i + 1}</span>{l}
+                </button>
               ))}
             </div>
+            <p className="border-b border-border bg-muted/30 px-4 py-1.5 text-xs text-muted-foreground">{SECTION_HINT[extra ?? "sources"]}</p>
             {!mapping && <div className="flex overflow-x-auto border-b border-border bg-muted/30" role="tablist">
               {groups.map((g, i) => {
                 const list = chain.filter(([x]) => x === g).map(([, x]) => x);

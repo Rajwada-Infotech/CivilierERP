@@ -2,13 +2,17 @@ import React from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { getVerificationDashboard } from "@/api/legalVerificationApi";
+import { getPreReg } from "@/api/legalIntelApi";
 
 /** Legal dashboard (V2.1): verification, review, approval and post-registration counts and the workload (follows the project picker). */
 export function VerificationDashboardSection({ project }: { project: string }) {
   const navigate = useNavigate();
   const q = useQuery({ queryKey: ["legal-verification-dashboard", project], queryFn: () => getVerificationDashboard(project), staleTime: 60_000 });
+  // Pre-registration compliance (classification & conversion) counts.
+  const pre = useQuery({ queryKey: ["legal-prereg", project], queryFn: () => getPreReg(project), staleTime: 60_000 });
   const d = q.data;
   if (!d) return null;
+  const pc = pre.data?.counts;
   const V = "/legal/land/verification", R = "/legal/verification/reports";
   const tiles: [string, number, string, string?][] = [
     ["Land enquiries", d.enquiries, "/legal/land/enquiries"],
@@ -23,7 +27,14 @@ export function VerificationDashboardSection({ project }: { project: string }) {
     ["Land Approval pending", d.landApprovalPending, "/legal/approvals"],
     ["LA / ULC pending", d.laUlcPending, R],
     ["Mutation pending", d.pendingMutation, "/legal/land/post-registration"],
-    ["Conversion pending", d.pendingConversion, "/legal/land/post-registration"],
+    ["Post-reg conversion pending", d.pendingConversion, "/legal/land/post-registration"],
+    ...(pc ? [
+      ["Pre-reg conversion pending", pc.prePending, "/legal/land/pre-registration", pc.prePending ? "text-amber-700" : undefined],
+      ["Pre-reg conversion overdue", pc.preOverdue, "/legal/land/pre-registration", pc.preOverdue ? "text-destructive" : undefined],
+      ["Conversion order to verify", pc.orderVerificationPending, "/legal/land/pre-registration", pc.orderVerificationPending ? "text-violet-700" : undefined],
+      ["Registration blocked (conversion)", pc.registrationBlocked, "/legal/land/pre-registration", pc.registrationBlocked ? "text-destructive" : undefined],
+      ["N/A conversion — approval pending", pc.notApplicablePending, "/legal/land/pre-registration"],
+    ] as [string, number, string, string?][] : []),
     ["Legally approved", d.verified, V, "text-emerald-700"],
   ];
   const max = Math.max(1, ...d.byActivity.map((a) => a.open));

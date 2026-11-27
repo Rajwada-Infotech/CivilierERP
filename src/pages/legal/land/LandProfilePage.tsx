@@ -638,7 +638,12 @@ export default function LandProfilePage() {
               </DialogContent>
             </Dialog>
             {/* All sections, row by row. View: read-only with every field (empty ones marked). Edit: every section's editor. */}
-            {mode === "view" ? <LandRecordView landId={landId} editor={!registered || amendOpen ? (k) => renderTab((SECTION_TAB[k] ?? k) as TabKey) : undefined} /> : (
+            {mode === "view" ? <LandRecordView landId={landId} editor={!registered || amendOpen ? (k) => renderTab((SECTION_TAB[k] ?? k) as TabKey) : undefined}
+              extraTabs={[
+                { key: "intel", label: "Land intelligence", render: () => <LandIntelligence landId={landId} editable={!registered || amendOpen} /> },
+                { key: "versions", label: "Versions", render: () => <div className="border border-border bg-card p-4">{renderTab("versions")}</div> },
+                { key: "activity", label: "Activity history", render: () => <div className="border border-border bg-card p-4">{renderTab("activity")}</div> },
+              ]} /> : (
               <div className="space-y-5">
                 {EDIT_ORDER.filter((k) => tabs.some((t) => t.key === k)).map((k, i) => (
                   <section key={k} className="border-2 border-foreground/70 bg-card p-4">
@@ -652,16 +657,8 @@ export default function LandProfilePage() {
                 </div>
               </div>
             )}
-            {/* Legal V3: parcels, ownership events, family & inheritance, disputes, possession. */}
-            <LandIntelligence landId={landId} editable={!registered || amendOpen} />
-            <details className="border border-border bg-card">
-              <summary className="cursor-pointer px-4 py-3 text-sm font-semibold">Versions</summary>
-              <div className="border-t border-border p-4">{renderTab("versions")}</div>
-            </details>
-            <details className="border border-border bg-card">
-              <summary className="cursor-pointer px-4 py-3 text-sm font-semibold">Activity history</summary>
-              <div className="border-t border-border p-4">{renderTab("activity")}</div>
-            </details>
+            {/* In edit mode the extra sections stay below (view mode shows them as tabs). */}
+            {mode !== "view" && <LandIntelligence landId={landId} editable={!registered || amendOpen} />}
 
           </div>
           </LegalLockContext.Provider>

@@ -153,8 +153,13 @@ const NEW_LABEL: Record<string, string> = {
 };
 
 /** The land's record, every section row by row, read-only — every field shown, empty ones marked (land page). */
-export function LandRecordView({ landId, editor }: { landId: number; editor?: (key: string) => React.ReactNode }) {
+export function LandRecordView({ landId, editor, extraTabs = [] }: { landId: number; editor?: (key: string) => React.ReactNode;
+  /** More tabs after the land's sections (Land intelligence, Versions, Activity history…). */
+  extraTabs?: { key: string; label: string; render: () => React.ReactNode }[] }) {
   const qc = useQueryClient();
+  // One section at a time (tabs); remembered per land for the visit.
+  const [active, setActive] = useState<string | null>(() => { try { return sessionStorage.getItem(`land-tab-${landId}`); } catch { return null; } });
+  const pick = (k: string) => { setActive(k); try { sessionStorage.setItem(`land-tab-${landId}`, k); } catch { /* storage off */ } };
   const [editing, setEditing] = useState<string | null>(null);
   const [views, setViews] = useState<Record<string, "records" | "tree">>({});
   // Inline editing: "<master>#<id>" for an entry, "new:<section>:<master>" for a new one.
@@ -166,9 +171,38 @@ export function LandRecordView({ landId, editor }: { landId: number; editor?: (k
   const { data, isLoading, error } = useQuery({ queryKey: ["legal-review", landId], queryFn: () => getLandReview(landId) });
   if (isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>;
   if (error || !data) return <p className="text-sm text-destructive">{(error as Error)?.message ?? "Could not load"}</p>;
+  const cur = active && (data.steps.some((x) => x.key === active) || extraTabs.some((x) => x.key === active)) ? active : data.steps[0]?.key;
+  const extra = extraTabs.find((x) => x.key === cur);
   return (
     <div className="space-y-4">
+      {/* Section tabs: number, name, entries and what is wrong / missing */}
+      <nav className="sticky top-0 z-10 flex overflow-x-auto border border-border bg-card" role="tablist" aria-label="Land sections">
+        {data.steps.map((s, i) => {
+          const wrong = Object.values(s.decisions ?? {}).filter((d) => d === "bad").length;
+          const missing = s.missingRequired.length + (s.records.length ? 0 : s.needed ? 1 : 0);
+          const on = cur === s.key;
+          return (
+            <button key={s.key} role="tab" aria-selected={on} onClick={() => { pick(s.key); setInline(null); setEditing(null); }}
+              className={`-mb-px shrink-0 border-b-2 px-3 py-2 text-left ${on ? "border-foreground bg-muted/40" : "border-transparent hover:bg-muted/30"}`}>
+              <span className="flex items-center gap-1.5 text-sm">
+                <span className={`flex h-5 w-5 items-center justify-center text-[0.625rem] font-bold ${on ? "bg-foreground text-background" : "bg-muted"}`}>{i + 1}</span>
+                <span className={on ? "font-semibold" : ""}>{s.label}</span>
+              </span>
+              <span className="mt-0.5 block pl-6 text-[0.6875rem] text-muted-foreground">
+                {s.records.length} entr{s.records.length === 1 ? "y" : "ies"}
+                {wrong ? <b className="text-destructive"> · {wrong} ✗</b> : missing ? <b className="text-amber-700"> · {missing} missing</b> : null}
+              </span>
+            </button>
+          );
+        })}
+        {extraTabs.map((x) => (
+          <button key={x.key} role="tab" aria-selected={cur === x.key} onClick={() => pick(x.key)}
+            className={`-mb-px shrink-0 border-b-2 border-l border-l-border px-3 py-2 text-sm ${cur === x.key ? "border-b-foreground bg-muted/40 font-semibold" : "border-b-transparent hover:bg-muted/30"}`}>{x.label}</button>
+        ))}
+      </nav>
+      {extra && <div>{extra.render()}</div>}
       {data.steps.map((s, i) => {
+        if (s.key !== cur) return null;
         const req = s.missingRequired.length, docs = (s.checklist ?? []).filter((c) => c.state === "Missing").length;
         const wrong = Object.values(s.decisions ?? {}).filter((d) => d === "bad").length;
         const empty = !s.records.length;

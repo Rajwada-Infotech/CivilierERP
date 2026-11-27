@@ -74,6 +74,33 @@ const LAND_CLASSES = ["Sali", "Suna", "Danga", "Bastu", "Doba", "Pukur", "Bagan"
 // Land Records Search: how a record was obtained, and what was found (finding a record is not verifying it).
 const SOURCE_METHODS = ["Online portal", "Certified copy", "Office inspection", "Manual entry"];
 const RECORD_STATUSES = ["Pending", "Found", "Partially Matched", "Verified", "Not Found", "Disputed", "Unable to Verify"];
+// A parcel's classification / conversion answer changed after the Legal Officer decided: back to Pending (audited).
+const ASSESS_COLS = ["LandTypeId", "ProposedLandTypeId", "ProposedLandUse", "ConversionRequired", "ConversionStage"];
+async function parcelAssessmentReset(pool, req, row, before) {
+  if (!row?.ParcelId) return;
+  // New parcel / no answer yet: suggest the requirement from the classification's default.
+  if (row.LandTypeId && !row.ConversionRequired) {
+    await pool.request().input("P", row.ParcelId).query(`UPDATE p SET ConversionRequired = CASE t.DefaultConversionRequirement WHEN N'Not required' THEN N'No' ELSE N'Under Assessment' END,
+        ConversionStage = CASE t.DefaultConversionRequirement WHEN N'Not required' THEN N'Not Applicable' WHEN N'Usually required before registration' THEN N'Pre-registration'
+          WHEN N'Usually permitted after registration' THEN N'Post-registration' ELSE ConversionStage END
+      FROM dbo.LegalLandParcel p JOIN dbo.LegalLandType t ON t.LandTypeId = p.LandTypeId WHERE p.ParcelId = @P`);
+  }
+  if (!before) return;
+  const changed = ASSESS_COLS.filter((c) => String(before[c] ?? "") !== String(row[c] ?? ""));
+  if (changed.length && before.AssessmentStatus && before.AssessmentStatus !== "Pending") {
+    await pool.request().input("P", row.ParcelId).query("UPDATE dbo.LegalLandParcel SET AssessmentStatus = N'Pending', AssessedBy = NULL, AssessedAt = NULL WHERE ParcelId = @P");
+    await require("./legalAudit").writeAudit(pool, req, { action: "Parcel classification changed — assessment back to Pending", entityType: "Land Parcel", entityId: row.ParcelId, landId: row.LandId ?? null,
+      oldValue: Object.fromEntries(changed.map((c) => [c, before[c]])), newValue: Object.fromEntries(changed.map((c) => [c, row[c]])) }).catch(() => {});
+  }
+}
+// A pre-registration conversion is recorded only for a parcel of the land whose approved assessment says so; an order needs its copy.
+async function preRegConversionCheck(pool, v) {
+  const p = (await pool.request().input("P", v.ParcelId).query("SELECT LandId, ConversionRequired, ConversionStage FROM dbo.LegalLandParcel WHERE ParcelId = @P AND IsActive = 1")).recordset[0];
+  if (!p || Number(p.LandId) !== Number(v.LandId)) return "Pick a parcel of this land";
+  if (!(p.ConversionRequired === "Yes" && p.ConversionStage === "Pre-registration")) return "This parcel is not assessed as needing conversion before registration";
+  if (v.ConversionStatus === "Order Received" && (!v.OrderNo || !v.OrderDate || !v.OrderFileId)) return "Order Received needs the order number, order date and the order copy";
+  return null;
+}
 const OWNER_KINDS = ["Individual", "Joint Owner", "Co-owner", "Legal Heir / Successor", "Company / Organisation", "Government", "Trust / Institution"];
 const FAMILY_RELATIONS = ["Deceased owner", "Husband", "Wife", "Son", "Daughter", "Father", "Mother", "Brother", "Sister", "Grandfather", "Grandmother", "Grandson",
   "Granddaughter", "Son's widow", "Son's son", "Son's daughter", "Daughter's son", "Daughter's daughter", "Other legally relevant relation"];
@@ -305,13 +332,18 @@ const MASTERS = {
 
   "land-type": {
     title: "Land Type", group: "Land records", pageKey: "legal-land-type-master", table: "LegalLandType", pk: "LandTypeId",
-    desc: "Classes of land as recorded (Sali, Bastu, Danga…) and whether building on it needs conversion.",
+    desc: "Land classification master (Bastu, Shali, Doba, Danga, Pukur…): whether a conversion assessment is needed and the default requirement — suggestions only; the Legal Officer decides each parcel.",
     label: "LandTypeName", orderBy: "LandTypeName",
     unique: [["LandTypeCode"], "This land type code already exists"],
     fields: [
       { name: "LandTypeCode", label: "Land type code", type: "text", required: true, max: 20, upper: true },
       { name: "LandTypeName", label: "Land type", type: "text", required: true, max: 100 },
       { name: "ConversionNeeded", label: "Needs conversion before building", type: "bit", default: false },
+      // Pre-registration classification assessment (configurable — the Legal Officer still decides each parcel).
+      { name: "ConversionAssessmentRequired", label: "Conversion assessment required", type: "bit", default: true },
+      { name: "DefaultConversionRequirement", label: "Default conversion requirement", type: "select", required: true,
+        options: ["Not required", "Assess case by case", "Usually required before registration", "Usually permitted after registration"], default: "Assess case by case" },
+      { name: "Remarks", label: "Remarks", type: "textarea", max: 500 },
       { name: "Description", label: "Description", type: "textarea", max: 500 },
       ACTIVE,
     ],
@@ -804,6 +836,7 @@ const MASTERS = {
     label: "r.ParcelCode + ISNULL(' · RS ' + r.RsDagNo, '') + ISNULL(' · LR ' + r.LrDagNo, '')", orderBy: "ParcelCode",
     unique: [["ParcelCode"], "This parcel ID already exists"],
     check: async (pool, values, id) => (await enquiryOpen(pool, values, id)) || parcelClash(pool, values, id),
+    afterWrite: (pool, req, row, before) => parcelAssessmentReset(pool, req, row, before),
     fields: [
       { name: "EnquiryId", label: "Enquiry", type: "ref", ref: "land-enquiry", required: true },
       { name: "ParcelCode", label: "Parcel ID", type: "text", max: 40, auto: "PCL" },
@@ -821,7 +854,14 @@ const MASTERS = {
       { name: "DeedArea", label: "Deed area", type: "decimal" },
       { name: "SurveyedArea", label: "Surveyed area", type: "decimal" },
       { name: "OwnershipArea", label: "Current ownership area", type: "decimal" },
-      { name: "LandTypeId", label: "Land type", type: "ref", ref: "land-type" },
+      { name: "LandTypeId", label: "Current classification", type: "ref", ref: "land-type" },
+      { name: "ProposedLandTypeId", label: "Proposed classification", type: "ref", ref: "land-type" },
+      { name: "ProposedLandUse", label: "Proposed land use", type: "text", max: 200 },
+      { name: "ConversionRequired", label: "Conversion required", type: "select", options: ["Yes", "No", "Under Assessment", "Legal Review Required"] },
+      { name: "ConversionStage", label: "Conversion stage", type: "select", options: ["Pre-registration", "Post-registration", "Not Applicable"] },
+      { name: "AssessmentRemarks", label: "Assessment remarks / reason", type: "textarea", max: 1000 },
+      // Set by the Legal Officer's decision (Pre-registration compliance page); any change above sends it back to Pending.
+      { name: "AssessmentStatus", label: "Assessment approval", type: "select", system: true, options: ["Pending", "Approved", "Returned", "Rejected"], default: "Pending" },
       { name: "OfferedOwner", label: "Offered by (owner / co-owners)", type: "text", max: 300 },
       { name: "OfferedSharePct", label: "Offered share (%)", type: "decimal", maxValue: 100 },
       { name: "OfferedShareFraction", label: "Offered share as fraction (e.g. 1/3)", type: "text", max: 20, pattern: "^\\d+/\\d+$", patternMsg: "Write a fraction like 1/3" },
@@ -836,6 +876,7 @@ const MASTERS = {
       label: "r.ParcelCode + ISNULL(' · RS ' + r.RsDagNo, '') + ISNULL(' · LR ' + r.LrDagNo, '')", orderBy: "ParcelCode",
       unique: [["ParcelCode"], "This parcel ID already exists"],
       check: async (pool, values, id) => parcelClash(pool, values, id),
+      afterWrite: (pool, req, row, before) => parcelAssessmentReset(pool, req, row, before),
       fields: [
         LAND_ID,
         { name: "ParcelCode", label: "Parcel ID", type: "text", max: 40, auto: "PCL" },
@@ -853,7 +894,14 @@ const MASTERS = {
         { name: "DeedArea", label: "Deed area", type: "decimal" },
         { name: "SurveyedArea", label: "Surveyed area", type: "decimal" },
         { name: "OwnershipArea", label: "Current ownership area", type: "decimal" },
-        { name: "LandTypeId", label: "Land type", type: "ref", ref: "land-type" },
+        { name: "LandTypeId", label: "Current classification", type: "ref", ref: "land-type" },
+        { name: "ProposedLandTypeId", label: "Proposed classification", type: "ref", ref: "land-type" },
+        { name: "ProposedLandUse", label: "Proposed land use", type: "text", max: 200 },
+        { name: "ConversionRequired", label: "Conversion required", type: "select", options: ["Yes", "No", "Under Assessment", "Legal Review Required"] },
+        { name: "ConversionStage", label: "Conversion stage", type: "select", options: ["Pre-registration", "Post-registration", "Not Applicable"] },
+        { name: "AssessmentRemarks", label: "Assessment remarks / reason", type: "textarea", max: 1000 },
+        // Set by the Legal Officer's decision (Pre-registration compliance page); any change above sends it back to Pending.
+        { name: "AssessmentStatus", label: "Assessment approval", type: "select", system: true, options: ["Pending", "Approved", "Returned", "Rejected"], default: "Pending" },
         { name: "OfferedOwner", label: "Offered by (owner / co-owners)", type: "text", max: 300 },
         { name: "OfferedSharePct", label: "Offered share (%)", type: "decimal", maxValue: 100 },
         { name: "OfferedShareFraction", label: "Offered share as fraction (e.g. 1/3)", type: "text", max: 20, pattern: "^\\d+/\\d+$", patternMsg: "Write a fraction like 1/3" },
@@ -864,6 +912,49 @@ const MASTERS = {
       ],
     }),
   // Every transferor / transferee of an ownership event (several sellers / buyers, partial shares).
+  // Conversion that must be completed BEFORE registration (one parcel each). Submitting the application is not completion:
+  // only an order, verified by another user, satisfies the pre-registration gate. Verify / submit are actions, not fields.
+  "prereg-conversion": landChild("Pre-registration Conversion", "LegalPreRegConversion", "ConversionId",
+    "Land conversion required before registration — application, office, hearing, queries, fees and the conversion order.", {
+      label: "ISNULL(r.ApplicationNo, 'Conversion ' + CAST(r.ConversionId AS NVARCHAR(10))) + ' · ' + r.ConversionStatus", orderBy: "ConversionId",
+      check: async (pool, values) => preRegConversionCheck(pool, values),
+      guard: async (pool, id) => {
+        const r0 = (await pool.request().input("C", id).query("SELECT ConversionStatus FROM dbo.LegalPreRegConversion WHERE ConversionId = @C")).recordset[0];
+        return ["Verified", "Submitted for Verification"].includes(r0?.ConversionStatus) ? `This conversion is ${r0.ConversionStatus.toLowerCase()} — ${r0.ConversionStatus === "Verified" ? "change it through an amendment" : "wait for the verification decision"}` : null;
+      },
+      afterWrite: async (pool, req, row, before) => {
+        if (!row?.AssignedUserId || Number(row.AssignedUserId) === Number(before?.AssignedUserId)) return;
+        const l = (await pool.request().input("L", row.LandId).query("SELECT LandCode FROM dbo.LegalLand WHERE LandId = @L")).recordset[0];
+        await require("../../services/legalNotify").notify(pool, { users: [row.AssignedUserId], except: req?.user?.userId, type: "legal_prereg_conversion",
+          title: `Pre-registration conversion: ${l?.LandCode ?? ""}`, body: `${row.TargetDate ? `Target ${String(row.TargetDate).slice(0, 10)} · ` : ""}Open Legal → Pipeline → Pre-registration compliance.`, refId: row.LandId });
+      },
+      fields: [
+        LAND_ID,
+        { name: "ParcelId", label: "Parcel", type: "ref", ref: "land-parcel", filterBy: "LandId", required: true },
+        { name: "ApplicationNo", label: "Conversion application number", type: "text", max: 60 },
+        { name: "ApplicationDate", label: "Application date", type: "date" },
+        { name: "OfficeName", label: "Concerned office", type: "text", max: 200 },
+        { name: "AssignedUserId", label: "Assigned employee", type: "ref", ref: "user" },
+        { name: "TargetDate", label: "Target completion date", type: "date" },
+        { name: "ConversionStatus", label: "Status", type: "select", required: true, default: "Conversion Required",
+          options: ["Conversion Required", "Application Preparation", "Application Submitted", "Query Received", "Hearing Pending", "Under Process", "Order Received", "Rejected"] },
+        { name: "HearingDate", label: "Hearing date", type: "date" },
+        { name: "QueryDate", label: "Government query date", type: "date" },
+        { name: "QueryDetails", label: "Government query", type: "textarea", max: 1000 },
+        { name: "ResponseDate", label: "Response date", type: "date" },
+        { name: "QueryResponse", label: "Our response", type: "textarea", max: 1000 },
+        { name: "FeeAmount", label: "Fee (₹)", type: "decimal" },
+        { name: "FeeRef", label: "Fee receipt / reference", type: "text", max: 100 },
+        { name: "OrderNo", label: "Conversion order number", type: "text", max: 100 },
+        { name: "OrderDate", label: "Order date", type: "date" },
+        { name: "CompletionDate", label: "Completion date", type: "date" },
+        { name: "ApplicationFileId", label: "Application copy", type: "file" },
+        { name: "OrderFileId", label: "Conversion order copy", type: "file" },
+        { name: "VerificationStatus", label: "Legal verification", type: "select", system: true, options: ["Not Submitted", "Pending", "Verified", "Returned"], default: "Not Submitted" },
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
   "ownership-event-party": landChild("Ownership Event Party", "LegalOwnershipEventParty", "PartyId",
     "Who gave and who received in one ownership event, with the share (as % and as an exact fraction).", {
       label: "r.PartyRole + ': ' + r.PersonName", orderBy: "EventId, PartyRole DESC, PartyId",

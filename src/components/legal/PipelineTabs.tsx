@@ -6,7 +6,7 @@ import { ArrowRight2 } from "iconsax-react";
  * Enquiry → Deed registry search → Land conversion → Deed Process → LA & ULC → Deed Registration → Post-registration.
  * (Verification and approvals are in Approvals, not a pipeline stage.)
  */
-export type PipelineStage = "enquiry" | "search" | "verification" | "verify" | "deed" | "clearance" | "registration" | "post";
+export type PipelineStage = "enquiry" | "search" | "verification" | "verify" | "deed" | "clearance" | "prereg" | "registration" | "post";
 export const PIPELINE: { key: PipelineStage; label: string; path: string; hint: string }[] = [
   { key: "enquiry", label: "Enquiries", path: "/legal/land/enquiries", hint: "Land offered or found — record it under a project" },
   { key: "search", label: "Land records search", path: "/legal/land/deed-search", hint: "Search RS, LR, CS records and the registry deeds year by year" },
@@ -14,6 +14,7 @@ export const PIPELINE: { key: PipelineStage; label: string; path: string; hint: 
   { key: "verify", label: "Land conversion", path: "/legal/land/properties?filter=verification", hint: "Converted lands being entered and verified — before Deed Process" },
   { key: "deed", label: "Deed Process", path: "/legal/land/deed-process", hint: "Deed details completed, then sent for final approval" },
   { key: "clearance", label: "LA & ULC", path: "/legal/land/la-ulc", hint: "Apply for and obtain the clearances" },
+  { key: "prereg", label: "Pre-registration compliance", path: "/legal/land/pre-registration", hint: "Land classification & conversion per parcel — the gate before Deed Registration" },
   { key: "registration", label: "Deed Registration", path: "/legal/deed-registration", hint: "Consideration, stamp duty, registration" },
   { key: "post", label: "Post-registration", path: "/legal/land/post-registration", hint: "Mutation and the tasks after registration" },
 ];

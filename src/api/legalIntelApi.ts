@@ -46,3 +46,20 @@ export const confirmFramework = async (id: number, remarks?: string) => handle<{
 export const calculateShares = async (id: number) => handle<{ message: string; outcome: string }>(await fetchWithAuth(`${BASE}/inheritance/${id}/calculate`, post({})));
 export const reviewCalc = async (id: number, decision: "Approved" | "Rejected", remarks?: string) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/calc/${id}/review`, post({ decision, remarks })));
 export const inheritanceAction = async (id: number, action: string, remarks?: string) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/inheritance/${id}/workflow`, post({ action, remarks })));
+
+// ── Pre-registration classification & conversion ──
+export interface PreRegParcel {
+  ParcelId: number; ParcelCode: string; Dag: string | null; RsDagNo: string | null; LrDagNo: string | null; CurrentClass: string | null; ProposedClass: string | null; ProposedLandUse: string | null;
+  ConversionRequired: string | null; ConversionStage: string | null; AssessmentStatus: string; AssessmentRemarks: string | null; AssessedByName: string | null; AssessedAt: string | null;
+  ConversionId: number | null; ConversionStatus: string | null; VerificationStatus: string | null; ApplicationNo: string | null; TargetDate: string | null; AssignedName: string | null;
+  blockers: string[]; gate: "Blocked" | "Clear";
+}
+export interface PreRegLand { LandId: number; LandCode: string; LandName: string | null; ProjectId: number | null; ProjectName: string | null; WorkflowStatus: string; MouzaName: string | null;
+  EnquiryNo: string | null; JLNo: string | null; ok: boolean; parcels: PreRegParcel[]; blockers: string[] }
+export interface PreRegCounts { prePending: number; preOverdue: number; underProcess: number; orderVerificationPending: number; registrationBlocked: number; assessmentPending: number; notApplicablePending: number; postPending: number }
+export const getPreReg = async (project: string) => handle<{ lands: PreRegLand[]; counts: PreRegCounts }>(await fetchWithAuth(`${BASE}/prereg?project=${encodeURIComponent(project)}`));
+export const decideAssessment = async (parcelId: number, decision: "Approved" | "Returned" | "Rejected", remarks?: string) =>
+  handle<{ message: string }>(await fetchWithAuth(`${BASE}/parcel/${parcelId}/assessment`, post({ decision, remarks })));
+export const submitPreRegConversion = async (id: number) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/prereg-conversion/${id}/submit`, post({})));
+export const verifyPreRegConversion = async (id: number, decision: "Verified" | "Returned", remarks?: string) =>
+  handle<{ message: string }>(await fetchWithAuth(`${BASE}/prereg-conversion/${id}/verify`, post({ decision, remarks })));

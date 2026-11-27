@@ -176,6 +176,19 @@ module.exports = {
            CASE WHEN x.Status <> N'Completed' AND x.DueDate < CAST(GETDATE() AS DATE) THEN N'Overdue' ELSE N'' END AS Overdue
     FROM dbo.LegalPostRegTask x ${LAND} LEFT JOIN dbo.users u ON u.id = x.AssignedUserId ORDER BY l.LandCode, x.TaskNo`,
     [...L3, C("TaskNo", "No."), C("Task", "Task"), C("RefNo", "Reference"), C("AssignedName", "Employee"), C("DueDate", "Due"), C("Overdue", "Overdue"), C("Status", "Status"), C("CompletedAt", "Completed")], "DueDate"),
+  "pre-registration-conversion": rep("Pre-registration Land Conversion Report", `
+    SELECT ${LCOLS}, l.WorkflowStatus AS Stage, p.ParcelCode, p.RsDagNo, p.LrDagNo, CONCAT_WS(' / ', p.RsKhatianNo, p.LrKhatianNo) AS Khatian, t.LandTypeName AS CurrentClass, pt.LandTypeName AS ProposedClass,
+           p.ProposedLandUse, p.ConversionRequired, p.ConversionStage, p.AssessmentStatus, c.ApplicationNo, c.ApplicationDate, c.OfficeName, u.name AS AssignedName, c.TargetDate,
+           ISNULL(c.ConversionStatus, CASE WHEN p.ConversionRequired = N'Yes' AND p.ConversionStage = N'Pre-registration' THEN N'Conversion Required' ELSE N'' END) AS Status,
+           c.OrderNo, c.OrderDate, c.VerificationStatus,
+           CASE WHEN c.ConversionStatus <> N'Verified' AND c.TargetDate < CAST(GETDATE() AS DATE) THEN N'Overdue' ELSE N'' END AS Overdue
+    FROM dbo.LegalLandParcel p JOIN dbo.LegalLand l ON l.LandId = p.LandId AND l.IsActive = 1 LEFT JOIN dbo.LegalMouza m ON m.MouzaId = l.MouzaId LEFT JOIN dbo.LegalDistrict dd ON dd.DistrictId = l.DistrictId
+    LEFT JOIN dbo.LegalLandType t ON t.LandTypeId = p.LandTypeId LEFT JOIN dbo.LegalLandType pt ON pt.LandTypeId = p.ProposedLandTypeId
+    OUTER APPLY (SELECT TOP 1 * FROM dbo.LegalPreRegConversion x WHERE x.ParcelId = p.ParcelId AND x.IsActive = 1 ORDER BY x.ConversionId DESC) c LEFT JOIN dbo.users u ON u.id = c.AssignedUserId
+    WHERE p.IsActive = 1 ORDER BY l.LandCode, p.ParcelCode`,
+    [...L3, C("Stage", "Stage"), C("ParcelCode", "Parcel"), C("RsDagNo", "RS Dag"), C("LrDagNo", "LR Dag"), C("CurrentClass", "Current class"), C("ProposedClass", "Proposed class"),
+      C("ProposedLandUse", "Proposed use"), C("ConversionRequired", "Conversion required"), C("ConversionStage", "When"), C("AssessmentStatus", "Assessment"), C("ApplicationNo", "Application"),
+      C("OfficeName", "Office"), C("AssignedName", "Employee"), C("TargetDate", "Target"), C("Overdue", "Overdue"), C("Status", "Status"), C("OrderNo", "Order"), C("VerificationStatus", "Verification")], "ApplicationDate"),
   "la-ulc-expiry": rep("LA / ULC Expiry Report", `
     SELECT ${LCOLS}, x.Kind, x.Status, x.ApplicationNo, x.AppliedOn, x.CertificateNo, x.ObtainedOn, x.ExpiryDate,
            CASE WHEN x.ExpiryDate IS NULL THEN N'' WHEN x.ExpiryDate < CAST(GETDATE() AS DATE) THEN N'Expired' WHEN x.ExpiryDate <= DATEADD(day, 30, CAST(GETDATE() AS DATE)) THEN N'Expires within 30 days' ELSE N'Valid' END AS Validity

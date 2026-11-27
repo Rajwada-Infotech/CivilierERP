@@ -283,4 +283,152 @@ router.post("/inheritance/:id/workflow", requirePageRight(LAND, "view"), async (
   } catch (err) { fail(res, "workflow", err); }
 });
 
+// ── Pre-registration classification & conversion ─────────────────────────────────────────────────
+/**
+ * The pre-registration compliance gate, parcel by parcel (spec 6–7). Returns { ok, parcels: [{ ..., blockers }], blockers }.
+ * Bastu → assessment recorded & approved; non-Bastu → Legal Officer decision; "Yes / Pre-registration" → a verified
+ * conversion order; "Yes / Post-registration" or "No" → approved with its reason; unclear → blocked.
+ */
+async function preRegGate(pool, landId) {
+  const parcels = (await pool.request().input("L", sql.Int, landId).query(`
+    SELECT p.ParcelId, p.ParcelCode, ISNULL(p.RsDagNo, p.LrDagNo) AS Dag, p.RsDagNo, p.LrDagNo, t.LandTypeName AS CurrentClass, pt.LandTypeName AS ProposedClass, p.ProposedLandUse,
+           p.ConversionRequired, p.ConversionStage, p.AssessmentStatus, p.AssessmentRemarks, au.name AS AssessedByName, p.AssessedAt, p.LandTypeId,
+           c.ConversionId, c.ConversionStatus, c.VerificationStatus, c.ApplicationNo, CONVERT(char(10), c.TargetDate, 23) AS TargetDate, cu.name AS AssignedName
+    FROM dbo.LegalLandParcel p LEFT JOIN dbo.LegalLandType t ON t.LandTypeId = p.LandTypeId LEFT JOIN dbo.LegalLandType pt ON pt.LandTypeId = p.ProposedLandTypeId
+    LEFT JOIN dbo.users au ON au.id = p.AssessedBy
+    OUTER APPLY (SELECT TOP 1 * FROM dbo.LegalPreRegConversion x WHERE x.ParcelId = p.ParcelId AND x.IsActive = 1 ORDER BY x.ConversionId DESC) c
+    LEFT JOIN dbo.users cu ON cu.id = c.AssignedUserId
+    WHERE p.LandId = @L AND p.IsActive = 1 AND p.ParcelStatus <> N'Excluded' ORDER BY p.ParcelCode`)).recordset;
+  const all = [];
+  for (const p of parcels) {
+    const dag = `Dag ${p.Dag ?? p.ParcelCode}`;
+    const b = [];
+    if (!p.LandTypeId) b.push(`${dag}: land classification not recorded`);
+    else if (!p.ConversionRequired || ["Under Assessment", "Legal Review Required"].includes(p.ConversionRequired)) b.push(`${dag}: conversion applicability ${p.ConversionRequired === "Legal Review Required" ? "needs legal review" : "not assessed"}`);
+    else if (p.AssessmentStatus !== "Approved") b.push(`${dag}: Legal Officer approval of the conversion assessment is ${p.AssessmentStatus.toLowerCase()}`);
+    else if (p.ConversionRequired === "Yes" && p.ConversionStage === "Pre-registration" && !(p.ConversionStatus === "Verified" && p.VerificationStatus === "Verified"))
+      b.push(`${dag}: pre-registration land conversion is pending${p.ConversionStatus ? ` (${p.ConversionStatus})` : ""} — complete conversion and obtain legal verification`);
+    p.blockers = b;
+    p.gate = b.length ? "Blocked" : "Clear";
+    all.push(...b);
+  }
+  if (!parcels.length) all.push("No land parcel recorded — add the parcels with their classification");
+  return { ok: !all.length, parcels, blockers: all };
+}
+
+router.get("/land/:landId/prereg", requirePageRight(LAND, "view"), async (req, res) => {
+  try { res.json(await preRegGate(getPool(), idOf(req.params.landId))); } catch (err) { fail(res, "prereg gate", err); }
+});
+
+// GET /prereg — every land before registration with its parcels' classification, conversion and gate status, plus counts.
+router.get("/prereg", requirePageRight(LAND, "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const lands = (await pool.request().query(`SELECT l.LandId, l.LandCode, l.LandName, l.ProjectId, pr.name AS ProjectName, l.WorkflowStatus, m.MouzaName, e.EnquiryNo, mz.JLNo
+      FROM dbo.LegalLand l LEFT JOIN dbo.enterprise pr ON pr.id = l.ProjectId LEFT JOIN dbo.LegalMouza m ON m.MouzaId = l.MouzaId
+      LEFT JOIN dbo.LegalLandEnquiry e ON e.EnquiryId = l.EnquiryId LEFT JOIN dbo.LegalMouza mz ON mz.MouzaId = l.MouzaId
+      WHERE l.IsActive = 1 AND ISNULL(l.IsCancelled, 0) = 0 AND l.WorkflowStatus <> N'Registered' ORDER BY l.LandCode`)).recordset;
+    const project = String(req.query.project ?? "all");
+    const out = [];
+    for (const l of lands.filter((x) => project === "all" || Number(x.ProjectId) === Number(project))) out.push({ ...l, ...(await preRegGate(pool, l.LandId)) });
+    const ps = out.flatMap((l) => l.parcels);
+    const today = new Date().toISOString().slice(0, 10);
+    const counts = {
+      prePending: ps.filter((p) => p.ConversionRequired === "Yes" && p.ConversionStage === "Pre-registration" && p.ConversionStatus !== "Verified").length,
+      preOverdue: ps.filter((p) => p.ConversionStage === "Pre-registration" && p.ConversionStatus !== "Verified" && p.TargetDate && p.TargetDate < today).length,
+      underProcess: ps.filter((p) => ["Application Submitted", "Query Received", "Hearing Pending", "Under Process"].includes(p.ConversionStatus)).length,
+      orderVerificationPending: ps.filter((p) => p.ConversionStatus === "Submitted for Verification").length,
+      registrationBlocked: out.filter((l) => !l.ok && ["Deed Process", "Deed Registration", "Deed Completed"].includes(l.WorkflowStatus)).length,
+      assessmentPending: ps.filter((p) => p.AssessmentStatus !== "Approved").length,
+      notApplicablePending: ps.filter((p) => p.ConversionRequired === "No" && p.AssessmentStatus !== "Approved").length,
+      postPending: (await pool.request().query("SELECT COUNT(*) AS n FROM dbo.LegalMutation WHERE IsActive = 1 AND Kind = N'Conversion' AND ISNULL(ConversionStage, N'Post-registration') = N'Post-registration' AND CompletionDate IS NULL AND ApplicationStatus NOT IN (N'Approved', N'Rejected')")).recordset[0].n,
+    };
+    res.json({ lands: out, counts });
+  } catch (err) { fail(res, "prereg list", err); }
+});
+
+// POST /parcel/:id/assessment { decision: Approved | Returned | Rejected, remarks } — Legal Officer decides the parcel's
+// conversion applicability. Approved "Yes / Pre-registration" opens the pre-registration conversion; "Yes /
+// Post-registration" opens the post-registration conversion task (existing module); "No" needs its reason.
+router.post("/parcel/:id/assessment", requirePageRight(LAND, "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const decision = req.body?.decision, remarks = txt(req.body?.remarks, 1000);
+    if (!["Approved", "Returned", "Rejected"].includes(decision)) return res.status(400).json({ error: "Choose the decision" });
+    if (!(await legalOfficer(req))) return res.status(403).json({ error: "Only a Legal Officer can approve conversion applicability" });
+    const p = (await pool.request().input("P", sql.Int, idOf(req.params.id)).query(`SELECT p.*, t.LandTypeName, pt.LandTypeName AS ProposedName, l.LandCode, l.WorkflowStatus FROM dbo.LegalLandParcel p
+      JOIN dbo.LegalLand l ON l.LandId = p.LandId LEFT JOIN dbo.LegalLandType t ON t.LandTypeId = p.LandTypeId LEFT JOIN dbo.LegalLandType pt ON pt.LandTypeId = p.ProposedLandTypeId
+      WHERE p.ParcelId = @P AND p.IsActive = 1`)).recordset[0];
+    if (!p) return res.status(404).json({ error: "Parcel not found (or not on a land yet)" });
+    if (p.WorkflowStatus === "Registered") return res.status(409).json({ error: "The land is registered — use an amendment" });
+    if (decision !== "Approved" && !remarks) return res.status(400).json({ error: "Give the reason" });
+    if (decision === "Approved") {
+      if (!p.LandTypeId) return res.status(409).json({ error: "Record the current classification first" });
+      if (!["Yes", "No"].includes(p.ConversionRequired)) return res.status(409).json({ error: "Decide Yes or No for 'Conversion required' first — Under Assessment / Legal Review Required cannot be approved" });
+      if (p.ConversionRequired === "Yes" && !["Pre-registration", "Post-registration"].includes(p.ConversionStage)) return res.status(409).json({ error: "Choose whether the conversion is needed before or after registration" });
+      if (p.ConversionRequired === "Yes" && !p.ProposedLandTypeId) return res.status(409).json({ error: "Record the proposed classification" });
+      if (p.ConversionRequired === "No" && !(p.AssessmentRemarks || remarks)) return res.status(400).json({ error: "Record the reason conversion is not required" });
+      if (p.ConversionRequired === "Yes" && p.ConversionStage === "Post-registration" && !(p.AssessmentRemarks || remarks)) return res.status(400).json({ error: "Record why the conversion may legally follow registration" });
+    }
+    await pool.request().input("P", sql.Int, p.ParcelId).input("S", sql.NVarChar(20), decision).input("U", sql.Int, userOf(req)).input("R", sql.NVarChar(1000), remarks)
+      .query(`UPDATE dbo.LegalLandParcel SET AssessmentStatus = @S, AssessedBy = @U, AssessedAt = SYSUTCDATETIME(),
+                AssessmentRemarks = CASE WHEN @R IS NULL THEN AssessmentRemarks ELSE LEFT(ISNULL(AssessmentRemarks + CHAR(10), N'') + @R, 1000) END,
+                ConversionStage = CASE WHEN ConversionRequired = N'No' THEN N'Not Applicable' ELSE ConversionStage END WHERE ParcelId = @P`);
+    let extra = "";
+    if (decision === "Approved" && p.ConversionRequired === "Yes" && p.ConversionStage === "Pre-registration"
+      && !(await pool.request().input("P", sql.Int, p.ParcelId).query("SELECT 1 AS x FROM dbo.LegalPreRegConversion WHERE ParcelId = @P AND IsActive = 1")).recordset[0]) {
+      await pool.request().input("L", sql.Int, p.LandId).input("P", sql.Int, p.ParcelId).input("U", sql.Int, userOf(req))
+        .query("INSERT INTO dbo.LegalPreRegConversion (LandId, ParcelId, ConversionStatus, CreatedBy) VALUES (@L, @P, N'Conversion Required', @U)");
+      extra = " — pre-registration conversion opened";
+    }
+    if (decision === "Approved" && p.ConversionRequired === "Yes" && p.ConversionStage === "Post-registration"
+      && !(await pool.request().input("P", sql.Int, p.ParcelId).query("SELECT 1 AS x FROM dbo.LegalMutation WHERE ParcelId = @P AND Kind = N'Conversion' AND IsActive = 1")).recordset[0]) {
+      await pool.request().input("L", sql.Int, p.LandId).input("P", sql.Int, p.ParcelId).input("M", sql.Int, p.MouzaId).input("D", sql.NVarChar(100), p.RsDagNo ?? p.LrDagNo)
+        .input("C", sql.NVarChar(100), p.LandTypeName).input("Q", sql.NVarChar(100), p.ProposedName).input("U", sql.Int, userOf(req))
+        .query(`INSERT INTO dbo.LegalMutation (LandId, OfficeName, Kind, ConversionStage, ParcelId, MouzaId, DagNo, CurrentClass, RequestedClass, ApplicationStatus, Remarks, IsActive, CreatedBy)
+                VALUES (@L, N'To be decided', N'Conversion', N'Post-registration', @P, @M, LEFT(@D, 60), @C, @Q, N'Not Applied', N'Opened by the pre-registration assessment — conversion permitted after registration', 1, @U)`);
+      extra = " — post-registration conversion task opened";
+    }
+    await writeAudit(pool, req, { action: `Conversion assessment ${decision.toLowerCase()}`, entityType: "Land Parcel", entityId: p.ParcelId, landId: p.LandId,
+      newValue: { classification: p.LandTypeName, required: p.ConversionRequired, stage: p.ConversionStage, proposed: p.ProposedName }, remarks });
+    res.json({ message: `${p.ParcelCode}: assessment ${decision.toLowerCase()}${extra}` });
+  } catch (err) { fail(res, "assessment", err); }
+});
+
+// POST /prereg-conversion/:id/submit — order received → Submitted for Verification. POST …/verify { decision, remarks }.
+router.post("/prereg-conversion/:id/submit", requirePageRight(LAND, "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const c = (await pool.request().input("C", sql.Int, idOf(req.params.id)).query("SELECT * FROM dbo.LegalPreRegConversion WHERE ConversionId = @C AND IsActive = 1")).recordset[0];
+    if (!c) return res.status(404).json({ error: "Conversion not found" });
+    if (!["Order Received", "Returned for Correction"].includes(c.ConversionStatus)) return res.status(409).json({ error: "Only a conversion with its order received can be sent for verification — an application alone is not a completed conversion" });
+    if (!c.OrderNo || !c.OrderDate || !c.OrderFileId) return res.status(409).json({ error: "Enter the order number, order date and upload the order copy first" });
+    await pool.request().input("C", sql.Int, c.ConversionId).input("U", sql.Int, userOf(req))
+      .query("UPDATE dbo.LegalPreRegConversion SET ConversionStatus = N'Submitted for Verification', VerificationStatus = N'Pending', SubmittedBy = @U, SubmittedAt = SYSUTCDATETIME(), UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE ConversionId = @C");
+    await writeAudit(pool, req, { action: "Pre-registration conversion submitted for verification", entityType: "Pre-registration Conversion", entityId: c.ConversionId, landId: c.LandId });
+    res.json({ message: "Sent for legal verification" });
+  } catch (err) { fail(res, "prereg submit", err); }
+});
+router.post("/prereg-conversion/:id/verify", requirePageRight(LAND, "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const decision = req.body?.decision, remarks = txt(req.body?.remarks, 1000);
+    if (!["Verified", "Returned"].includes(decision)) return res.status(400).json({ error: "Choose Verify or Return" });
+    if (decision === "Returned" && !remarks) return res.status(400).json({ error: "Give the reason" });
+    if (!(await verifier(req))) return res.status(403).json({ error: "Only a Verifier or Legal Officer can verify a conversion order" });
+    const c = (await pool.request().input("C", sql.Int, idOf(req.params.id)).query("SELECT * FROM dbo.LegalPreRegConversion WHERE ConversionId = @C AND IsActive = 1")).recordset[0];
+    if (!c) return res.status(404).json({ error: "Conversion not found" });
+    if (c.ConversionStatus !== "Submitted for Verification") return res.status(409).json({ error: "Not waiting for verification" });
+    if (!isAdmin(req) && Number(c.SubmittedBy) === Number(userOf(req))) return res.status(409).json({ error: "You submitted this order — another user must verify it" });
+    await pool.request().input("C", sql.Int, c.ConversionId).input("U", sql.Int, userOf(req)).input("R", sql.NVarChar(1000), remarks)
+      .input("S", sql.NVarChar(40), decision === "Verified" ? "Verified" : "Returned for Correction").input("V", sql.NVarChar(20), decision)
+      .query(`UPDATE dbo.LegalPreRegConversion SET ConversionStatus = @S, VerificationStatus = @V, VerifiedBy = @U, VerifiedAt = SYSUTCDATETIME(), VerifyRemarks = @R,
+                CompletionDate = CASE WHEN @V = N'Verified' THEN ISNULL(CompletionDate, CAST(GETDATE() AS DATE)) ELSE CompletionDate END, UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME()
+              WHERE ConversionId = @C`);
+    await writeAudit(pool, req, { action: `Pre-registration conversion ${decision.toLowerCase()}`, entityType: "Pre-registration Conversion", entityId: c.ConversionId, landId: c.LandId, remarks });
+    res.json({ message: decision === "Verified" ? "Conversion verified — the parcel's pre-registration conversion is complete" : "Returned for correction" });
+  } catch (err) { fail(res, "prereg verify", err); }
+});
+
 module.exports = router;
+module.exports.preRegGate = preRegGate;

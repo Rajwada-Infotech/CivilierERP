@@ -11,7 +11,7 @@ import { BodyPortal } from "@/components/ui/body-portal";
  * same change. The activity list, durations, dependencies, reminder days and the report list are read live from
  * Setup / the server, so they never go out of date.
  */
-const GUIDE_UPDATED = "27 Nov 2026 · V3 complete: 24 new reports, versioned checklist & legal rules, amendment types, My tasks for inheritance / disputes / events / documents / amendments;  V3 parcels, ownership events, family & inheritance engine;  V3 phase A corrections (rejected activities block review, duplicate confirm, approval terms, deed statuses, activity categories);  Land Records Search phases 1–3 (records, mapping, discrepancies, alternative history, possession, legal review, summary); 26 Nov · Other… adds to masters; Ownership History tree view; Legal V2.1 (Assign tab, My tasks, due-date colours)";
+const GUIDE_UPDATED = "27 Nov 2026 · Pre-registration classification & conversion gate;  V3 complete: 24 new reports, versioned checklist & legal rules, amendment types, My tasks for inheritance / disputes / events / documents / amendments;  V3 parcels, ownership events, family & inheritance engine;  V3 phase A corrections (rejected activities block review, duplicate confirm, approval terms, deed statuses, activity categories);  Land Records Search phases 1–3 (records, mapping, discrepancies, alternative history, possession, legal review, summary); 26 Nov · Other… adds to masters; Ownership History tree view; Legal V2.1 (Assign tab, My tasks, due-date colours)";
 
 type Step = { title: string; where?: string; points: string[] };
 const STEPS: Step[] = [
@@ -80,11 +80,18 @@ const STEPS: Step[] = [
     "Submit for final approval → L1 → L2.",
   ] },
   { title: "LA & ULC", where: "Pipeline → 6", points: ["Each clearance on its own: application, queries, report, certificate, expiry. Submitting is not a clearance."] },
-  { title: "Deed Registration", where: "Pipeline → 7", points: [
+  { title: "Pre-registration compliance", where: "Pipeline → 7", points: [
+    "Every parcel records its current classification (Setup → Land Type: Bastu, Shali, Doba, Danga, Pukur…), the proposed classification and land use, whether conversion is required (Yes / No / Under Assessment / Legal Review Required) and when (before or after registration), with the reason.",
+    "A Legal Officer approves each parcel's assessment; changing the classification sends it back to Pending. The land-type default only suggests — never decides.",
+    "Conversion needed before registration: the application is tracked here (office, employee, target, query / response, hearing, fees) up to the order; Order Received → Send for verification → another user verifies. An application alone never completes it.",
+    "Conversion permitted after registration: approving the assessment opens the conversion task in Post-registration (mutation stays separate there).",
+    "Gate before Deed Registration (L2 approval and the registration itself), parcel by parcel: classification recorded, assessment approved, required pre-registration conversion verified — otherwise \"Registration is blocked\" with the Dag.",
+  ] },
+  { title: "Deed Registration", where: "Pipeline → 8", points: [
     "Consideration, payment schedule and payments, stamp duty and fees, appointment, attempt, registered deed no. and copy, IGR / deed-location tracking.",
     "Registered land is locked; changes go through an amendment.",
   ] },
-  { title: "Post-registration", where: "Pipeline → 8", points: [
+  { title: "Post-registration", where: "Pipeline → 9", points: [
     "Tasks with employee, due date and status.",
     "Mutation and Conversion tracked separately (application, office, employee, target, hearing, status, query log). Conversion waits for an approved mutation (rule conversion_after_mutation).",
   ] },
@@ -164,7 +171,7 @@ export function LegalGuideButton() {
               <button onClick={() => setOpen(false)} aria-label="Close" className="border border-foreground/40 p-1.5 hover:border-foreground"><X size={16} /></button>
             </div>
             <p className="mb-3 border border-border bg-muted/30 px-3 py-2 text-xs">
-              Flow: Enquiry → Land records search → Legal verification → Final Legal Review → Land record → Land Approval → Deed Process → LA &amp; ULC → Deed Registration → Post-registration.
+              Flow: Enquiry → Land records search → Legal verification → Final Legal Review → Land record → Land Approval → Deed Process → LA &amp; ULC → Pre-registration compliance → Deed Registration → Post-registration.
             </p>
             <ol className="space-y-3">
               {STEPS.map((s, i) => (

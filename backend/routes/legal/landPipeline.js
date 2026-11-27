@@ -2000,6 +2000,9 @@ router.post("/:id/deed-process/approve", requirePageRight(LAND_PAGE, "view"), as
       if (cols.a && !l.DeedFileId) return res.status(409).json({ error: "Upload the deed copy before approval" });
       const stops = await require("./dueDiligence").processingBlockers(pool, id);
       if (stops.length) return res.status(409).json({ error: `Cannot approve: ${stops.join("; ")}` });
+      // Pre-registration compliance gate (land classification & conversion), parcel by parcel, before Deed Registration.
+      const gate = await require("./landIntel").preRegGate(pool, id).catch(() => ({ ok: true, blockers: [] }));
+      if (!gate.ok) return res.status(409).json({ error: `Registration is blocked. ${gate.blockers.join("; ")}.` });
     }
     const userId = req.user?.userId || null;
     const note = cols.c ? ", DeedApprovalNote = @R" : "";
@@ -2161,6 +2164,9 @@ router.post("/:id/deed-registration", requirePageRight(LAND_PAGE, "view"), async
         if (pay.Total == null || Number(pay.Paid) + 0.001 < Number(pay.Total)) return res.status(409).json({ error: "The consideration is not fully paid yet" });
       }
     }
+    // Pre-registration compliance gate again at the registration itself (a parcel may have changed since approval).
+    const preGate = await require("./landIntel").preRegGate(pool, id).catch(() => ({ ok: true, blockers: [] }));
+    if (!preGate.ok) return res.status(409).json({ error: `Registration is blocked. ${preGate.blockers.join("; ")}.` });
     const fileId = idParam(req.body?.fileId);
     if (!fileId) return res.status(400).json({ error: "Upload the registered deed copy" });
     if (!(await pool.request().input("F", sql.Int, fileId).query("SELECT 1 AS x FROM dbo.LegalMasterFile WHERE FileId = @F")).recordset[0]) return res.status(400).json({ error: "File not found" });
