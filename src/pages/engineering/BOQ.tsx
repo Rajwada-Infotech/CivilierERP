@@ -446,7 +446,7 @@ export default function BOQ() {
     {
       id: "actions",
       header: "Actions",
-      size: 240, // room for print, edit and Submit without widening one group's column
+      size: 180, // eye + print + edit (~110px), with room for the Submit button on drafts; wider only leaves dead space
 
       cell: ({ row }: any) => (
         <div className="flex items-center gap-1">
