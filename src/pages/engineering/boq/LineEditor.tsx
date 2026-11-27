@@ -71,8 +71,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
     44,
     ...(!isItem ? [190] : []),
     220,
-    ...(isItem ? [190] : []),
-    100,
+    ...(isItem ? [190, 100] : []), // For Activity, Code
     160,
     ...(isItem ? [96, 92] : []),
     isItem ? 140 : 110,
@@ -80,7 +79,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
     120,
     104, // Tax %
     124,
-    ...(!isItem ? [148] : []),
+    ...(!isItem ? [170] : []), // Per Activity Price
     120,
     ...(!readOnly ? [48] : []),
   ];
@@ -120,7 +119,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
   // Every mode shows 12 columns (+ delete when editable): items get "For Activity"
   // and "Per Unit Qty"; activities get "Area" and "Per Activity Price".
   // Activities also get a leading "Activity Group" column.
-  const colCount = (isItem ? 13 : 12) + (readOnly ? 0 : 1);
+  const colCount = (isItem ? 13 : 11) + (readOnly ? 0 : 1);
 
   return (
     <div
@@ -259,10 +258,10 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                   ...(!isItem ? [["Activity Group", "left"]] : []),
                   [isItem ? "Item" : "Activity", "left"],
                   ...(isItem ? [["For Activity", "left"]] : []),
-                  ["Code", "left"],
+                  ...(isItem ? [["Code", "left"]] : []),
                   ["Spec / Notes", "left"],
                   ...(isItem ? [["Item Qty", "right"], ["Wastage %", "right"]] : []),
-                  [isItem ? "Per Unit Qty" : "Total Area", "right"],
+                  [isItem ? "Per Unit Qty" : "Total Qty", "right"],
                   ["UOM", "left"],
                   [isItem ? "Rate (₹)" : "Total Rate (₹)", "right"],
                   ["Tax %", "right"],
@@ -560,7 +559,8 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                       </td>
                     )}
 
-                    {/* Code */}
+                    {/* Code (items only) */}
+                    {isItem && (
                     <td
                       style={{
                         borderRight: "1px solid hsl(var(--foreground) / 0.2)",
@@ -586,6 +586,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                         {codeVal || <em>Auto</em>}
                       </span>
                     </td>
+                    )}
 
                     {/* Spec/Notes */}
                     <td
@@ -744,7 +745,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                                 title={
                                   !act
                                     ? "Pick the activity this item is for"
-                                    : "Enter the activity's Total Area and this item's quantity"
+                                    : "Enter the activity's Total Qty and this item's quantity"
                                 }
                                 style={{ color: "hsl(var(--muted-foreground))" }}
                               >
@@ -754,7 +755,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                           }
                           return (
                             <span
-                              title={`${fmtQty(q)} ÷ ${fmtQty(basis.value)} (activity ${basis.kind === "area" ? "area" : "quantity"})`}
+                              title={`${fmtQty(q)} ÷ ${fmtQty(basis.value)} (activity qty)`}
                               style={{
                                 fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
                                 fontVariantNumeric: "tabular-nums",
@@ -765,7 +766,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                             >
                               {fmtQty(q / basis.value)}
                               <span style={{ fontSize: 9.5, fontWeight: 500, color: "hsl(var(--muted-foreground))" }}>
-                                {` ${row.uomName || ""} / ${basis.kind === "area" ? "area" : "unit"}`}
+                                {` ${row.uomName || ""} / activity unit`}
                               </span>
                             </span>
                           );
@@ -969,7 +970,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                           }
                           return (
                             <span
-                              title={`${fmt(amt)} ÷ ${fmtQty(basis.value)} (${basis.kind === "area" ? "total area" : "total qty"})`}
+                              title={`${fmt(amt)} ÷ ${fmtQty(basis.value)} (total qty)`}
                               style={{
                                 fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
                                 fontVariantNumeric: "tabular-nums",
@@ -979,7 +980,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                             >
                               {fmt(amt / basis.value)}
                               <span style={{ fontSize: 9.5, fontWeight: 500, color: "hsl(var(--muted-foreground))" }}>
-                                {basis.kind === "area" ? " / area" : " / unit"}
+                                {` / ${row.uomName ? row.uomName.toLowerCase() : "unit"}`}
                               </span>
                             </span>
                           );

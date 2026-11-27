@@ -213,7 +213,7 @@ export const ActivityRow: React.FC<{
             )}
             {labourTotal > 0 && activity.area > 0 && (
               <span className="flex items-center gap-1 text-[0.625rem] font-medium px-2 py-1 bg-card text-foreground border border-foreground/40">
-                Per Activity Price: {fmt(labourTotal / activity.area)} / area
+                Per Activity Price: {fmt(labourTotal / activity.area)} / {activity.unit ? activity.unit.toLowerCase() : "unit"}
               </span>
             )}
             {materialsTotal > 0 && (
@@ -278,7 +278,7 @@ export const ActivityRow: React.FC<{
             onChange={(e) =>
               onUpdate(withArea(activity, parseFloat(e.target.value) || 0))
             }
-            placeholder="Area"
+            placeholder="Qty"
             className={cellInput}
           />
           <MaterialBreakdownModal
@@ -324,7 +324,7 @@ export const ActivityRow: React.FC<{
             )}
             {labourTotal > 0 && activity.area > 0 && (
               <span className="flex items-center gap-1 text-[0.625rem] font-medium px-2 py-0.5 bg-card text-foreground border border-foreground/40">
-                Per Activity Price: {fmt(labourTotal / activity.area)} / area
+                Per Activity Price: {fmt(labourTotal / activity.area)} / {activity.unit ? activity.unit.toLowerCase() : "unit"}
               </span>
             )}
             {materialsTotal > 0 && (

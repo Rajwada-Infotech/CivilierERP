@@ -283,7 +283,7 @@ export const MaterialBreakdownModal: React.FC<{
                             />
                             <p className="text-[0.625rem] text-muted-foreground mt-1">
                               {activity.area > 0 && matQty(mat, activity) > 0
-                                ? `Per unit: ${fmtQ(matQty(mat, activity) / activity.area)}${mat.unit ? ` ${mat.unit}` : ""} / area`
+                                ? `Per unit: ${fmtQ(matQty(mat, activity) / activity.area)}${mat.unit ? ` ${mat.unit}` : ""} / ${activity.unit ? activity.unit.toLowerCase() : "unit"}`
                                 : "Per unit: —"}
                             </p>
                           </div>
