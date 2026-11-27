@@ -446,10 +446,10 @@ export default function BOQ() {
     {
       id: "actions",
       header: "Actions",
-      size: 180, // eye + print + edit (~110px), with room for the Submit button on drafts; wider only leaves dead space
+      size: 140, // icon buttons only; the Submit button on drafts/rejected wraps below them instead of widening every row
 
       cell: ({ row }: any) => (
-        <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center gap-1">
           <Button data-row-view
             variant="ghost"
             size="sm"
