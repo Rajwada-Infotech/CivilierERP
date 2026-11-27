@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button";
 import { fetchNextDocNumber } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { DateInput } from "@/components/ui/date-input";
-import { BoqItem, BoqActivity, BoqRecord, Company, Project, DocType, UomOption, ItemOption, ActivityOption, ActivityGroupOption, uid, apiFetch, rowToItem, rowToActivity, buildPayload, Field, FormState, defaultForm, recordToForm } from "./config";
+import { BoqItem, BoqActivity, BoqRecord, Company, Project, DocType, UomOption, ItemOption, ActivityOption, ActivityGroupOption, apiFetch, rowToItem, rowToActivity, buildPayload, Field, FormState, defaultForm, recordToForm } from "./config";
 import { LineEditor } from "./LineEditor";
 
 // BOQ Form Modal
@@ -105,47 +105,6 @@ export const FormModal: React.FC<FormModalProps> = ({
     set("CompanyId", v);
     set("ProjectId", "");
     clearLocation();
-  };
-
-  // When an Activity line is added, auto-fetch the items linked to that
-  // activity (Activity Master → "Add Item") and merge any not already on
-  // the Items tab — quantity/rate are left blank for the user to fill in.
-  const handleActivitySelected = async (activityId: string) => {
-    try {
-      const linked = await apiFetch(`/activity-items?activityId=${activityId}`);
-      const linkedList: any[] = Array.isArray(linked) ? linked : [];
-      if (linkedList.length === 0) return;
-
-      setItems((prev) => {
-        const existingIds = new Set(prev.map((it) => it.itemId));
-        const actName = activityOptions.find((o) => o.id === activityId)?.name ?? "";
-        const newRows = linkedList
-          .filter((li) => !existingIds.has(li.itemId))
-          .map((li) => ({
-            _key: uid(),
-            activityId,
-            activityName: actName,
-            itemId: li.itemId,
-            itemName: li.itemName,
-            itemCode: li.itemCode || "",
-            description: "",
-            quantity: "",
-            wastage: "",
-            uomName: li.uom || "",
-            rate: "",
-            tax: "18",
-            amount: 0,
-          }));
-        if (newRows.length === 0) return prev;
-        toast.success(
-          `${newRows.length} item${newRows.length > 1 ? "s" : ""} auto-added from this activity`,
-        );
-        return [...prev, ...newRows];
-      });
-    } catch (err) {
-      // Non-fatal — activity selection itself still succeeds either way.
-      console.warn("Failed to auto-fetch activity items:", err);
-    }
   };
 
   // Filter projects to only those belonging to the selected company.
@@ -622,7 +581,6 @@ export const FormModal: React.FC<FormModalProps> = ({
                 lineTab === "items" ? (setItems as any) : (setActivities as any)
               }
               onTabChange={setLineTab}
-              onActivitySelected={handleActivitySelected}
             />
           </div>
         </div>
