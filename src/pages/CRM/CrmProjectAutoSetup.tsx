@@ -6,11 +6,11 @@ import { toast } from "sonner";
 import { Link } from "react-router-dom";
 import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { ChevronDown, ChevronRight, Pencil, Plus, X } from "lucide-react";
+import { ArrowRight, Building2, Car, ChevronDown, ChevronRight, ExternalLink, Grid3X3, Pencil, Plus, RefreshCw, X } from "lucide-react";
 import { useUrlParam } from "@/hooks/useUrlParam";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
+import { GRID_CARD, GridGuidance, GridToneMark } from "@/components/crm/CrmDataTable";
 import { NamingPanel } from "./autoSetup/NamingPanel";
 import { ProjectTypeBar } from "./autoSetup/ProjectTypeBar";
 import { BlockStackEditor } from "./autoSetup/BlockStackEditor";
@@ -18,8 +18,9 @@ import ParkingSetup from "./autoSetup/ParkingSetup";
 import { ProjectPicker } from "./autoSetup/ProjectPicker";
 import { BlockFloorTree, FloorUnitList, TowerOverview, useUnitEditing } from "./autoSetup/UnitTree";
 import { LandInventory, PlotLayoutStep, PlotOverview, PlotSummaryPanel } from "./autoSetup/PlotParts";
+import { MATRIX_BTN, MATRIX_BTN_BRAND } from "./matrix/shared";
 import {
-  API, EMPTY_ITEMS, INP, KEY_INK, KEY_LINE, LBL, NUM, Notice, PANEL, RULE, RULE_SOFT, Section, SetupProgress, TEXT_LINK, chip,
+  API, EMPTY_ITEMS, INP, KEY_INK, KEY_LINE, LBL, NUM, Notice, PANEL, SEG_WRAP, Section, SetupProgress, TEXT_LINK, TONE_ROSE_TEXT, chip, segBtn,
   fetchApplicablePlans, fetchStatus, generateNames, isDuplicateBlockName, plural,
   type KindRow, type NamingScheme, type PaymentPlan, type PlotSummary,
 } from "./autoSetup/config";
@@ -323,7 +324,7 @@ const CrmProjectAutoSetup: React.FC = () => {
         const open = floorPlanExpandedFloorId === f.Id;
         const clickable = !floorsEditMode && f.IsGenerated && f.FloorNo !== -1;
         return (
-          <span key={f.Id} className={`${chip(open)} ${NUM} ${f.FloorNo === -1 ? "!border-destructive text-destructive" : ""}`}>
+          <span key={f.Id} className={`${chip(open)} ${NUM} ${f.FloorNo === -1 ? `!border-rose-500/40 ${TONE_ROSE_TEXT}` : ""}`}>
             {clickable ? (
               <button onClick={() => toggleFloor(f, floorPlanExpandedFloorId, setFloorPlanExpandedFloorId)}>{f.FloorLabel}</button>
             ) : <span>{f.FloorNo === -1 ? "Unassigned" : f.FloorLabel}</span>}
@@ -356,303 +357,409 @@ const CrmProjectAutoSetup: React.FC = () => {
     ];
   })();
 
+  const guidance = (() => {
+    if (!projectId || !status) return null;
+    if (!status.projectType) {
+      return { tone: "waiting" as const, title: "Choose a Project Type", text: "Select whether this project builds Towers/Flats, Plots/Villas, or Commercial spaces so subsequent steps configure the right inventory flow." };
+    }
+    if (!step1Done) {
+      return { tone: "waiting" as const, title: `Step 1 · Create ${isPlotted ? "Plot Blocks" : "Blocks / Towers"}`, text: "Use Step 1 below to create your project's blocks at once using Alphabetical, Numeric, or Custom naming." };
+    }
+    if (isPlotted && (!plotSummary || plotSummary.Plots === 0)) {
+      return { tone: "moving" as const, title: "Step 2 · Lay Out & Generate Plots", text: "Configure plot counts, naming prefixes, default sizes, and rates per block below, save the layout, then click Generate Plots." };
+    }
+    if (hasTowers && !step2Done) {
+      return { tone: "waiting" as const, title: "Step 2 · Set Floor Counts", text: "Enter how many floors each tower block contains in Step 2 below and click Generate Floors." };
+    }
+    if (anyToGenerate) {
+      return {
+        tone: "moving" as const,
+        title: "Step 3 · Ready to Generate Units",
+        text: "Review unit naming & floor mixes below. Pending floors with a unit count will auto-create units and Flat Master rooms (where Unit Composition layouts exist).",
+        action: rights.canCreate ? (
+          <button type="button" onClick={handleGenerate} disabled={generating} className={MATRIX_BTN_BRAND}>
+            {generating ? "Generating…" : "Generate Units"}
+          </button>
+        ) : undefined,
+      };
+    }
+    if (buildsVillas && plotSummary && plotSummary.VillaTypes > plotSummary.VillaTypesWithLayout) {
+      return { tone: "waiting" as const, title: "Villa Room Layouts Incomplete", text: `${plotSummary.VillaTypes - plotSummary.VillaTypesWithLayout} villa type(s) still lack room layouts in Plot Master before plots can convert to DPR construction.` };
+    }
+    return { tone: "done" as const, title: "Project Structure Ready", text: "Blocks, inventory, and pricing structure are set up. Use Unit Matrix or Parking Matrix to view live availability, holds, and bookings." };
+  })();
+
   return (
-    <>
+    <div className="space-y-4">
+      {ask.node}
       <Breadcrumbs items={["Dashboard", "CRM", "Project Auto Setup"]} />
-      <SheetShell
-        eyebrow="CivilierERP · CRM · Setup"
-        title="Auto Project Setup"
-        subtitle={activeTab === "parking"
-          ? "Parking slots per block: the mix of types, their charges, and the slots made from them."
-          : isPlotted
-            ? "A project's plot blocks and land. Plot Master stays the sales inventory until construction creates a Unit Master record."
-            : "Pick a project, then make its blocks, floors and units in one place instead of one row at a time."}
-        action={
-          <div className="seg">
-            <button className={activeTab === "setup" ? "on" : ""} onClick={() => setActiveTab("setup")}>{isPlotted ? "Blocks & plots" : "Blocks, floors & units"}</button>
-            <button className={activeTab === "parking" ? "on" : ""} onClick={() => setActiveTab("parking")}>Parking</button>
-          </div>
-        }
-      >
-        {ask.node}
-        {activeTab === "parking" ? (
-          <ParkingSetup />
-        ) : (
-          <div className="space-y-5">
-            <ProjectPicker companyId={companyId} projectId={projectId}
-              onCompany={(v) => { setCompanyId(v); setProjectId(""); }} onProject={setProjectId} />
 
-            {!projectId && (
-              <div className="bg-card px-6 py-10 text-center" style={{ border: RULE_SOFT }}>
-                <p className="text-sm font-medium">No project selected</p>
-                <p className="text-xs text-muted-foreground mt-1">Pick a company and project above to see and manage its blocks, floors and units.</p>
+      <section className={`${GRID_CARD} rounded-xl px-5 py-4 space-y-3`} aria-label="Auto Project Setup header">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex items-start gap-3 min-w-0 flex-1 basis-72">
+            <span className="w-10 h-10 rounded-xl bg-primary text-primary-foreground flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
+              {activeTab === "parking" ? <Car size={19} /> : <Building2 size={19} />}
+            </span>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-medium text-muted-foreground">CRM · Setup &amp; Inventory</span>
+                {status?.project?.Name && (
+                  <span className="inline-flex items-center rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[0.6875rem] font-semibold text-foreground">
+                    {status.project.Name}{status.project.ShortCode ? ` (${status.project.ShortCode})` : ""}
+                  </span>
+                )}
               </div>
-            )}
-            {projectId && statusLoading && <p className="text-sm text-muted-foreground">Loading the project…</p>}
-            {projectId && statusFailed && <Notice tone="error">{(statusError as Error)?.message}</Notice>}
-
-            {projectId && status && (
-              <>
-                <SetupProgress steps={steps} />
-                {hasPlots && plotSummary && <PlotSummaryPanel s={plotSummary} buildsVillas={buildsVillas} projectId={projectId} canEdit={rights.canEdit} />}
-
-                {!status.shortCodeValid && (
-                  <Notice tone="error">
-                    This project has no valid short name (letters and numbers only). Set one in Project Master first — it becomes the first part of every generated unit name (e.g. RYG/A/1001).
-                  </Notice>
-                )}
-
-                {/* What this project is — type, what it sells, and each block's layout. */}
-                <ProjectTypeBar projectId={Number(projectId)} status={status} canEdit={rights.canEdit}
-                  onChanged={() => { changed(); qc.invalidateQueries({ queryKey: ["auto-setup-kinds", projectId] }); }} />
-
-                {!isPlotted && status.legacyUnitCount > 0 && (
-                  <Notice tone="fix">
-                    <span className={NUM}>{plural(status.legacyUnitCount, "unit")}</span> with no floor — the Unassigned row in the overview. Edit each to give it a floor, or use{" "}
-                    <Link to="/crm/setup/unit-master" className={TEXT_LINK}>Unit Master</Link>.
-                  </Notice>
-                )}
-
-                {blocks.length > 0 && (isPlotted
-                  ? <PlotOverview projectName={status.project?.Name} typeName={status.projectType?.Name} blocks={blocks} canDelete={rights.canDelete} confirm={ask.confirm} onChanged={changed} />
-                  : <TowerOverview projectName={status.project?.Name} blocks={blocks} floors={floors} floorsByBlock={floorsByBlock} ctx={unitCtx} toggle={toggleFloor} />)}
-
-                {/* 1 · Blocks */}
-                <Section tag="1" title={isPlotted ? "Plot blocks" : "Blocks"} done={step1Done}
-                  note={step1Done ? `${isPlotted ? "A block opens in Plot Master." : "Open a block to see its floors."}${rights.canEdit || rights.canDelete ? " Edit renames or removes blocks." : ""}` : "Create the towers / blocks of this project."}
-                  right={<>
-                    {(rights.canEdit || rights.canDelete) && step1Done && (
-                      <button onClick={() => { setBlocksEditMode((v) => !v); setEditingBlockId(null); }} className={`${blocksEditMode ? KEY_INK : KEY_LINE} h-8 px-3`}>
-                        <Pencil size={12} /> {blocksEditMode ? "Done" : "Edit"}
-                      </button>
-                    )}
-                    {rights.canCreate && step1Done && !showAddBlockForm && (
-                      <button onClick={() => setShowAddBlockForm(true)} className={`${KEY_LINE} h-8 px-3`}><Plus size={12} /> Add blocks</button>
-                    )}
-                  </>}>
-                  {step1Done && (
-                    <div className="flex items-center flex-wrap gap-1.5">
-                      {blocks.map((b) => (
-                        <span key={b.Id} className={chip(!blocksEditMode && !isPlotted && !!blocksExpandedBlocks[b.Id])}>
-                          {editingBlockId === b.Id ? (
-                            <input autoFocus type="text" value={editingBlockName}
-                              autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false} name={`block-rename-${b.Id}`}
-                              onChange={(e) => setEditingBlockName(e.target.value)}
-                              onBlur={() => handleRenameBlock(b)}
-                              onKeyDown={(e) => { if (e.key === "Enter") handleRenameBlock(b); if (e.key === "Escape") setEditingBlockId(null); }}
-                              className="w-16 bg-transparent border-b border-foreground outline-none" />
-                          ) : blocksEditMode ? (
-                            <>
-                              <span className="font-medium">{b.BlockName}</span>
-                              {rights.canEdit && (
-                                <button onClick={() => { setEditingBlockId(b.Id); setEditingBlockName(b.BlockName); }} title="Rename block" className="hover:text-primary"><Pencil size={11} /></button>
-                              )}
-                              {rights.canDelete && (
-                                <button onClick={() => handleDeleteBlock(b)} title="Delete block" className="hover:text-destructive"><X size={12} /></button>
-                              )}
-                            </>
-                          ) : isPlotted ? (
-                            <Link to="/crm/setup/plot-master" className="font-medium hover:text-primary">{b.BlockName}</Link>
-                          ) : (
-                            <button onClick={() => setBlocksExpandedBlocks((m) => ({ ...m, [b.Id]: !m[b.Id] }))} className="inline-flex items-center gap-1 font-medium">
-                              {blocksExpandedBlocks[b.Id] ? <ChevronDown size={12} /> : <ChevronRight size={12} />} {b.BlockName}
-                            </button>
-                          )}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-
-                  {!isPlotted && blocks.filter((b) => blocksExpandedBlocks[b.Id]).map((b) => (
-                    <div key={b.Id} className={`${PANEL} px-3 py-2`}>
-                      <div className={`${LBL} py-1`}>Block {b.BlockName}</div>
-                      <BlockFloorTree blockFloors={floorsByBlock.get(b.Id) || []} expandedFloorId={blocksExpandedFloorId} ctx={unitCtx}
-                        onToggleFloor={(f) => toggleFloor(f, blocksExpandedFloorId, setBlocksExpandedFloorId)} />
-                    </div>
-                  ))}
-
-                  {rights.canCreate && (!step1Done || showAddBlockForm) && (
-                    <div className={step1Done ? `${PANEL} p-4 space-y-4` : "space-y-4"}>
-                      {step1Done && (
-                        <div className="flex items-center justify-between">
-                          <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em]">Add more {isPlotted ? "plot " : ""}blocks</span>
-                          <button onClick={() => setShowAddBlockForm(false)} className={`${KEY_LINE} h-8 px-3`}>Cancel</button>
-                        </div>
-                      )}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <label className="block space-y-1">
-                          <span className={`block ${LBL}`}>Number of blocks</span>
-                          <input type="number" min={1} max={100} value={blockCount} onChange={(e) => setBlockCount(e.target.value)} className={`${INP} ${NUM}`} />
-                        </label>
-                        <div className="space-y-1">
-                          <span className={`block ${LBL}`}>Naming scheme</span>
-                          <div className="seg">
-                            {(["Alphabetical", "Numeric", "Custom"] as NamingScheme[]).map((s) => (
-                              <button key={s} type="button" className={namingScheme === s ? "on" : ""} onClick={() => setNamingScheme(s)}>{s}</button>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="space-y-1">
-                        <span className={`block ${LBL}`}>Block names</span>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-                          {blockNames.map((name, i) => {
-                            const dupe = isDuplicateBlockName(name, i, blockNames, existingBlockNamesLower);
-                            return (
-                              <div key={i}>
-                                <input type="text" value={name} placeholder={`Block ${i + 1}`}
-                                  autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
-                                  name={`block-name-${i}-${projectId || "new"}`}
-                                  onChange={(e) => setBlockNames((arr) => arr.map((v, idx) => (idx === i ? e.target.value : v)))}
-                                  className={`${INP} ${dupe ? "!border-destructive text-destructive" : ""}`} />
-                                {dupe && <div className="text-[0.625rem] text-destructive mt-0.5">Already exists</div>}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                      <div className="flex justify-end pt-3" style={{ borderTop: RULE_SOFT }}>
-                        <button onClick={handleSaveBlocks} disabled={savingBlocks || blockNames.some((n, i) => isDuplicateBlockName(n, i, blockNames, existingBlockNamesLower))}
-                          className={`${KEY_INK} h-9 px-5 w-full sm:w-auto`}>
-                          {savingBlocks ? "Saving…" : step1Done ? "Add blocks" : "Create blocks"}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                  {!rights.canCreate && !step1Done && <p className="text-xs text-muted-foreground">No blocks yet, and you may not create them.</p>}
-                </Section>
-
-                {/* A plot block has no floors: the floor step is replaced (the server refuses POST /floors for it). */}
-                {step1Done && hasPlots && (
-                  <PlotLayoutStep blocks={plotBlocks} projectTypeName={status.projectType?.Name} canEdit={rights.canEdit} canCreate={rights.canCreate} onChanged={changed} />
-                )}
-                {step1Done && hasPlots && plotBlocks.some((b) => b.PlotTemplate?.IsGenerated) && (
-                  <LandInventory blocks={plotBlocks} projectId={projectId} canDelete={rights.canDelete} confirm={ask.confirm} onChanged={changed} />
-                )}
-
-                {/* 2 · Floor plan — every count stays editable, prefilled with what's there. */}
-                {step1Done && hasTowers && (
-                  <Section tag="2" title="Floor plan" done={step2Done}
-                    note={step2Done ? `Open a floor to see its units.${rights.canDelete ? " Edit removes empty floors." : ""}` : "Enter how many floors each block has."}
-                    right={rights.canDelete && step2Done && (
-                      <button onClick={() => setFloorsEditMode((v) => !v)} className={`${floorsEditMode ? KEY_INK : KEY_LINE} h-8 px-3`}>
-                        <Pencil size={12} /> {floorsEditMode ? "Done" : "Edit"}
-                      </button>
-                    )}>
-                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-                      {towerBlocks.map((b) => {
-                        const blockFloors = floorsByBlock.get(b.Id) || [];
-                        const hasFloors = blockFloors.length > 0;
-                        // Open while there's nothing to show yet, or once "Add floors" is pressed.
-                        const isOpen = rights.canCreate && (!hasFloors || !!floorFormOpenFor[b.Id]);
-                        const openFloor = blockFloors.find((x) => x.Id === floorPlanExpandedFloorId);
-                        return (
-                          <div key={b.Id} className={`${PANEL} p-3 space-y-2.5`}>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="text-sm font-semibold">Block {b.BlockName}</span>
-                              {hasFloors && <span className="text-xs text-muted-foreground"><span className={NUM}>{blockFloors.length}</span> floor{blockFloors.length === 1 ? "" : "s"}</span>}
-                              {hasFloors && !isOpen && rights.canCreate && (
-                                <button onClick={() => setFloorFormOpenFor((m) => ({ ...m, [b.Id]: true }))} className={`${KEY_LINE} h-7 px-2.5 ml-auto`}><Plus size={11} /> Add floors</button>
-                              )}
-                            </div>
-                            {isOpen && (
-                              <div className="flex items-center gap-2">
-                                <input type="number" min={1} max={100} placeholder="Number of floors" value={floorCounts[b.Id] || ""}
-                                  onChange={(e) => setFloorCounts((m) => ({ ...m, [b.Id]: e.target.value }))} className={`${INP} ${NUM}`} />
-                                {hasFloors && (
-                                  <button onClick={() => setFloorFormOpenFor((m) => ({ ...m, [b.Id]: false }))} className={`${KEY_LINE} h-9 px-3`}>Cancel</button>
-                                )}
-                              </div>
-                            )}
-                            {!hasFloors && !rights.canCreate && <p className="text-xs text-muted-foreground">No floors yet.</p>}
-                            {hasFloors && floorTags(blockFloors)}
-                            {openFloor && <FloorUnitList floorId={openFloor.Id} ctx={unitCtx} />}
-                          </div>
-                        );
-                      })}
-                    </div>
-                    {rights.canCreate && towerBlocks.some((b) => !(floorsByBlock.get(b.Id) || []).length || floorFormOpenFor[b.Id]) && (
-                      <div className="flex justify-end pt-3" style={{ borderTop: RULE_SOFT }}>
-                        <button onClick={async () => { if (await handleSaveFloors()) setFloorFormOpenFor({}); }} disabled={savingFloors}
-                          className={`${KEY_INK} h-9 px-5 w-full sm:w-auto`}>
-                          {savingFloors ? "Saving…" : step2Done ? "Add floors" : "Generate floors"}
-                        </button>
-                      </div>
-                    )}
-                  </Section>
-                )}
-
-                {/* 3 · Unit types & generation */}
-                {step2Done && hasTowers && (
-                  <Section tag="3" title="Unit types & generation" note="Set each block's unit mix (a typical floor, or a floor's own), then generate the units.">
-                    {/* How the units will be named — project default, block and floor overrides, previewed first. */}
-                    <NamingPanel projectId={Number(projectId)} shortName={status.project?.ShortCode} blocks={towerBlocks} floorsByBlock={floorsByBlock} canEdit={rights.canEdit} />
-
-                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-                      {towerBlocks.map((b) => {
-                        const bf = floorsByBlock.get(b.Id) || [];
-                        const nonGroundFloors = bf.filter((f) => f.FloorNo !== 0);
-                        const groundFloor = bf.find((f) => f.FloorNo === 0);
-                        // Fully done: every non-ground floor (and a sellable ground floor) is generated.
-                        const blockFullyGenerated = nonGroundFloors.length > 0
-                          && nonGroundFloors.every((f) => f.IsGenerated)
-                          && (!groundFloor || groundFloor.IsGenerated || !groundFloor.HasUnits);
-                        const totalGenerated = bf.reduce((s, f) => s + (f.GeneratedUnitCount || 0), 0);
-                        const summaryFloors = [groundFloor, ...nonGroundFloors].filter(Boolean);
-                        return (
-                          <div key={b.Id} className={`${PANEL} p-3 sm:p-4 space-y-3`}>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="text-sm font-semibold">Block {b.BlockName}</span>
-                              {blockFullyGenerated && <SheetMark text={`${plural(totalGenerated, "unit")} generated`} tone="done" />}
-                              {blockFullyGenerated && (
-                                <button onClick={() => setUnitTemplateOpenFor((m) => ({ ...m, [b.Id]: !m[b.Id] }))} className={`${KEY_LINE} h-7 px-2.5 ml-auto`}>
-                                  {unitTemplateOpenFor[b.Id] ? "Collapse" : "Manage mix / units"}
-                                </button>
-                              )}
-                            </div>
-                            {blockFullyGenerated && !unitTemplateOpenFor[b.Id] ? (
-                              // Nothing pending: the floors as tags, each opening to its units.
-                              <>
-                                <div className="flex flex-wrap gap-1.5">
-                                  {summaryFloors.map((f: any) => (
-                                    <button key={f.Id} onClick={() => toggleFloor(f, expandedFloorId, setExpandedFloorId)} className={`${chip(expandedFloorId === f.Id)} ${NUM}`}>
-                                      {f.FloorNo === 0 ? "Ground" : f.FloorLabel} · {f.GeneratedUnitCount || 0}
-                                    </button>
-                                  ))}
-                                </div>
-                                {summaryFloors.some((f: any) => f.Id === expandedFloorId) && <FloorUnitList floorId={expandedFloorId!} ctx={unitCtx} />}
-                              </>
-                            ) : (
-                              // The block as a building: typical floor once, any floor its own mix.
-                              <BlockStackEditor blockId={b.Id} blockName={b.BlockName} kinds={kindsFor(b.Id)} layoutTypes={unitTypesMaster} paymentPlans={applicablePlans}
-                                onOpenGeneratedFloor={(f) => loadFloor(f)}
-                                renderGeneratedFloor={(fid) => <FloorUnitList floorId={fid} ctx={unitCtx} />}
-                                canEdit={rights.canEdit} onChanged={changed} />
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    {/* Only when something can be generated — otherwise it just leads to "No eligible floors". */}
-                    {anyToGenerate && (
-                      <div className="flex flex-col sm:flex-row sm:items-center gap-3 px-4 py-3 bg-primary/5" style={{ border: RULE, boxShadow: "inset 3px 0 0 hsl(var(--foreground))" }}>
-                        <p className="text-xs text-muted-foreground flex-1">
-                          <span className="font-semibold text-foreground">Ready to generate.</span> Units will be made for every floor with a unit count that isn&apos;t generated yet.
-                        </p>
-                        {rights.canCreate
-                          ? <button onClick={handleGenerate} disabled={generating} className={`${KEY_INK} h-9 px-5 w-full sm:w-auto`}>{generating ? "Generating…" : "Generate units"}</button>
-                          : <span className="text-xs text-muted-foreground">You may not generate units.</span>}
-                      </div>
-                    )}
-                  </Section>
-                )}
-              </>
-            )}
+              <h1 className="text-xl font-bold tracking-tight text-foreground mt-0.5">Auto Project Setup</h1>
+              <p className="text-xs text-muted-foreground mt-0.5 max-w-[78ch]">
+                {activeTab === "parking"
+                  ? "Configure block-level parking slot mixes, charges & GST, slot naming, and bulk-generate slots into Parking Matrix."
+                  : isPlotted
+                    ? "Create plot blocks, lay out uniform/custom plots, and track Plot Master availability & villa construction."
+                    : "Configure project type, blocks, floors, unit naming conventions, and typical/floor mixes — bulk generating units and Flat Master rooms together."}
+              </p>
+            </div>
           </div>
-        )}
-      </SheetShell>
-    </>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <Link to={activeTab === "parking" ? "/crm/parking-matrix" : "/crm/unit-matrix"} className={MATRIX_BTN}>
+              <Grid3X3 size={13} />
+              <span>{activeTab === "parking" ? "Parking Matrix" : "Unit Matrix"}</span>
+            </Link>
+            {projectId && (
+              <button
+                type="button"
+                onClick={() => {
+                  refetchStatus();
+                  qc.invalidateQueries({ queryKey: ["crm-auto-project-setup-parking-status", projectId] });
+                  qc.invalidateQueries({ queryKey: ["crm-auto-project-setup-parking-slots", projectId] });
+                }}
+                className={`${MATRIX_BTN} w-9 !px-0`}
+                title="Refresh setup state"
+                aria-label="Refresh setup state"
+              >
+                <RefreshCw size={13} />
+              </button>
+            )}
+            <div className={SEG_WRAP} role="tablist" aria-label="Setup workspace">
+              <button type="button" role="tab" aria-selected={activeTab === "setup"} className={segBtn(activeTab === "setup")} onClick={() => setActiveTab("setup")}>
+                <Building2 size={13} /> {isPlotted ? "Blocks & plots" : "Blocks, floors & units"}
+              </button>
+              <button type="button" role="tab" aria-selected={activeTab === "parking"} className={segBtn(activeTab === "parking")} onClick={() => setActiveTab("parking")}>
+                <Car size={13} /> Parking
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="pt-2.5 border-t border-border/70 flex flex-wrap items-center justify-between gap-2 text-[0.6875rem] text-muted-foreground">
+          {activeTab === "parking" ? (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="font-medium text-foreground">Parking Setup Flow:</span>
+              <span className="rounded-md bg-muted px-2 py-0.5">Select Project</span>
+              <ArrowRight size={11} />
+              <span className="rounded-md bg-muted px-2 py-0.5">Blocks Required</span>
+              <ArrowRight size={11} />
+              <span className="rounded-md bg-muted px-2 py-0.5">Slot Naming</span>
+              <ArrowRight size={11} />
+              <span className="rounded-md bg-muted px-2 py-0.5">Block Parking Mix &amp; Rates</span>
+              <ArrowRight size={11} />
+              <span className="rounded-md bg-muted px-2 py-0.5">Create Slots in Parking Matrix</span>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="font-medium text-foreground">Setup Flow:</span>
+              <span className="rounded-md bg-muted px-2 py-0.5">Project &amp; Type</span>
+              <ArrowRight size={11} />
+              <span className="rounded-md bg-muted px-2 py-0.5">1. Blocks</span>
+              <ArrowRight size={11} />
+              <span className="rounded-md bg-muted px-2 py-0.5">{isPlotted ? "2. Plot Layout" : "2. Floor Plan"}</span>
+              <ArrowRight size={11} />
+              <span className="rounded-md bg-muted px-2 py-0.5">{isPlotted ? "3. Plots & Villas" : "3. Naming, Mix & Generate Units"}</span>
+            </div>
+          )}
+          <div className="flex items-center gap-3">
+            <Link to="/crm/setup/unit-master" className={TEXT_LINK}>Unit Master <ExternalLink size={10} className="inline ml-0.5" /></Link>
+            <Link to="/crm/setup/plot-master" className={TEXT_LINK}>Plot Master <ExternalLink size={10} className="inline ml-0.5" /></Link>
+          </div>
+        </div>
+      </section>
+
+      {activeTab === "parking" ? (
+        <ParkingSetup />
+      ) : (
+        <div className="space-y-4">
+          <ProjectPicker companyId={companyId} projectId={projectId}
+            onCompany={(v) => { setCompanyId(v); setProjectId(""); }} onProject={setProjectId} />
+
+          {!projectId && (
+            <div className="rounded-xl border border-dashed border-border bg-card px-6 py-10 text-center">
+              <p className="text-sm font-medium text-foreground">No project selected</p>
+              <p className="text-xs text-muted-foreground mt-1">Pick a company and project above to configure its blocks, floors, plots and units.</p>
+            </div>
+          )}
+          {projectId && statusLoading && <p className="text-sm text-muted-foreground">Loading the project…</p>}
+          {projectId && statusFailed && <Notice tone="error">{(statusError as Error)?.message}</Notice>}
+
+          {projectId && status && (
+            <>
+              <SetupProgress steps={steps} />
+              {guidance && <GridGuidance tone={guidance.tone} title={guidance.title} text={guidance.text} action={guidance.action} />}
+              {hasPlots && plotSummary && <PlotSummaryPanel s={plotSummary} buildsVillas={buildsVillas} projectId={projectId} canEdit={rights.canEdit} />}
+
+              {!status.shortCodeValid && (
+                <Notice tone="error">
+                  This project has no valid short name (letters and numbers only). Set one in Project Master first — it becomes the first part of every generated unit name (e.g. RYG/A/1001).
+                </Notice>
+              )}
+
+              {/* What this project is — type, what it sells, and each block's layout. */}
+              <ProjectTypeBar projectId={Number(projectId)} status={status} canEdit={rights.canEdit}
+                onChanged={() => { changed(); qc.invalidateQueries({ queryKey: ["auto-setup-kinds", projectId] }); }} />
+
+              {!isPlotted && status.legacyUnitCount > 0 && (
+                <Notice tone="fix">
+                  <span className={NUM}>{plural(status.legacyUnitCount, "unit")}</span> with no floor — the Unassigned row in the overview. Edit each to give it a floor, or use{" "}
+                  <Link to="/crm/setup/unit-master" className={TEXT_LINK}>Unit Master</Link>.
+                </Notice>
+              )}
+
+              {blocks.length > 0 && (isPlotted
+                ? <PlotOverview projectName={status.project?.Name} typeName={status.projectType?.Name} blocks={blocks} canDelete={rights.canDelete} confirm={ask.confirm} onChanged={changed} />
+                : <TowerOverview projectName={status.project?.Name} blocks={blocks} floors={floors} floorsByBlock={floorsByBlock} ctx={unitCtx} toggle={toggleFloor} />)}
+
+              {/* 1 · Blocks */}
+              <Section tag="1" title={isPlotted ? "Plot blocks" : "Blocks"} done={step1Done}
+                note={step1Done ? `${isPlotted ? "A block opens in Plot Master." : "Open a block to inspect its floors."}${rights.canEdit || rights.canDelete ? " Edit renames or removes blocks." : ""}` : "Create the towers / blocks of this project."}
+                right={<>
+                  {(rights.canEdit || rights.canDelete) && step1Done && (
+                    <button onClick={() => { setBlocksEditMode((v) => !v); setEditingBlockId(null); }} className={`${blocksEditMode ? KEY_INK : KEY_LINE} h-8 px-3`}>
+                      <Pencil size={12} /> {blocksEditMode ? "Done" : "Edit"}
+                    </button>
+                  )}
+                  {rights.canCreate && step1Done && !showAddBlockForm && (
+                    <button onClick={() => setShowAddBlockForm(true)} className={`${KEY_LINE} h-8 px-3`}><Plus size={12} /> Add blocks</button>
+                  )}
+                </>}>
+                {step1Done && (
+                  <div className="flex items-center flex-wrap gap-1.5">
+                    {blocks.map((b) => (
+                      <span key={b.Id} className={chip(!blocksEditMode && !isPlotted && !!blocksExpandedBlocks[b.Id])}>
+                        {editingBlockId === b.Id ? (
+                          <input autoFocus type="text" value={editingBlockName}
+                            autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false} name={`block-rename-${b.Id}`}
+                            onChange={(e) => setEditingBlockName(e.target.value)}
+                            onBlur={() => handleRenameBlock(b)}
+                            onKeyDown={(e) => { if (e.key === "Enter") handleRenameBlock(b); if (e.key === "Escape") setEditingBlockId(null); }}
+                            className="w-16 bg-transparent border-b border-primary outline-none" />
+                        ) : blocksEditMode ? (
+                          <>
+                            <span className="font-medium">{b.BlockName}</span>
+                            {rights.canEdit && (
+                              <button onClick={() => { setEditingBlockId(b.Id); setEditingBlockName(b.BlockName); }} title="Rename block" className="hover:text-primary"><Pencil size={11} /></button>
+                            )}
+                            {rights.canDelete && (
+                              <button onClick={() => handleDeleteBlock(b)} title="Delete block" className="hover:text-destructive"><X size={12} /></button>
+                            )}
+                          </>
+                        ) : isPlotted ? (
+                          <Link to="/crm/setup/plot-master" className="font-medium hover:text-primary">{b.BlockName}</Link>
+                        ) : (
+                          <button onClick={() => setBlocksExpandedBlocks((m) => ({ ...m, [b.Id]: !m[b.Id] }))} className="inline-flex items-center gap-1 font-medium">
+                            {blocksExpandedBlocks[b.Id] ? <ChevronDown size={12} /> : <ChevronRight size={12} />} {b.BlockName}
+                          </button>
+                        )}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {!isPlotted && blocks.filter((b) => blocksExpandedBlocks[b.Id]).map((b) => (
+                  <div key={b.Id} className={`${PANEL} px-3.5 py-2.5`}>
+                    <div className={`${LBL} py-1`}>Block {b.BlockName}</div>
+                    <BlockFloorTree blockFloors={floorsByBlock.get(b.Id) || []} expandedFloorId={blocksExpandedFloorId} ctx={unitCtx}
+                      onToggleFloor={(f) => toggleFloor(f, blocksExpandedFloorId, setBlocksExpandedFloorId)} />
+                  </div>
+                ))}
+
+                {rights.canCreate && (!step1Done || showAddBlockForm) && (
+                  <div className={step1Done ? `${PANEL} p-4 space-y-4` : "space-y-4"}>
+                    {step1Done && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-foreground">Add more {isPlotted ? "plot " : ""}blocks</span>
+                        <button onClick={() => setShowAddBlockForm(false)} className={`${KEY_LINE} h-8 px-3`}>Cancel</button>
+                      </div>
+                    )}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <label className="block space-y-1">
+                        <span className={`block ${LBL}`}>Number of blocks</span>
+                        <input type="number" min={1} max={100} value={blockCount} onChange={(e) => setBlockCount(e.target.value)} className={`${INP} ${NUM}`} />
+                      </label>
+                      <div className="space-y-1">
+                        <span className={`block ${LBL}`}>Naming scheme</span>
+                        <div className={SEG_WRAP}>
+                          {(["Alphabetical", "Numeric", "Custom"] as NamingScheme[]).map((s) => (
+                            <button key={s} type="button" className={segBtn(namingScheme === s)} onClick={() => setNamingScheme(s)}>{s}</button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <span className={`block ${LBL}`}>Block names</span>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                        {blockNames.map((name, i) => {
+                          const dupe = isDuplicateBlockName(name, i, blockNames, existingBlockNamesLower);
+                          return (
+                            <div key={i}>
+                              <input type="text" value={name} placeholder={`Block ${i + 1}`}
+                                autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
+                                name={`block-name-${i}-${projectId || "new"}`}
+                                onChange={(e) => setBlockNames((arr) => arr.map((v, idx) => (idx === i ? e.target.value : v)))}
+                                className={`${INP} ${dupe ? `!border-rose-500/60 ${TONE_ROSE_TEXT}` : ""}`} />
+                              {dupe && <div className={`text-[0.6875rem] ${TONE_ROSE_TEXT} mt-0.5`}>Already exists</div>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div className="flex justify-end pt-3 border-t border-border/70">
+                      <button onClick={handleSaveBlocks} disabled={savingBlocks || blockNames.some((n, i) => isDuplicateBlockName(n, i, blockNames, existingBlockNamesLower))}
+                        className={`${KEY_INK} h-9 px-5 w-full sm:w-auto`}>
+                        {savingBlocks ? "Saving…" : step1Done ? "Add blocks" : "Create blocks"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {!rights.canCreate && !step1Done && <p className="text-xs text-muted-foreground">No blocks yet, and you may not create them.</p>}
+              </Section>
+
+              {/* A plot block has no floors: the floor step is replaced (the server refuses POST /floors for it). */}
+              {step1Done && hasPlots && (
+                <PlotLayoutStep blocks={plotBlocks} projectTypeName={status.projectType?.Name} canEdit={rights.canEdit} canCreate={rights.canCreate} onChanged={changed} />
+              )}
+              {step1Done && hasPlots && plotBlocks.some((b) => b.PlotTemplate?.IsGenerated) && (
+                <LandInventory blocks={plotBlocks} projectId={projectId} canDelete={rights.canDelete} confirm={ask.confirm} onChanged={changed} />
+              )}
+
+              {/* 2 · Floor plan — every count stays editable, prefilled with what's there. */}
+              {step1Done && hasTowers && (
+                <Section tag="2" title="Floor plan" done={step2Done}
+                  note={step2Done ? `Open a floor to inspect its units.${rights.canDelete ? " Edit removes empty floors." : ""}` : "Enter how many floors each block has."}
+                  right={rights.canDelete && step2Done && (
+                    <button onClick={() => setFloorsEditMode((v) => !v)} className={`${floorsEditMode ? KEY_INK : KEY_LINE} h-8 px-3`}>
+                      <Pencil size={12} /> {floorsEditMode ? "Done" : "Edit"}
+                    </button>
+                  )}>
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                    {towerBlocks.map((b) => {
+                      const blockFloors = floorsByBlock.get(b.Id) || [];
+                      const hasFloors = blockFloors.length > 0;
+                      // Open while there's nothing to show yet, or once "Add floors" is pressed.
+                      const isOpen = rights.canCreate && (!hasFloors || !!floorFormOpenFor[b.Id]);
+                      const openFloor = blockFloors.find((x) => x.Id === floorPlanExpandedFloorId);
+                      return (
+                        <div key={b.Id} className={`${PANEL} p-3.5 space-y-2.5`}>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm font-semibold">Block {b.BlockName}</span>
+                            {hasFloors && <span className="text-xs text-muted-foreground"><span className={NUM}>{blockFloors.length}</span> floor{blockFloors.length === 1 ? "" : "s"}</span>}
+                            {hasFloors && !isOpen && rights.canCreate && (
+                              <button onClick={() => setFloorFormOpenFor((m) => ({ ...m, [b.Id]: true }))} className={`${KEY_LINE} h-7 px-2.5 ml-auto`}><Plus size={11} /> Add floors</button>
+                            )}
+                          </div>
+                          {isOpen && (
+                            <div className="flex items-center gap-2">
+                              <input type="number" min={1} max={100} placeholder="Number of floors" value={floorCounts[b.Id] || ""}
+                                onChange={(e) => setFloorCounts((m) => ({ ...m, [b.Id]: e.target.value }))} className={`${INP} ${NUM}`} />
+                              {hasFloors && (
+                                <button onClick={() => setFloorFormOpenFor((m) => ({ ...m, [b.Id]: false }))} className={`${KEY_LINE} h-9 px-3`}>Cancel</button>
+                              )}
+                            </div>
+                          )}
+                          {!hasFloors && !rights.canCreate && <p className="text-xs text-muted-foreground">No floors yet.</p>}
+                          {hasFloors && floorTags(blockFloors)}
+                          {openFloor && <FloorUnitList floorId={openFloor.Id} ctx={unitCtx} />}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {rights.canCreate && towerBlocks.some((b) => !(floorsByBlock.get(b.Id) || []).length || floorFormOpenFor[b.Id]) && (
+                    <div className="flex justify-end pt-3 border-t border-border/70">
+                      <button onClick={async () => { if (await handleSaveFloors()) setFloorFormOpenFor({}); }} disabled={savingFloors}
+                        className={`${KEY_INK} h-9 px-5 w-full sm:w-auto`}>
+                        {savingFloors ? "Saving…" : step2Done ? "Add floors" : "Generate floors"}
+                      </button>
+                    </div>
+                  )}
+                </Section>
+              )}
+
+              {/* 3 · Unit types & generation */}
+              {step2Done && hasTowers && (
+                <Section tag="3" title="Unit types & generation" note="Set each block's unit mix (a typical floor, or a floor's own), then generate the units.">
+                  {/* How the units will be named — project default, block and floor overrides, previewed first. */}
+                  <NamingPanel projectId={Number(projectId)} shortName={status.project?.ShortCode} blocks={towerBlocks} floorsByBlock={floorsByBlock} canEdit={rights.canEdit} />
+
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                    {towerBlocks.map((b) => {
+                      const bf = floorsByBlock.get(b.Id) || [];
+                      const nonGroundFloors = bf.filter((f) => f.FloorNo !== 0);
+                      const groundFloor = bf.find((f) => f.FloorNo === 0);
+                      // Fully done: every non-ground floor (and a sellable ground floor) is generated.
+                      const blockFullyGenerated = nonGroundFloors.length > 0
+                        && nonGroundFloors.every((f) => f.IsGenerated)
+                        && (!groundFloor || groundFloor.IsGenerated || !groundFloor.HasUnits);
+                      const totalGenerated = bf.reduce((s, f) => s + (f.GeneratedUnitCount || 0), 0);
+                      const summaryFloors = [groundFloor, ...nonGroundFloors].filter(Boolean);
+                      return (
+                        <div key={b.Id} className={`${PANEL} p-3.5 sm:p-4 space-y-3`}>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm font-semibold">Block {b.BlockName}</span>
+                            {blockFullyGenerated && <GridToneMark text={`${plural(totalGenerated, "unit")} generated`} tone="done" />}
+                            {blockFullyGenerated && (
+                              <button onClick={() => setUnitTemplateOpenFor((m) => ({ ...m, [b.Id]: !m[b.Id] }))} className={`${KEY_LINE} h-7 px-2.5 ml-auto`}>
+                                {unitTemplateOpenFor[b.Id] ? "Collapse" : "Manage mix / units"}
+                              </button>
+                            )}
+                          </div>
+                          {blockFullyGenerated && !unitTemplateOpenFor[b.Id] ? (
+                            <>
+                              <div className="flex flex-wrap gap-1.5">
+                                {summaryFloors.map((f: any) => (
+                                  <button key={f.Id} onClick={() => toggleFloor(f, expandedFloorId, setExpandedFloorId)} className={`${chip(expandedFloorId === f.Id)} ${NUM}`}>
+                                    {f.FloorNo === 0 ? "Ground" : f.FloorLabel} · {f.GeneratedUnitCount || 0}
+                                  </button>
+                                ))}
+                              </div>
+                              {summaryFloors.some((f: any) => f.Id === expandedFloorId) && <FloorUnitList floorId={expandedFloorId!} ctx={unitCtx} />}
+                            </>
+                          ) : (
+                            <BlockStackEditor blockId={b.Id} blockName={b.BlockName} kinds={kindsFor(b.Id)} layoutTypes={unitTypesMaster} paymentPlans={applicablePlans}
+                              onOpenGeneratedFloor={(f) => loadFloor(f)}
+                              renderGeneratedFloor={(fid) => <FloorUnitList floorId={fid} ctx={unitCtx} />}
+                              canEdit={rights.canEdit} onChanged={changed} />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Only when something can be generated — otherwise it just leads to "No eligible floors". */}
+                  {anyToGenerate && (
+                    <div className="rounded-xl border border-primary/35 bg-primary/[0.06] flex flex-col sm:flex-row sm:items-center gap-3 px-4 py-3.5">
+                      <p className="text-xs text-muted-foreground flex-1">
+                        <span className="font-semibold text-foreground">Ready to generate.</span> Units will be created for every pending floor with a unit count, plus Flat Master rooms where layouts exist.
+                      </p>
+                      {rights.canCreate
+                        ? <button onClick={handleGenerate} disabled={generating} className={`${KEY_INK} h-9 px-5 w-full sm:w-auto`}>{generating ? "Generating…" : "Generate units"}</button>
+                        : <span className="text-xs text-muted-foreground">You may not generate units.</span>}
+                    </div>
+                  )}
+                </Section>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
   );
 };
 

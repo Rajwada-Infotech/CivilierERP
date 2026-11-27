@@ -3,12 +3,12 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CheckCircle2, GripVertical, Pencil, Undo2, Wand2 } from "lucide-react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { SheetMark } from "@/components/sheet/Sheet";
-import { KEY_INK, KEY_LINE, NUM, RULE, RULE_SOFT, TEXT_LINK } from "./config";
+import { GridToneMark } from "@/components/crm/CrmDataTable";
+import { KEY_INK, KEY_LINE, NUM, TEXT_LINK, TONE_ROSE_TEXT } from "./config";
 
 const CARD = (on: boolean, dashed = false) =>
-  `relative h-full border p-3 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40 ${dashed ? "border-dashed" : ""} ${on ? "border-foreground bg-primary/5 shadow-[inset_0_-3px_0_hsl(var(--foreground))]" : "border-foreground/25 hover:border-foreground"}`;
-const SEL = "h-7 px-1.5 text-xs border border-foreground/40 bg-card text-foreground outline-none focus:border-foreground";
+  `relative h-full rounded-xl border p-3.5 text-left transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${dashed ? "border-dashed" : ""} ${on ? "border-primary bg-primary/[0.06] ring-1 ring-primary/30" : "border-border bg-card hover:border-primary/45 hover:bg-muted/20"}`;
+const SEL = "h-8 px-2 text-xs rounded-md border border-border bg-card text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20";
 
 // Unit naming for Auto Project Setup. Pick a ready-made style (the ones real
 // projects actually use) or arrange the parts yourself. Under the hood it is
@@ -226,10 +226,10 @@ export function NamingPanel({ projectId, shortName, blocks, floorsByBlock, canEd
   };
 
   return (
-    <div className="bg-card p-3 sm:p-4 space-y-3" style={{ border: RULE }}>
+    <div className="rounded-xl border border-border bg-card p-3.5 sm:p-4 space-y-3">
       {/* Folded: one line saying what new units are called. */}
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em]">{isOpen ? "How should units be named?" : "Unit names"}</span>
+        <span className="text-xs font-bold text-foreground">{isOpen ? "How should units be named?" : "Unit naming convention"}</span>
         {!isOpen && (
           <>
             <span className={`${NUM} text-xs text-foreground`}>{example(saved, short, blockName)} …</span>
@@ -252,7 +252,7 @@ export function NamingPanel({ projectId, shortName, blocks, floorsByBlock, canEd
 
       {isOpen && (<>
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs text-muted-foreground">Pick the style that looks right.</span>
+        <span className="text-xs text-muted-foreground">Pick a numbering format below (only new floors/units use updated naming).</span>
         {blocks.length > 1 && (
           <label className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
             Apply to
@@ -266,7 +266,7 @@ export function NamingPanel({ projectId, shortName, blocks, floorsByBlock, canEd
       </div>
 
       {/* Pick by example — real names for this project. */}
-      <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6">
+      <div className="grid gap-2.5 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6">
         {PRESETS.map((p) => {
           const pb = { ...p.b, skipIO: b.skipIO, ground: b.ground };
           const active = !customOpen && sameAs(pb, effective);
@@ -274,9 +274,9 @@ export function NamingPanel({ projectId, shortName, blocks, floorsByBlock, canEd
           return (
             <button key={p.title} type="button" disabled={!canEdit} onClick={() => { setB(pb); setCustomOpen(false); }} aria-pressed={active}
               className={CARD(active)}>
-              {active && <CheckCircle2 size={14} className="absolute top-2.5 right-2.5" />}
-              <div className="text-[11px] text-muted-foreground pr-5">{p.title} <span className="opacity-60">· {p.hint}</span></div>
-              <div className={`mt-1 ${NUM} text-sm font-semibold`}>{first}</div>
+              {active && <CheckCircle2 size={14} className="absolute top-2.5 right-2.5 text-primary" />}
+              <div className="text-[11px] text-muted-foreground pr-5">{p.title} <span className="opacity-70">· {p.hint}</span></div>
+              <div className={`mt-1 ${NUM} text-sm font-semibold text-foreground`}>{first}</div>
               <div className={`${NUM} text-[11px] text-muted-foreground`}>{rest.join(", ")}</div>
             </button>
           );
@@ -286,10 +286,10 @@ export function NamingPanel({ projectId, shortName, blocks, floorsByBlock, canEd
           return (
             <button type="button" disabled={!canEdit} onClick={() => setCustomOpen(true)} aria-pressed={isCustom}
               className={CARD(isCustom, true)}>
-              {isCustom && <CheckCircle2 size={14} className="absolute top-2.5 right-2.5" />}
-              <div className="text-[11px] text-muted-foreground flex items-center gap-1"><Wand2 size={11} /> Your own</div>
-              <div className="mt-1 text-sm font-semibold">{isCustom ? <span className={NUM}>{names.split(",  ")[0]}</span> : "Make your own"}</div>
-              <div className="text-[11px] text-muted-foreground">Arrange the parts yourself</div>
+              {isCustom && <CheckCircle2 size={14} className="absolute top-2.5 right-2.5 text-primary" />}
+              <div className="text-[11px] text-muted-foreground flex items-center gap-1"><Wand2 size={11} /> Custom format</div>
+              <div className="mt-1 text-sm font-semibold text-foreground">{isCustom ? <span className={NUM}>{names.split(",  ")[0]}</span> : "Make your own"}</div>
+              <div className="text-[11px] text-muted-foreground">Arrange parts &amp; separator</div>
             </button>
           );
         })()}
@@ -297,17 +297,17 @@ export function NamingPanel({ projectId, shortName, blocks, floorsByBlock, canEd
 
       {/* Make your own: drag the boxes into order, pick a style in each. */}
       {customOpen && (
-        <div className="space-y-2 p-3 border border-dashed border-foreground/40">
-          <p className="text-[11px] text-muted-foreground">Drag the boxes to change the order, and pick how each part looks in its menu.</p>
+        <div className="space-y-2.5 p-3.5 rounded-xl border border-dashed border-border bg-muted/20">
+          <p className="text-xs text-muted-foreground">Drag the segments to reorder, and choose how each segment formats.</p>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="px-3 py-2 text-xs border border-foreground/20 text-muted-foreground">Project <b className="text-foreground">{short}</b></span>
+            <span className="px-3 py-1.5 rounded-lg text-xs border border-border bg-card text-muted-foreground">Project <b className="text-foreground">{short}</b></span>
             {b.order.map((p, i) => (
               <React.Fragment key={p}>
                 <span className={`text-muted-foreground ${NUM}`}>{effective.joinFloorUnit && p === "unit" && b.order[i - 1] === "floor" ? "+" : b.sep}</span>
                 <div draggable={canEdit} onDragStart={() => setDragIdx(i)} onDragOver={(e) => e.preventDefault()} onDrop={() => drop(i)} onDragEnd={() => setDragIdx(null)}
-                  className={`flex items-center gap-2 border border-foreground bg-card px-2 py-1.5 cursor-grab active:cursor-grabbing select-none ${dragIdx === i ? "opacity-40" : ""}`}>
+                  className={`flex items-center gap-2 rounded-lg border border-primary/40 bg-card px-2.5 py-1.5 cursor-grab active:cursor-grabbing select-none ${dragIdx === i ? "opacity-40" : ""}`}>
                   <GripVertical size={12} className="text-muted-foreground" />
-                  <span className="text-xs font-medium">{LABEL[p]}</span>
+                  <span className="text-xs font-medium text-foreground">{LABEL[p]}</span>
                   <select disabled={!canEdit} value={b[p]} onChange={(e) => setB({ ...b, [p]: e.target.value } as Builder)}
                     className={SEL}>
                     {STYLE_OPTIONS[p].map((o) => <option key={o.value} value={o.value}>{o.label(blockName)}</option>)}
@@ -330,8 +330,8 @@ export function NamingPanel({ projectId, shortName, blocks, floorsByBlock, canEd
       )}
 
       {/* Result bar — calm when saved, clearly asks to save when changed. */}
-      <div className={`flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2 ${dirty ? "bg-primary/5" : "bg-card"}`} style={{ border: dirty ? RULE : RULE_SOFT, boxShadow: dirty ? "inset 3px 0 0 hsl(var(--foreground))" : undefined }}>
-        <span className="text-xs text-muted-foreground">{dirty ? "New units would be named" : "New units will be named"}</span>
+      <div className={`flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border px-3.5 py-2.5 ${dirty ? "border-primary/45 bg-primary/[0.06]" : "border-border bg-muted/20"}`}>
+        <span className="text-xs text-muted-foreground">{dirty ? "Preview (unsaved):" : "Active format:"}</span>
         <span className={`${NUM} text-sm font-semibold text-foreground`}>{names} …</span>
         <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
           Ground floor as
@@ -360,13 +360,13 @@ export function NamingPanel({ projectId, shortName, blocks, floorsByBlock, canEd
               </>
             )
           ) : (
-            <SheetMark text="Saved" tone="done" />
+            <GridToneMark text="Saved" tone="done" />
           )}
         </div>
       </div>
       {/* Honest consequences, checked against the real data. */}
       {clashes.length > 0 && (
-        <p className="text-xs text-destructive">
+        <p className={`text-xs ${TONE_ROSE_TEXT}`}>
           {clashes.length} of the next {pendingCount} name(s) already exist ({clashes.slice(0, 3).join(", ")}{clashes.length > 3 ? "…" : ""}) — those would be skipped. Pick a different style.
         </p>
       )}
@@ -461,9 +461,9 @@ export function ParkingNamingPanel({ projectId, shortName, blocks, canEdit }: {
   };
 
   return (
-    <div className="bg-card p-3 sm:p-4 space-y-3" style={{ border: RULE }}>
+    <div className="rounded-xl border border-border bg-card p-3.5 sm:p-4 space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em]">{isOpen ? "How should parking slots be named?" : "Slot names"}</span>
+        <span className="text-xs font-bold text-foreground">{isOpen ? "How should parking slots be named?" : "Parking slot naming convention"}</span>
         {!isOpen && (
           <>
             <span className={`${NUM} text-xs text-foreground`}>{parkingExample(savedTemplate, short, blockName)} …</span>
@@ -483,23 +483,23 @@ export function ParkingNamingPanel({ projectId, shortName, blocks, canEdit }: {
       </div>
       {isOpen && (
         <>
-          <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
+          <div className="grid gap-2.5 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
             {PARKING_PRESETS.map((p) => {
               const active = p.template === chosen;
               const [first, ...rest] = parkingExample(p.template, short, blockName).split(",  ");
               return (
                 <button key={p.title} type="button" disabled={!canEdit} onClick={() => setPick(p.template)} aria-pressed={active}
                   className={CARD(active)}>
-                  {active && <CheckCircle2 size={14} className="absolute top-2.5 right-2.5" />}
-                  <div className="text-[11px] text-muted-foreground pr-5">{p.title} <span className="opacity-60">· {p.hint}</span></div>
-                  <div className={`mt-1 ${NUM} text-sm font-semibold`}>{first}</div>
+                  {active && <CheckCircle2 size={14} className="absolute top-2.5 right-2.5 text-primary" />}
+                  <div className="text-[11px] text-muted-foreground pr-5">{p.title} <span className="opacity-70">· {p.hint}</span></div>
+                  <div className={`mt-1 ${NUM} text-sm font-semibold text-foreground`}>{first}</div>
                   <div className={`${NUM} text-[11px] text-muted-foreground`}>{rest.join(", ")}</div>
                 </button>
               );
             })}
           </div>
-          <div className={`flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2 ${dirty ? "bg-primary/5" : "bg-card"}`} style={{ border: dirty ? RULE : RULE_SOFT, boxShadow: dirty ? "inset 3px 0 0 hsl(var(--foreground))" : undefined }}>
-            <span className="text-xs text-muted-foreground">{dirty ? "New slots would be named" : "New slots will be named"}</span>
+          <div className={`flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border px-3.5 py-2.5 ${dirty ? "border-primary/45 bg-primary/[0.06]" : "border-border bg-muted/20"}`}>
+            <span className="text-xs text-muted-foreground">{dirty ? "Preview (unsaved):" : "Active format:"}</span>
             <span className={`${NUM} text-sm font-semibold text-foreground`}>{parkingExample(chosen, short, blockName)} …</span>
             <div className="ml-auto flex items-center gap-2">
               {dirty || firstTime ? (canEdit && (
@@ -514,7 +514,7 @@ export function ParkingNamingPanel({ projectId, shortName, blocks, canEdit }: {
                   </button>
                 </>
               )) : (
-                <SheetMark text="Saved" tone="done" />
+                <GridToneMark text="Saved" tone="done" />
               )}
             </div>
           </div>

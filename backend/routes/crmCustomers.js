@@ -117,49 +117,157 @@ async function assertUniqueCustomerEmail(pool, email, excludeId = null) {
   throw err;
 }
 
-// GET / — all customers
+const CUSTOMER_SORT_MAP = {
+  CustomerNo: "c.CustomerNo",
+  CustomerName: "c.CustomerName",
+  Mobile: "ISNULL(c.Mobile, N'zzzz')",
+  PanNo: "ISNULL(NULLIF(LTRIM(RTRIM(c.PanNo)), N''), N'zzzz')",
+  City: "ISNULL(NULLIF(LTRIM(RTRIM(c.City)), N''), ISNULL(NULLIF(LTRIM(RTRIM(c.CurrentCity)), N''), N'zzzz'))",
+  InvoiceMode: "ISNULL(c.InvoiceMode, N'NonInvoice')",
+  ApplicationCount: "(SELECT COUNT(*) FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id)",
+  CreatedAt: "c.CreatedAt",
+};
+
+function buildCustomerWhere(req0, query, projectScope, opts = {}) {
+  const { search, invoiceMode, view, focus } = query;
+  const companyId = query.companyId ? parseInt(query.companyId, 10) : null;
+  const projectId = query.projectId ? parseInt(query.projectId, 10) : null;
+  const blockId = query.blockId ? parseInt(query.blockId, 10) : null;
+  const { projectPredicate } = require("../services/projectScope");
+  const conds = ["c.IsActive = 1"];
+
+  // A restricted user sees customers with an application in their projects, and those with none yet.
+  if (projectScope) {
+    conds.push(`(EXISTS (SELECT 1 FROM dbo.CrmApplication sa WHERE sa.CustomerId = c.Id ${projectPredicate(projectScope, "sa.ProjectId")}) OR NOT EXISTS (SELECT 1 FROM dbo.CrmApplication sa2 WHERE sa2.CustomerId = c.Id))`);
+  }
+  if (search) {
+    req0.input("srch", sql.NVarChar(200), `%${String(search).trim()}%`);
+    conds.push(`(
+      c.CustomerName LIKE @srch
+      OR c.Mobile LIKE @srch
+      OR c.AltMobile LIKE @srch
+      OR c.Email LIKE @srch
+      OR c.CustomerNo LIKE @srch
+      OR c.PanNo LIKE @srch
+      OR c.City LIKE @srch
+      OR c.CurrentCity LIKE @srch
+    )`);
+  }
+  if (companyId) {
+    req0.input("companyId", sql.Int, companyId);
+    conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.CompanyId = @companyId)");
+  }
+  if (projectId) {
+    req0.input("projectId", sql.Int, projectId);
+    conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.ProjectId = @projectId)");
+  }
+  if (blockId) {
+    req0.input("blockId", sql.Int, blockId);
+    conds.push("(EXISTS (SELECT 1 FROM dbo.CrmApplication a JOIN dbo.UnitMaster um ON um.Id = a.PreferredUnitId WHERE a.CustomerId = c.Id AND um.BlockId = @blockId) OR EXISTS (SELECT 1 FROM dbo.CrmApplication a2 JOIN dbo.CrmApplicationPlot ap ON ap.ApplicationId = a2.Id AND ap.Status = N'Active' JOIN dbo.PlotMaster pm ON pm.Id = ap.PlotId WHERE a2.CustomerId = c.Id AND pm.BlockId = @blockId))");
+  }
+
+  if (opts.includeViewFilters) {
+    if (view === "withApps") {
+      conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id)");
+    } else if (view === "noApps") {
+      conds.push("NOT EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id)");
+    } else if (view === "missingKyc") {
+      conds.push(`(
+        NULLIF(LTRIM(RTRIM(ISNULL(c.PanNo, N''))), N'') IS NULL
+        OR NULLIF(LTRIM(RTRIM(ISNULL(c.Email, N''))), N'') IS NULL
+        OR NULLIF(LTRIM(RTRIM(ISNULL(c.Address, N''))), N'') IS NULL
+      )`);
+    } else if (view === "invoice") {
+      conds.push("c.InvoiceMode = N'Invoice'");
+    }
+
+    if (invoiceMode === "Invoice" || invoiceMode === "NonInvoice") {
+      req0.input("invoiceMode", sql.NVarChar(30), invoiceMode);
+      conds.push("ISNULL(c.InvoiceMode, N'NonInvoice') = @invoiceMode");
+    }
+
+    if (focus === "missingPan") {
+      conds.push("NULLIF(LTRIM(RTRIM(ISNULL(c.PanNo, N''))), N'') IS NULL");
+    } else if (focus === "missingEmail") {
+      conds.push("NULLIF(LTRIM(RTRIM(ISNULL(c.Email, N''))), N'') IS NULL");
+    } else if (focus === "missingAddress") {
+      conds.push("NULLIF(LTRIM(RTRIM(ISNULL(c.Address, N''))), N'') IS NULL");
+    }
+  }
+
+  return `WHERE ${conds.join(" AND ")}`;
+}
+
+// GET /counts — tab & KYC-completeness counters under current global scope
+router.get("/counts", requireAnyPageRight(["crm-customers", "crm-resales", "crm-ownership-changes"], "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const req0 = pool.request();
+    const where = buildCustomerWhere(req0, req.query, req.projectScope, { includeViewFilters: false });
+    const result = await req0.query(`
+      SELECT
+        COUNT(*) AS allCount,
+        SUM(CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id) THEN 1 ELSE 0 END) AS withAppsCount,
+        SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id) THEN 1 ELSE 0 END) AS noAppsCount,
+        SUM(CASE WHEN (
+          NULLIF(LTRIM(RTRIM(ISNULL(c.PanNo, N''))), N'') IS NULL
+          OR NULLIF(LTRIM(RTRIM(ISNULL(c.Email, N''))), N'') IS NULL
+          OR NULLIF(LTRIM(RTRIM(ISNULL(c.Address, N''))), N'') IS NULL
+        ) THEN 1 ELSE 0 END) AS missingKycCount,
+        SUM(CASE WHEN c.InvoiceMode = N'Invoice' THEN 1 ELSE 0 END) AS invoiceCount,
+        SUM(CASE WHEN ISNULL(c.InvoiceMode, N'NonInvoice') <> N'Invoice' THEN 1 ELSE 0 END) AS nonInvoiceCount,
+        SUM(CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(c.PanNo, N''))), N'') IS NULL THEN 1 ELSE 0 END) AS missingPanCount,
+        SUM(CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(c.Email, N''))), N'') IS NULL THEN 1 ELSE 0 END) AS missingEmailCount,
+        SUM(CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(c.Address, N''))), N'') IS NULL THEN 1 ELSE 0 END) AS missingAddressCount
+      FROM dbo.CrmCustomer c
+      ${where}
+    `);
+    const d = result.recordset[0] || {};
+    res.json({
+      all: Number(d.allCount) || 0,
+      withApps: Number(d.withAppsCount) || 0,
+      noApps: Number(d.noAppsCount) || 0,
+      missingKyc: Number(d.missingKycCount) || 0,
+      invoice: Number(d.invoiceCount) || 0,
+      nonInvoice: Number(d.nonInvoiceCount) || 0,
+      missingPan: Number(d.missingPanCount) || 0,
+      missingEmail: Number(d.missingEmailCount) || 0,
+      missingAddress: Number(d.missingAddressCount) || 0,
+    });
+  } catch (e) {
+    console.error("[crm-customers] GET /counts error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET / — all customers (paginated when ?page= is passed, array when omitted for pickers)
 // Resale and Ownership Changes pick the new buyer from this list, so their rights read it too.
 router.get("/", requireAnyPageRight(["crm-customers", "crm-resales", "crm-ownership-changes"], "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { search } = req.query;
-    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
-    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
-    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
     const countReq = pool.request();
-    const bind = (name, type, value) => { req0.input(name, type, value); countReq.input(name, type, value); };
-    const conds = ["c.IsActive = 1"];
-    // A restricted user sees customers with an application in their projects, and those with none yet (a new customer
-    // belongs to no project until its first application; crmCustomerGuard lets them open one by id too).
-    if (req.projectScope) conds.push(`(EXISTS (SELECT 1 FROM dbo.CrmApplication sa WHERE sa.CustomerId = c.Id ${require("../services/projectScope").projectPredicate(req.projectScope, "sa.ProjectId")}) OR NOT EXISTS (SELECT 1 FROM dbo.CrmApplication sa2 WHERE sa2.CustomerId = c.Id))`);
-    if (search) {
-      bind("srch", sql.NVarChar(200), `%${search}%`);
-      conds.push("(c.CustomerName LIKE @srch OR c.Mobile LIKE @srch OR c.CustomerNo LIKE @srch OR c.PanNo LIKE @srch)");
-    }
-    // A customer isn't itself scoped to one Company/Project/Block — it can
-    // have applications/bookings across several. Filtering here means "has
-    // at least one application matching this scope", via EXISTS against
-    // CrmApplication (which always carries CompanyId/ProjectId; BlockId only
-    // resolves once a unit is picked, via UnitMaster).
-    if (companyId) { bind("companyId", sql.Int, companyId); conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.CompanyId = @companyId)"); }
-    if (projectId) { bind("projectId", sql.Int, projectId); conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.ProjectId = @projectId)"); }
-    if (blockId) { bind("blockId", sql.Int, blockId); conds.push("(EXISTS (SELECT 1 FROM dbo.CrmApplication a JOIN dbo.UnitMaster um ON um.Id = a.PreferredUnitId WHERE a.CustomerId = c.Id AND um.BlockId = @blockId) OR EXISTS (SELECT 1 FROM dbo.CrmApplication a2 JOIN dbo.CrmApplicationPlot ap ON ap.ApplicationId = a2.Id AND ap.Status = N'Active' JOIN dbo.PlotMaster pm ON pm.Id = ap.PlotId WHERE a2.CustomerId = c.Id AND pm.BlockId = @blockId))"); }
-    const where = `WHERE ${conds.join(" AND ")}`;
+    const where = buildCustomerWhere(req0, req.query, req.projectScope, { includeViewFilters: true });
+    const countWhere = buildCustomerWhere(countReq, req.query, req.projectScope, { includeViewFilters: true });
+
+    const sortKey = String(req.query.sortKey || "CreatedAt");
+    const sortExpr = Object.hasOwn(CUSTOMER_SORT_MAP, sortKey) ? CUSTOMER_SORT_MAP[sortKey] : CUSTOMER_SORT_MAP.CreatedAt;
+    const sortDir = req.query.sortDir === "asc" ? "ASC" : "DESC";
+    const orderSql = `ORDER BY ${sortExpr} ${sortDir}, c.Id DESC`;
 
     if (!req.query.page) {
-      const result = await req0.query(`${customerSelectForScope(CUSTOMER_SELECT, req.projectScope)} ${where} ORDER BY c.CreatedAt DESC`);
+      const result = await req0.query(`${customerSelectForScope(CUSTOMER_SELECT, req.projectScope)} ${where} ${orderSql}`);
       return res.json(result.recordset);
     }
 
-    const { page, pageSize, offset } = applyPagination(req);
+    const { page, pageSize, offset } = applyPagination(req, 25, 200);
     req0.input("offset", sql.Int, offset);
     req0.input("pageSize", sql.Int, pageSize);
     const [result, countResult] = await Promise.all([
-      req0.query(`${customerSelectForScope(CUSTOMER_SELECT, req.projectScope)} ${where} ORDER BY c.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      req0.query(`${customerSelectForScope(CUSTOMER_SELECT, req.projectScope)} ${where} ${orderSql} OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
       // The same WHERE as the rows (it used to repeat the filters without the project scope, so a restricted
       // user's total counted customers they can't see).
-      countReq.query(`SELECT COUNT(*) AS total FROM dbo.CrmCustomer c ${where}`),
+      countReq.query(`SELECT COUNT(*) AS total FROM dbo.CrmCustomer c ${countWhere}`),
     ]);
     res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
   } catch (e) {

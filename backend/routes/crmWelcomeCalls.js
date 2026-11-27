@@ -27,23 +27,33 @@ const { applyPagination } = require("../services/crmListPagination");
 
 router.use(authMiddleware);
 
-const WC_SELECT = `
-  SELECT
-    wc.Id, wc.BookingId, wc.CalledBy, wc.CallDate, wc.DurationSeconds,
-    wc.Outcome, wc.NextCallDate, wc.Notes, wc.CustomFields, wc.PreferredAgreementDate,
-    wc.PaymentPlanConfirmed, wc.PaymentPlanConfirmedAt, wc.CreatedAt,
-    u.name  AS CalledByName,
-    b.BookingNo,
-    COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
-    COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
-    a.ApplicantName, a.Mobile,
-    CASE WHEN sub.IsLocked = 1 THEN 1 ELSE 0 END AS HasSubmittedChecklist
+const WC_FROM = `
   FROM dbo.CrmWelcomeCall wc
   JOIN dbo.CrmBooking b ON b.Id = wc.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
   LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+  LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+  LEFT JOIN dbo.BlockMaster blk ON blk.Id = COALESCE(um.BlockId, b.BlockId)
   LEFT JOIN dbo.Users u ON u.id = wc.CalledBy
+  LEFT JOIN dbo.Users uOwner ON uOwner.id = b.AssignedTo
   LEFT JOIN dbo.CrmWelcomeCallSubmission sub ON sub.BookingId = wc.BookingId
+`;
+
+const WC_SELECT = `
+  SELECT
+    wc.Id, wc.BookingId, wc.CalledBy, wc.CallDate, wc.DurationSeconds,
+    wc.Outcome, wc.NextCallDate, wc.Notes, wc.CustomFields, wc.PreferredAgreementDate,
+    wc.PaymentPlanConfirmed, wc.PaymentPlanConfirmedAt, wc.PaymentPlanDisputeReason, wc.CreatedAt,
+    u.name  AS CalledByName,
+    b.AssignedTo,
+    uOwner.name AS AssignedToName,
+    b.BookingNo, b.ApplicationId,
+    COALESCE(bn.UnitNo, um.UnitName, b.UnitNo) AS UnitNo,
+    COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
+    COALESCE(blk.BlockName, b.BlockName) AS BlockName,
+    a.ApplicantName, a.Mobile, a.Email,
+    CASE WHEN sub.IsLocked = 1 THEN 1 ELSE 0 END AS HasSubmittedChecklist
+  ${WC_FROM}
 `;
 
 const OUTCOMES = ["Welcomed","NotReachable","RequestedCallback","VoiceMail","Busy","SwitchedOff"];
@@ -62,6 +72,538 @@ function computeStreak(orderedOutcomes) {
   }
   return n;
 }
+
+// ─── Board helpers (paginated Welcome Calls work queues at enterprise scale) ─
+const CHECKLIST_ALWAYS_KEYS_SQL = [
+  "N'project_name'", "N'unit_no'", "N'booking_date'", "N'total_value'",
+  "N'plan_structure'", "N'outstanding_balance'",
+  "N'applicant_name'", "N'mobile_number'", "N'email'", "N'address'",
+  "N'documents_uploaded'", "N'documents_verified'",
+].join(",");
+
+const HAS_CO_SQL = "CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmCoApplicant ca WHERE ca.BookingId = b.Id AND ca.IsActive = 1) THEN 1 ELSE 0 END";
+const HAS_PARK_SQL = "CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmParkingAllotment pa WHERE pa.BookingId = b.Id AND pa.IsActive = 1) THEN 1 ELSE 0 END";
+const HAS_EXTRA_SQL = "CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmExtraCharge ec WHERE ec.BookingId = b.Id AND ec.IsActive = 1) THEN 1 ELSE 0 END";
+
+const CHECKLIST_TOTAL_EXPR = `(12 + ${HAS_CO_SQL} + ${HAS_PARK_SQL} + ${HAS_EXTRA_SQL})`;
+const CHECKED_COUNT_EXPR = `(
+  (SELECT COUNT(*) FROM dbo.CrmWelcomeChecklistItem ci
+   WHERE ci.BookingId = b.Id
+     AND ci.IsChecked = 1
+     AND ISNULL(ci.RecheckStatus, N'') <> N'Open'
+     AND (
+       ci.ItemKey IN (${CHECKLIST_ALWAYS_KEYS_SQL})
+       OR (ci.ItemKey = N'co_applicant_details' AND EXISTS (SELECT 1 FROM dbo.CrmCoApplicant ca WHERE ca.BookingId = b.Id AND ca.IsActive = 1))
+       OR (ci.ItemKey = N'parking_selection' AND EXISTS (SELECT 1 FROM dbo.CrmParkingAllotment pa WHERE pa.BookingId = b.Id AND pa.IsActive = 1))
+       OR (ci.ItemKey = N'extra_charges' AND EXISTS (SELECT 1 FROM dbo.CrmExtraCharge ec WHERE ec.BookingId = b.Id AND ec.IsActive = 1))
+     )
+  )
+  + CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmCoApplicant ca WHERE ca.BookingId = b.Id AND ca.IsActive = 1)
+          AND NOT EXISTS (SELECT 1 FROM dbo.CrmWelcomeChecklistItem ci WHERE ci.BookingId = b.Id AND ci.ItemKey = N'co_applicant_details')
+          AND (SELECT COUNT(*) FROM dbo.CrmWelcomeChecklistItem ci WHERE ci.BookingId = b.Id AND ci.IsChecked = 1 AND ISNULL(ci.RecheckStatus, N'') <> N'Open' AND ci.ItemKey IN (N'co_applicant_identity', N'co_applicant_kyc', N'co_applicant_contact')) = 3
+    THEN 1 ELSE 0 END
+)`;
+
+const NON_REACHED_OUTCOMES_SQL = "N'NotReachable',N'Busy',N'SwitchedOff',N'VoiceMail'";
+const STREAK_AT_LEAST_3_SQL = `(
+  lastCall.Outcome IN (${NON_REACHED_OUTCOMES_SQL})
+  AND (
+    SELECT COUNT(*)
+    FROM dbo.CrmWelcomeCall wcS
+    WHERE wcS.BookingId = b.Id
+      AND wcS.Outcome IN (${NON_REACHED_OUTCOMES_SQL})
+      AND (
+        lastBreak.Id IS NULL
+        OR wcS.CallDate > lastBreak.CallDate
+        OR (wcS.CallDate = lastBreak.CallDate AND wcS.CreatedAt > lastBreak.CreatedAt)
+      )
+  ) >= 3
+)`;
+
+const BOARD_BASE_FROM = `
+  FROM dbo.CrmBooking b
+  JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+  LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+  LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+  LEFT JOIN dbo.BlockMaster blk ON blk.Id = COALESCE(um.BlockId, b.BlockId)
+  LEFT JOIN dbo.Users uOwner ON uOwner.id = b.AssignedTo
+  LEFT JOIN dbo.CrmWelcomeCallSubmission sub ON sub.BookingId = b.Id
+  OUTER APPLY (
+    SELECT TOP 1 wcL.Id, wcL.Outcome, wcL.CallDate, wcL.NextCallDate, wcL.CalledBy, uLast.name AS CalledByName
+    FROM dbo.CrmWelcomeCall wcL
+    LEFT JOIN dbo.Users uLast ON uLast.id = wcL.CalledBy
+    WHERE wcL.BookingId = b.Id
+    ORDER BY wcL.CallDate DESC, wcL.CreatedAt DESC
+  ) lastCall
+  OUTER APPLY (
+    SELECT COUNT(*) AS OpenRecheckCount, MIN(ciR.RecheckRequestedAt) AS OldestFlaggedAt
+    FROM dbo.CrmWelcomeChecklistItem ciR
+    WHERE ciR.BookingId = b.Id AND ciR.RecheckStatus = '${CrmStatus.OPEN}'
+  ) rc
+  OUTER APPLY (
+    SELECT TOP 1 wcP.PaymentPlanConfirmed, wcP.PaymentPlanDisputeReason
+    FROM dbo.CrmWelcomeCall wcP
+    WHERE wcP.BookingId = b.Id AND wcP.PaymentPlanConfirmed IS NOT NULL
+    ORDER BY wcP.CallDate DESC, wcP.CreatedAt DESC
+  ) planPref
+  OUTER APPLY (
+    SELECT TOP 1 wcB.Id, wcB.CallDate, wcB.CreatedAt
+    FROM dbo.CrmWelcomeCall wcB
+    WHERE wcB.BookingId = b.Id
+      AND (wcB.Outcome IS NULL OR wcB.Outcome NOT IN (${NON_REACHED_OUTCOMES_SQL}))
+    ORDER BY wcB.CallDate DESC, wcB.CreatedAt DESC
+  ) lastBreak
+`;
+
+const HAS_WELCOMED_SQL = `EXISTS (SELECT 1 FROM dbo.CrmWelcomeCall wcW WHERE wcW.BookingId = b.Id AND wcW.Outcome = N'Welcomed')`;
+
+function buildBoardScopeFilters(req0, query, projectScope) {
+  const companyId = query.companyId ? parseInt(query.companyId, 10) : null;
+  const projectId = query.projectId ? parseInt(query.projectId, 10) : null;
+  const blockId = query.blockId ? parseInt(query.blockId, 10) : null;
+  const search = query.search ? String(query.search).trim() : "";
+  const assignedTo = query.assignedTo ? String(query.assignedTo).trim() : "";
+
+  const conds = [`b.Status = '${CrmStatus.APPROVED}'`, "b.IsActive = 1"];
+  if (projectScope) conds.push(projectPredicate(projectScope, "b.ProjectId", "").trim());
+  if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+  if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+  if (blockId) {
+    req0.input("blockId", sql.Int, blockId);
+    conds.push(`(COALESCE(um.BlockId, b.BlockId) = @blockId OR EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bp JOIN dbo.PlotMaster pm ON pm.Id = bp.PlotId WHERE bp.BookingId = b.Id AND bp.Status = N'Active' AND pm.BlockId = @blockId))`);
+  }
+  if (assignedTo === "unassigned") {
+    conds.push("b.AssignedTo IS NULL");
+  } else if (assignedTo && /^\d+$/.test(assignedTo)) {
+    req0.input("assignedTo", sql.Int, parseInt(assignedTo, 10));
+    conds.push("b.AssignedTo = @assignedTo");
+  }
+  if (search) {
+    req0.input("srch", sql.NVarChar(200), `%${search}%`);
+    conds.push("(a.ApplicantName LIKE @srch OR a.Mobile LIKE @srch OR b.BookingNo LIKE @srch OR COALESCE(bn.UnitNo, um.UnitName, b.UnitNo) LIKE @srch OR COALESCE(bn.ProjectName, b.ProjectName) LIKE @srch)");
+  }
+  return conds;
+}
+
+function buildBoardTabAndFocusConds(req0, query) {
+  const conds = [];
+  const tab = String(query.tab || "queue");
+  const focus = String(query.focus || "");
+  const outcome = String(query.outcome || "");
+  const calledBy = query.calledBy ? String(query.calledBy).trim() : "";
+
+  if (tab === "queue") {
+    conds.push(`NOT ${HAS_WELCOMED_SQL}`);
+  } else if (tab === "checklist") {
+    conds.push(`${HAS_WELCOMED_SQL} AND ISNULL(sub.IsLocked, 0) = 0`);
+  } else if (tab === "recheck") {
+    conds.push("ISNULL(rc.OpenRecheckCount, 0) > 0");
+  } else if (tab === "verified") {
+    conds.push(`${HAS_WELCOMED_SQL} AND ISNULL(sub.IsLocked, 0) = 1 AND ISNULL(rc.OpenRecheckCount, 0) = 0`);
+  }
+
+  if (calledBy && /^\d+$/.test(calledBy)) {
+    req0.input("calledBy", sql.Int, parseInt(calledBy, 10));
+    conds.push("EXISTS (SELECT 1 FROM dbo.CrmWelcomeCall wcBy WHERE wcBy.BookingId = b.Id AND wcBy.CalledBy = @calledBy)");
+  }
+
+  if (outcome === "__never__") {
+    conds.push("lastCall.Id IS NULL");
+  } else if (OUTCOMES.includes(outcome)) {
+    req0.input("outcomeFilter", sql.NVarChar(50), outcome);
+    conds.push("lastCall.Outcome = @outcomeFilter");
+  }
+
+  // Purpose-specific focus filters per tab
+  if (focus === "neverCalled") conds.push("lastCall.Id IS NULL");
+  else if (focus === "overdue") conds.push("lastCall.Id IS NOT NULL AND lastCall.NextCallDate IS NOT NULL AND lastCall.NextCallDate < CAST(SYSDATETIME() AS DATE)");
+  else if (focus === "dueToday") conds.push("lastCall.Id IS NOT NULL AND lastCall.NextCallDate = CAST(SYSDATETIME() AS DATE)");
+  else if (focus === "unreachable3") conds.push(STREAK_AT_LEAST_3_SQL);
+  else if (focus === "scheduled") conds.push("lastCall.Id IS NOT NULL AND lastCall.NextCallDate > CAST(SYSDATETIME() AS DATE)");
+  else if (focus === "incomplete") conds.push(`${CHECKED_COUNT_EXPR} < ${CHECKLIST_TOTAL_EXPR}`);
+  else if (focus === "readyToSubmit") conds.push(`${CHECKED_COUNT_EXPR} >= ${CHECKLIST_TOTAL_EXPR} AND ISNULL(rc.OpenRecheckCount, 0) = 0`);
+  else if (focus === "hasRecheck") conds.push("ISNULL(rc.OpenRecheckCount, 0) > 0");
+  else if (focus === "missingFinancing") conds.push("NULLIF(LTRIM(RTRIM(ISNULL(b.FinancingType, N''))), N'') IS NULL");
+  else if (focus === "planDisputed") conds.push("planPref.PaymentPlanConfirmed = 0");
+  else if (focus === "aging") conds.push("rc.OldestFlaggedAt IS NOT NULL AND CAST(rc.OldestFlaggedAt AS DATE) <= DATEADD(day, -3, CAST(SYSDATETIME() AS DATE))");
+  else if (focus === "multi") conds.push("ISNULL(rc.OpenRecheckCount, 0) >= 2");
+
+  return conds;
+}
+
+const BOARD_SORT_MAP = {
+  BookingNo: "b.BookingNo",
+  BookingDate: "b.BookingDate",
+  ApplicantName: "a.ApplicantName",
+  ProjectName: "COALESCE(bn.ProjectName, b.ProjectName)",
+  LastOutcome: "ISNULL(lastCall.Outcome, N'')",
+  LastCallDate: "ISNULL(lastCall.CallDate, '1900-01-01')",
+  NextCallDate: "ISNULL(lastCall.NextCallDate, '9999-12-31')",
+  AttemptCount: "(SELECT COUNT(*) FROM dbo.CrmWelcomeCall wcC WHERE wcC.BookingId = b.Id)",
+  AssignedToName: "ISNULL(uOwner.name, N'zzzz')",
+  LastCalledByName: "ISNULL(lastCall.CalledByName, N'zzzz')",
+  CheckedCount: CHECKED_COUNT_EXPR,
+  OpenRecheckCount: "ISNULL(rc.OpenRecheckCount, 0)",
+  OldestFlaggedAt: "ISNULL(rc.OldestFlaggedAt, '9999-12-31')",
+  SubmittedAt: "ISNULL(sub.SubmittedAt, '1900-01-01')",
+  FinancingType: "ISNULL(b.FinancingType, N'zzzz')",
+  GrandTotal: "COALESCE(NULLIF(b.GrandTotal, 0), b.TotalValue, 0)",
+};
+
+function resolveBoardOrder(tab, sortKey, sortDir) {
+  const dir = sortDir === "desc" ? "DESC" : "ASC";
+  if (sortKey && sortKey !== "Urgency" && Object.hasOwn(BOARD_SORT_MAP, sortKey)) {
+    return `${BOARD_SORT_MAP[sortKey]} ${dir}, b.Id DESC`;
+  }
+  if (tab === "recheck") return "ISNULL(rc.OldestFlaggedAt, '9999-12-31') ASC, ISNULL(rc.OpenRecheckCount, 0) DESC, b.Id DESC";
+  if (tab === "verified") return "ISNULL(sub.SubmittedAt, b.BookingDate) DESC, b.Id DESC";
+  if (tab === "checklist") return "ISNULL(lastCall.CallDate, b.BookingDate) DESC, b.Id DESC";
+  // Queue default urgency: overdue & due today first, then never called (oldest booking first), then future callbacks
+  const urgencyOrder = `
+    CASE
+      WHEN lastCall.Id IS NOT NULL AND lastCall.NextCallDate IS NOT NULL AND lastCall.NextCallDate <= CAST(SYSDATETIME() AS DATE) THEN 0
+      WHEN lastCall.Id IS NULL THEN 1
+      ELSE 2
+    END ${dir},
+    ISNULL(lastCall.NextCallDate, b.BookingDate) ${dir},
+    b.Id ASC
+  `;
+  return urgencyOrder;
+}
+
+// GET /board — high-scale server-paginated Welcome Calls work queues
+router.get("/board", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const tab = ["queue", "checklist", "recheck", "verified"].includes(String(req.query.tab)) ? String(req.query.tab) : "queue";
+    const { page, pageSize, offset } = applyPagination(req, 25, 200);
+
+    const reqRows = pool.request();
+    const reqCount = pool.request();
+    const scopeConds = buildBoardScopeFilters(reqRows, req.query, req.projectScope);
+    const scopeCondsCount = buildBoardScopeFilters(reqCount, req.query, req.projectScope);
+    const tabConds = buildBoardTabAndFocusConds(reqRows, { ...req.query, tab });
+    const tabCondsCount = buildBoardTabAndFocusConds(reqCount, { ...req.query, tab });
+
+    const where = `WHERE ${[...scopeConds, ...tabConds].join(" AND ")}`;
+    const whereCount = `WHERE ${[...scopeCondsCount, ...tabCondsCount].join(" AND ")}`;
+    const orderSql = resolveBoardOrder(tab, String(req.query.sortKey || ""), String(req.query.sortDir || ""));
+
+    reqRows.input("offset", sql.Int, offset);
+    reqRows.input("pageSize", sql.Int, pageSize);
+
+    const pagedSql = `
+      ;WITH Paged AS (
+        SELECT b.Id AS BookingId
+        ${BOARD_BASE_FROM}
+        ${where}
+        ORDER BY ${orderSql}
+        OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY
+      )
+      SELECT
+        b.Id AS BookingId, b.BookingNo, b.ApplicationId, b.BookingDate,
+        b.GrandTotal, b.TotalValue, b.FinancingType, b.AssignedTo,
+        uOwner.name AS AssignedToName,
+        a.ApplicantName, a.Mobile, a.Email, a.ApplicationNo,
+        COALESCE(bn.UnitNo, um.UnitName, b.UnitNo) AS UnitNo,
+        COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
+        COALESCE(blk.BlockName, b.BlockName) AS BlockName,
+        CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bpx WHERE bpx.BookingId = b.Id) THEN 1 ELSE 0 END AS BIT) AS IsPlotSale,
+        lastCall.Id AS LastCallId, lastCall.Outcome AS LastOutcome, lastCall.CallDate AS LastCallDate,
+        lastCall.NextCallDate, lastCall.CalledBy AS LastCalledBy, lastCall.CalledByName AS LastCalledByName,
+        (SELECT COUNT(*) FROM dbo.CrmWelcomeCall wcCnt WHERE wcCnt.BookingId = b.Id) AS AttemptCount,
+        CAST(CASE WHEN ${HAS_WELCOMED_SQL} THEN 1 ELSE 0 END AS BIT) AS HasWelcomedCall,
+        planPref.PaymentPlanConfirmed,
+        planPref.PaymentPlanDisputeReason,
+        (SELECT TOP 1 wcPad.PreferredAgreementDate FROM dbo.CrmWelcomeCall wcPad WHERE wcPad.BookingId = b.Id AND wcPad.PreferredAgreementDate IS NOT NULL ORDER BY wcPad.CreatedAt DESC) AS PreferredAgreementDate,
+        ${CHECKLIST_TOTAL_EXPR} AS ChecklistTotal,
+        ${CHECKED_COUNT_EXPR} AS CheckedCount,
+        ISNULL(rc.OpenRecheckCount, 0) AS OpenRecheckCount,
+        rc.OldestFlaggedAt,
+        CAST(ISNULL(sub.IsLocked, 0) AS BIT) AS IsLocked,
+        sub.SubmittedAt,
+        uSub.name AS SubmittedByName,
+        topFlag.ItemKey AS FlaggedItemKey,
+        topFlag.RecheckReason AS FlaggedReason,
+        uFlag.name AS RequestedByName,
+        docStats.DocsTotal,
+        docStats.DocsVerified,
+        STUFF((
+          SELECT N', ' + bp.BankName
+          FROM dbo.CrmWelcomeCallBankPreference bp
+          WHERE bp.BookingId = b.Id
+          ORDER BY bp.CreatedAt ASC
+          FOR XML PATH(N''), TYPE
+        ).value(N'.', N'NVARCHAR(MAX)'), 1, 2, N'') AS BankPrefNames,
+        ag.Id AS AgreementId, ag.AgreementNo, ag.Status AS AgreementStatus,
+        (
+          SELECT TOP 20 Outcome
+          FROM dbo.CrmWelcomeCall
+          WHERE BookingId = b.Id
+          ORDER BY CallDate DESC, CreatedAt DESC
+          FOR JSON PATH
+        ) AS RecentOutcomesJson
+      FROM Paged p
+      JOIN dbo.CrmBooking b ON b.Id = p.BookingId
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+      LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+      LEFT JOIN dbo.BlockMaster blk ON blk.Id = COALESCE(um.BlockId, b.BlockId)
+      LEFT JOIN dbo.Users uOwner ON uOwner.id = b.AssignedTo
+      LEFT JOIN dbo.CrmWelcomeCallSubmission sub ON sub.BookingId = b.Id
+      LEFT JOIN dbo.Users uSub ON uSub.id = sub.SubmittedBy
+      OUTER APPLY (
+        SELECT TOP 1 wcL.Id, wcL.Outcome, wcL.CallDate, wcL.NextCallDate, wcL.CalledBy, uLast.name AS CalledByName
+        FROM dbo.CrmWelcomeCall wcL
+        LEFT JOIN dbo.Users uLast ON uLast.id = wcL.CalledBy
+        WHERE wcL.BookingId = b.Id
+        ORDER BY wcL.CallDate DESC, wcL.CreatedAt DESC
+      ) lastCall
+      OUTER APPLY (
+        SELECT COUNT(*) AS OpenRecheckCount, MIN(ciR.RecheckRequestedAt) AS OldestFlaggedAt
+        FROM dbo.CrmWelcomeChecklistItem ciR
+        WHERE ciR.BookingId = b.Id AND ciR.RecheckStatus = '${CrmStatus.OPEN}'
+      ) rc
+      OUTER APPLY (
+        SELECT TOP 1 ciF.ItemKey, ciF.RecheckReason, ciF.RecheckRequestedBy
+        FROM dbo.CrmWelcomeChecklistItem ciF
+        WHERE ciF.BookingId = b.Id AND ciF.RecheckStatus = '${CrmStatus.OPEN}'
+        ORDER BY ciF.RecheckRequestedAt ASC
+      ) topFlag
+      LEFT JOIN dbo.Users uFlag ON uFlag.id = topFlag.RecheckRequestedBy
+      OUTER APPLY (
+        SELECT TOP 1 wcP.PaymentPlanConfirmed, wcP.PaymentPlanDisputeReason
+        FROM dbo.CrmWelcomeCall wcP
+        WHERE wcP.BookingId = b.Id AND wcP.PaymentPlanConfirmed IS NOT NULL
+        ORDER BY wcP.CallDate DESC, wcP.CreatedAt DESC
+      ) planPref
+      OUTER APPLY (
+        SELECT COUNT(*) AS DocsTotal, SUM(CASE WHEN bd.IsVerified = 1 THEN 1 ELSE 0 END) AS DocsVerified
+        FROM dbo.CrmBookingDocument bd
+        WHERE bd.BookingId = b.Id OR (bd.ApplicationId = b.ApplicationId AND bd.BookingId IS NULL)
+      ) docStats
+      OUTER APPLY (
+        SELECT TOP 1 ag1.Id, ag1.AgreementNo, ag1.Status
+        FROM dbo.CrmAgreement ag1
+        WHERE ag1.BookingId = b.Id
+        ORDER BY CASE WHEN ag1.Status <> 'Cancelled' THEN 0 ELSE 1 END, ag1.CreatedAt DESC
+      ) ag
+      ORDER BY ${orderSql}
+    `;
+
+    const [rowsRes, cntRes] = await Promise.all([
+      reqRows.query(pagedSql),
+      reqCount.query(`SELECT COUNT(*) AS total ${BOARD_BASE_FROM} ${whereCount}`),
+    ]);
+
+    const rows = rowsRes.recordset.map((r) => {
+      let consecutiveNonReached = 0;
+      try {
+        const outcomes = JSON.parse(r.RecentOutcomesJson || "[]");
+        consecutiveNonReached = computeStreak(outcomes.map((o) => o.Outcome));
+      } catch {}
+      const { RecentOutcomesJson: _, ...rest } = r;
+      return { ...rest, ConsecutiveNonReached: consecutiveNonReached };
+    });
+
+    res.json({ rows, total: cntRes.recordset[0]?.total || 0, page, pageSize });
+  } catch (e) {
+    console.error("[crm-welcome-calls] GET /board error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /board/counts — tab counts + per-tab focus counts across ALL matching bookings
+router.get("/board/counts", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const reqB = pool.request();
+    const reqH = pool.request();
+
+    const scopeConds = buildBoardScopeFilters(reqB, req.query, req.projectScope);
+    const scopeWhere = `WHERE ${scopeConds.join(" AND ")}`;
+
+    // Build history count under the same global scope
+    const hConds = [];
+    if (req.projectScope) hConds.push(projectPredicate(req.projectScope, "b.ProjectId", "").trim());
+    if (req.query.companyId) { reqH.input("companyId", sql.Int, parseInt(req.query.companyId, 10)); hConds.push("b.CompanyId = @companyId"); }
+    if (req.query.projectId) { reqH.input("projectId", sql.Int, parseInt(req.query.projectId, 10)); hConds.push("b.ProjectId = @projectId"); }
+    if (req.query.blockId) {
+      reqH.input("blockId", sql.Int, parseInt(req.query.blockId, 10));
+      hConds.push(`(COALESCE(um.BlockId, b.BlockId) = @blockId OR EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bp JOIN dbo.PlotMaster pm ON pm.Id = bp.PlotId WHERE bp.BookingId = b.Id AND bp.Status = N'Active' AND pm.BlockId = @blockId))`);
+    }
+    if (req.query.assignedTo === "unassigned") hConds.push("b.AssignedTo IS NULL");
+    else if (req.query.assignedTo && /^\d+$/.test(String(req.query.assignedTo))) {
+      reqH.input("assignedTo", sql.Int, parseInt(req.query.assignedTo, 10));
+      hConds.push("b.AssignedTo = @assignedTo");
+    }
+    if (req.query.search && String(req.query.search).trim()) {
+      reqH.input("srch", sql.NVarChar(200), `%${String(req.query.search).trim()}%`);
+      hConds.push("(a.ApplicantName LIKE @srch OR a.Mobile LIKE @srch OR b.BookingNo LIKE @srch OR COALESCE(bn.UnitNo, um.UnitName, b.UnitNo) LIKE @srch OR COALESCE(bn.ProjectName, b.ProjectName) LIKE @srch OR u.name LIKE @srch)");
+    }
+    const hWhere = hConds.length ? `WHERE ${hConds.join(" AND ")}` : "";
+
+    const boardCountSql = `
+      SELECT
+        SUM(CASE WHEN y.HasWelcomed = 0 THEN 1 ELSE 0 END) AS TabQueue,
+        SUM(CASE WHEN y.HasWelcomed = 1 AND y.IsLocked = 0 THEN 1 ELSE 0 END) AS TabChecklist,
+        SUM(CASE WHEN y.OpenRecheckCount > 0 THEN 1 ELSE 0 END) AS TabRecheck,
+        SUM(CASE WHEN y.HasWelcomed = 1 AND y.IsLocked = 1 AND y.OpenRecheckCount = 0 THEN 1 ELSE 0 END) AS TabVerified,
+
+        SUM(CASE WHEN y.HasWelcomed = 0 AND y.LastCallId IS NULL THEN 1 ELSE 0 END) AS QNeverCalled,
+        SUM(CASE WHEN y.HasWelcomed = 0 AND y.LastCallId IS NOT NULL AND y.NextCallDate IS NOT NULL AND y.NextCallDate < y.TodayDate THEN 1 ELSE 0 END) AS QOverdue,
+        SUM(CASE WHEN y.HasWelcomed = 0 AND y.LastCallId IS NOT NULL AND y.NextCallDate = y.TodayDate THEN 1 ELSE 0 END) AS QDueToday,
+        SUM(CASE WHEN y.HasWelcomed = 0 AND y.IsUnreachable3 = 1 THEN 1 ELSE 0 END) AS QUnreachable3,
+        SUM(CASE WHEN y.HasWelcomed = 0 AND y.LastCallId IS NOT NULL AND y.NextCallDate > y.TodayDate THEN 1 ELSE 0 END) AS QScheduled,
+
+        SUM(CASE WHEN y.HasWelcomed = 1 AND y.IsLocked = 0 AND y.CheckedCount < y.ChecklistTotal THEN 1 ELSE 0 END) AS CIncomplete,
+        SUM(CASE WHEN y.HasWelcomed = 1 AND y.IsLocked = 0 AND y.CheckedCount >= y.ChecklistTotal AND y.OpenRecheckCount = 0 THEN 1 ELSE 0 END) AS CReadyToSubmit,
+        SUM(CASE WHEN y.HasWelcomed = 1 AND y.IsLocked = 0 AND y.OpenRecheckCount > 0 THEN 1 ELSE 0 END) AS CHasRecheck,
+        SUM(CASE WHEN y.HasWelcomed = 1 AND y.IsLocked = 0 AND y.MissingFinancing = 1 THEN 1 ELSE 0 END) AS CMissingFinancing,
+        SUM(CASE WHEN y.HasWelcomed = 1 AND y.IsLocked = 0 AND y.PlanDisputed = 1 THEN 1 ELSE 0 END) AS CPlanDisputed,
+
+        SUM(CASE WHEN y.OpenRecheckCount > 0 AND y.FlagAging = 1 THEN 1 ELSE 0 END) AS RAging,
+        SUM(CASE WHEN y.OpenRecheckCount >= 2 THEN 1 ELSE 0 END) AS RMulti
+      FROM (
+        SELECT
+          CAST(SYSDATETIME() AS DATE) AS TodayDate,
+          CASE WHEN ${HAS_WELCOMED_SQL} THEN 1 ELSE 0 END AS HasWelcomed,
+          ISNULL(sub.IsLocked, 0) AS IsLocked,
+          lastCall.Id AS LastCallId,
+          lastCall.NextCallDate,
+          CASE WHEN ${STREAK_AT_LEAST_3_SQL} THEN 1 ELSE 0 END AS IsUnreachable3,
+          ISNULL(rc.OpenRecheckCount, 0) AS OpenRecheckCount,
+          ${CHECKLIST_TOTAL_EXPR} AS ChecklistTotal,
+          ${CHECKED_COUNT_EXPR} AS CheckedCount,
+          CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(b.FinancingType, N''))), N'') IS NULL THEN 1 ELSE 0 END AS MissingFinancing,
+          CASE WHEN planPref.PaymentPlanConfirmed = 0 THEN 1 ELSE 0 END AS PlanDisputed,
+          CASE WHEN rc.OldestFlaggedAt IS NOT NULL AND CAST(rc.OldestFlaggedAt AS DATE) <= DATEADD(day, -3, CAST(SYSDATETIME() AS DATE)) THEN 1 ELSE 0 END AS FlagAging
+        ${BOARD_BASE_FROM}
+        ${scopeWhere}
+      ) y
+    `;
+
+    const [bRes, hRes] = await Promise.all([
+      reqB.query(boardCountSql),
+      reqH.query(`SELECT COUNT(*) AS total ${WC_FROM} ${hWhere}`),
+    ]);
+
+    const d = bRes.recordset[0] || {};
+    res.json({
+      tabs: {
+        queue: Number(d.TabQueue) || 0,
+        checklist: Number(d.TabChecklist) || 0,
+        recheck: Number(d.TabRecheck) || 0,
+        verified: Number(d.TabVerified) || 0,
+        history: Number(hRes.recordset[0]?.total) || 0,
+      },
+      focus: {
+        queue: {
+          neverCalled: Number(d.QNeverCalled) || 0,
+          overdue: Number(d.QOverdue) || 0,
+          dueToday: Number(d.QDueToday) || 0,
+          unreachable3: Number(d.QUnreachable3) || 0,
+          scheduled: Number(d.QScheduled) || 0,
+        },
+        checklist: {
+          incomplete: Number(d.CIncomplete) || 0,
+          readyToSubmit: Number(d.CReadyToSubmit) || 0,
+          hasRecheck: Number(d.CHasRecheck) || 0,
+          missingFinancing: Number(d.CMissingFinancing) || 0,
+          planDisputed: Number(d.CPlanDisputed) || 0,
+        },
+        recheck: {
+          aging: Number(d.RAging) || 0,
+          multi: Number(d.RMulti) || 0,
+        },
+      },
+    });
+  } catch (e) {
+    console.error("[crm-welcome-calls] GET /board/counts error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Helper to build Call History WHERE conditions (shared between GET / and GET /history-counts)
+function buildHistoryFilters(req0, query, projectScope) {
+  const { bookingId, pending, search, outcome, focus, calledBy, assignedTo, dateFrom, dateTo } = query;
+  const companyId = query.companyId ? parseInt(query.companyId, 10) : null;
+  const projectId = query.projectId ? parseInt(query.projectId, 10) : null;
+  const blockId = query.blockId ? parseInt(query.blockId, 10) : null;
+  const conds = [];
+  if (projectScope) conds.push(projectPredicate(projectScope, "b.ProjectId", "").trim());
+  if (bookingId) { req0.input("bid", sql.Int, parseInt(bookingId, 10)); conds.push("wc.BookingId = @bid"); }
+  if (pending === "1") conds.push("wc.NextCallDate <= CAST(SYSDATETIME() AS DATE)");
+  if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+  if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+  if (blockId) {
+    req0.input("blockId", sql.Int, blockId);
+    conds.push(`(COALESCE(um.BlockId, b.BlockId) = @blockId OR EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bp JOIN dbo.PlotMaster pm ON pm.Id = bp.PlotId WHERE bp.BookingId = b.Id AND bp.Status = N'Active' AND pm.BlockId = @blockId))`);
+  }
+  if (assignedTo === "unassigned") conds.push("b.AssignedTo IS NULL");
+  else if (assignedTo && /^\d+$/.test(String(assignedTo))) {
+    req0.input("assignedTo", sql.Int, parseInt(assignedTo, 10));
+    conds.push("b.AssignedTo = @assignedTo");
+  }
+  if (calledBy && /^\d+$/.test(String(calledBy))) {
+    req0.input("calledBy", sql.Int, parseInt(calledBy, 10));
+    conds.push("wc.CalledBy = @calledBy");
+  }
+  if (outcome && OUTCOMES.includes(String(outcome))) {
+    req0.input("outcome", sql.NVarChar(50), String(outcome));
+    conds.push("wc.Outcome = @outcome");
+  }
+  if (dateFrom && /^\d{4}-\d{2}-\d{2}$/.test(String(dateFrom))) {
+    req0.input("dateFrom", sql.Date, String(dateFrom));
+    conds.push("CAST(ISNULL(wc.CallDate, wc.CreatedAt) AS DATE) >= @dateFrom");
+  }
+  if (dateTo && /^\d{4}-\d{2}-\d{2}$/.test(String(dateTo))) {
+    req0.input("dateTo", sql.Date, String(dateTo));
+    conds.push("CAST(ISNULL(wc.CallDate, wc.CreatedAt) AS DATE) <= @dateTo");
+  }
+  if (focus === "welcomed") conds.push("wc.Outcome = N'Welcomed'");
+  else if (focus === "callback") conds.push("wc.Outcome = N'RequestedCallback'");
+  else if (focus === "notReached") conds.push(`wc.Outcome IN (${NON_REACHED_OUTCOMES_SQL})`);
+  else if (focus === "planDisputed") conds.push("wc.PaymentPlanConfirmed = 0");
+  else if (focus === "submitted") conds.push("sub.IsLocked = 1");
+  if (search && String(search).trim()) {
+    req0.input("search", sql.NVarChar(200), `%${String(search).trim()}%`);
+    conds.push("(a.ApplicantName LIKE @search OR a.Mobile LIKE @search OR b.BookingNo LIKE @search OR COALESCE(bn.UnitNo, um.UnitName, b.UnitNo) LIKE @search OR COALESCE(bn.ProjectName, b.ProjectName) LIKE @search OR u.name LIKE @search OR wc.Notes LIKE @search)");
+  }
+  return conds.length ? "WHERE " + conds.join(" AND ") : "";
+}
+
+// GET /history-counts — Call History focus breakdown across all matching calls
+router.get("/history-counts", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const req0 = pool.request();
+    const where = buildHistoryFilters(req0, { ...req.query, focus: "" }, req.projectScope);
+    const r = await req0.query(`
+      SELECT
+        COUNT(*) AS total,
+        SUM(CASE WHEN wc.Outcome = N'Welcomed' THEN 1 ELSE 0 END) AS welcomed,
+        SUM(CASE WHEN wc.Outcome = N'RequestedCallback' THEN 1 ELSE 0 END) AS callback,
+        SUM(CASE WHEN wc.Outcome IN (${NON_REACHED_OUTCOMES_SQL}) THEN 1 ELSE 0 END) AS notReached,
+        SUM(CASE WHEN wc.PaymentPlanConfirmed = 0 THEN 1 ELSE 0 END) AS planDisputed,
+        SUM(CASE WHEN sub.IsLocked = 1 THEN 1 ELSE 0 END) AS submitted
+      ${WC_FROM}
+      ${where}
+    `);
+    const d = r.recordset[0] || {};
+    res.json({
+      total: Number(d.total) || 0,
+      welcomed: Number(d.welcomed) || 0,
+      callback: Number(d.callback) || 0,
+      notReached: Number(d.notReached) || 0,
+      planDisputed: Number(d.planDisputed) || 0,
+      submitted: Number(d.submitted) || 0,
+    });
+  } catch (e) {
+    console.error("[crm-welcome-calls] GET /history-counts error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // GET /queue — the work queue: Approved bookings that still need a welcome
 // call, or have a callback due today/overdue. Never Cancelled/Rejected/
@@ -213,10 +755,12 @@ router.get("/:bookingId/call-context", requirePageRight("crm-welcome-calls", "vi
 
     const [bkRes, custRes, milRes, invRes, loanRes, oaRes, mrRes, recentCallsRes, padRes] = await Promise.all([
       pool.request().input("bid", sql.Int, bookingId).query(`
-        SELECT b.Id, b.BookingNo,
+        SELECT b.Id, b.BookingNo, b.ApplicationId, b.BookingDate, b.Status AS BookingStatus,
+               b.AssignedTo, uOwner.name AS AssignedToName,
                CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bpx WHERE bpx.BookingId = b.Id) THEN 1 ELSE 0 END AS BIT) AS IsPlotSale,
                COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
                COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
+               COALESCE(blk.BlockName, b.BlockName) AS BlockName,
                COALESCE(bn.UnitType, b.UnitType) AS UnitType,
                b.AreaSqFt,
                b.CarpetAreaSqFt, b.BuiltUpAreaSqFt, b.SuperBuiltUpAreaSqFt, b.OpenTerraceAreaSqFt,
@@ -228,6 +772,9 @@ router.get("/:bookingId/call-context", requirePageRight("crm-welcome-calls", "vi
         FROM dbo.CrmBooking b
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
         LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+        LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+        LEFT JOIN dbo.BlockMaster blk ON blk.Id = COALESCE(um.BlockId, b.BlockId)
+        LEFT JOIN dbo.Users uOwner ON uOwner.id = b.AssignedTo
         LEFT JOIN dbo.CrmPaymentPlanTemplate pp ON pp.Id = b.PaymentPlanId
         WHERE b.Id = @bid
       `),
@@ -259,12 +806,20 @@ router.get("/:bookingId/call-context", requirePageRight("crm-welcome-calls", "vi
         .query("SELECT ReceiptNo, Amount, AppliedAmount, Status FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid ORDER BY CreatedAt DESC"),
       pool.request().input("bid", sql.Int, bookingId)
         .query("SELECT ISNULL(SUM(Amount), 0) AS MRTotal FROM dbo.CrmMoneyReceipt WHERE BookingId = @bid AND Status IN ('Pending','Approved')"),
-      // Ordered outcomes (most-recent first) so we can compute a true
-      // consecutive streak in JS — a COUNT(*) has no concept of stopping
-      // at a Welcomed call in the middle of the history (old bug: called
-      // it "ConsecutiveNonReached" but it counted ALL non-reached rows).
-      pool.request().input("bid", sql.Int, bookingId)
-        .query("SELECT TOP 20 Outcome FROM dbo.CrmWelcomeCall WHERE BookingId = @bid ORDER BY CallDate DESC, CreatedAt DESC"),
+      // Ordered calls (most-recent first) for consecutive streak calculation AND
+      // inline call-history timeline inside the Welcome Call dialog.
+      pool.request().input("bid", sql.Int, bookingId).query(`
+        SELECT TOP 20
+               wc.Id, wc.BookingId, wc.CalledBy, wc.CallDate, wc.DurationSeconds,
+               wc.Outcome, wc.NextCallDate, wc.Notes, wc.CustomFields,
+               wc.PreferredAgreementDate, wc.PaymentPlanConfirmed,
+               wc.PaymentPlanDisputeReason, wc.CreatedAt,
+               u.name AS CalledByName
+        FROM dbo.CrmWelcomeCall wc
+        LEFT JOIN dbo.Users u ON u.id = wc.CalledBy
+        WHERE wc.BookingId = @bid
+        ORDER BY wc.CallDate DESC, wc.CreatedAt DESC
+      `),
       // Latest NON-NULL PreferredAgreementDate across every call logged so
       // far — a follow-up call that didn't re-ask/re-enter it must not make
       // it look like nothing was ever captured. Surfaced so the "Log Call"
@@ -296,6 +851,7 @@ router.get("/:bookingId/call-context", requirePageRight("crm-welcome-calls", "vi
       onAccount: { payments: oaRes.recordset, availableBalance: onAccountBalance },
       mrReceived,
       consecutiveNonReached,
+      recentCalls: recentCallsRes.recordset,
       // FinancingType is on CrmBooking (captured via the welcome call tab's
       // "How is this financed?" card, or later via Bank & KYC). Surfaced here
       // so the Bank Preference tab can show the current selection without an
@@ -311,53 +867,45 @@ router.get("/:bookingId/call-context", requirePageRight("crm-welcome-calls", "vi
   }
 });
 
+const HISTORY_SORT_MAP = {
+  CallDate: "ISNULL(wc.CallDate, wc.CreatedAt)",
+  CreatedAt: "wc.CreatedAt",
+  BookingNo: "b.BookingNo",
+  ApplicantName: "a.ApplicantName",
+  ProjectName: "COALESCE(bn.ProjectName, b.ProjectName)",
+  CalledByName: "ISNULL(u.name, N'zzzz')",
+  Outcome: "ISNULL(wc.Outcome, N'')",
+  DurationSeconds: "ISNULL(wc.DurationSeconds, 0)",
+  NextCallDate: "ISNULL(wc.NextCallDate, '9999-12-31')",
+};
+
 // GET / — all welcome calls
 router.get("/", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { bookingId, pending, search } = req.query;
-    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
-    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
-    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
-    // Rows and total share one set of inputs and conditions, project scope included (both used to list and count
-    // every project's calls).
     const req0 = pool.request();
     const countReq = pool.request();
-    const bind = (name, type, value) => { req0.input(name, type, value); countReq.input(name, type, value); };
-    const conds = [];
-    if (req.projectScope) conds.push(projectPredicate(req.projectScope, "b.ProjectId", "").trim());
-    if (bookingId) { bind("bid", sql.Int, parseInt(bookingId)); conds.push("wc.BookingId = @bid"); }
-    if (pending === "1") conds.push("wc.NextCallDate <= CAST(SYSDATETIME() AS DATE)");
-    if (companyId) { bind("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
-    if (projectId) { bind("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
-    if (blockId) { bind("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
-    if (search) {
-      bind("search", sql.NVarChar(200), `%${search}%`);
-      conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search)");
-    }
-    const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
-    const SELECT_WITH_BLOCK = `${WC_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
+    const where = buildHistoryFilters(req0, req.query, req.projectScope);
+    const countWhere = buildHistoryFilters(countReq, req.query, req.projectScope);
+
+    const sortKey = String(req.query.sortKey || "CallDate");
+    const sortExpr = Object.hasOwn(HISTORY_SORT_MAP, sortKey) ? HISTORY_SORT_MAP[sortKey] : HISTORY_SORT_MAP.CallDate;
+    const sortDir = req.query.sortDir === "asc" ? "ASC" : "DESC";
+    const orderSql = `ORDER BY ${sortExpr} ${sortDir}, wc.Id DESC`;
 
     if (!req.query.page) {
-      const result = await req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY wc.CreatedAt DESC`);
+      const result = await req0.query(`${WC_SELECT} ${where} ${orderSql}`);
       return res.json(result.recordset);
     }
 
-    const { page, pageSize, offset } = applyPagination(req);
+    const { page, pageSize, offset } = applyPagination(req, 25, 200);
     req0.input("offset", sql.Int, offset);
     req0.input("pageSize", sql.Int, pageSize);
     const [result, countResult] = await Promise.all([
-      req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY wc.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
-      countReq.query(`
-          SELECT COUNT(*) AS total
-          FROM dbo.CrmWelcomeCall wc
-          JOIN dbo.CrmBooking b ON b.Id = wc.BookingId
-          JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
-          ${where}
-        `),
+      req0.query(`${WC_SELECT} ${where} ${orderSql} OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      countReq.query(`SELECT COUNT(*) AS total ${WC_FROM} ${countWhere}`),
     ]);
-    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
+    res.json({ rows: result.recordset, total: countResult.recordset[0]?.total || 0, page, pageSize });
   } catch (e) {
     console.error("[crm-welcome-calls] GET error:", e.message);
     res.status(500).json({ error: e.message });

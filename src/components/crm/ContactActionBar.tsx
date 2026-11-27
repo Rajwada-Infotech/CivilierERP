@@ -2,9 +2,9 @@ import React, { useState } from "react";
 import { toast } from "sonner";
 import { Phone, MessageSquare, MessageCircle, Mail, PhoneCall, Copy } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { GRID_KEY, GRID_KEY_BRAND } from "@/components/crm/CrmDataTable";
 import { toWhatsAppNumber } from "@/lib/phone";
-
-const RULE = "1px solid hsl(var(--foreground))";
+import { cn } from "@/lib/utils";
 
 // Shared across every CRM page that needs a direct-contact affordance
 // (Communication Log, Welcome Call, ...) — one implementation instead of
@@ -24,29 +24,32 @@ export function CallDialog({ applicantName, mobile, onClose }: { applicantName: 
   };
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-xs text-center rounded-none" style={{ border: RULE }}>
+      <DialogContent className="max-w-xs text-center rounded-xl p-5 gap-3">
         <DialogHeader>
-          <DialogTitle className="font-heading flex items-center justify-center gap-1.5"><PhoneCall size={16} className="text-foreground" /> Call {applicantName}</DialogTitle>
+          <DialogTitle className="flex items-center justify-center gap-2 text-base font-semibold">
+            <PhoneCall size={16} className="text-primary shrink-0" /> Call {applicantName}
+          </DialogTitle>
         </DialogHeader>
-        <div className="py-3">
-          <div className="text-2xl font-bold tracking-wide text-foreground">{mobile}</div>
-          <p className="text-xs text-muted-foreground mt-1">On mobile, "Call Now" opens your dialer. On desktop, copy the number to dial manually.</p>
+        <div className="rounded-lg border border-border bg-muted/40 px-4 py-3">
+          <div className="text-xl font-bold tracking-wide tabular-nums text-foreground">{mobile}</div>
+          <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+            On mobile, Call Now opens your dialer. On desktop, copy the number to dial manually.
+          </p>
         </div>
         <div className="flex flex-col gap-2">
-          <a href={`tel:${mobile}`}
-            className="px-4 py-2 text-sm bg-primary text-primary-foreground font-medium hover:bg-primary/90 flex items-center justify-center gap-1.5">
+          <a href={`tel:${mobile}`} className={cn(GRID_KEY_BRAND, "h-9 px-4")}>
             <PhoneCall size={14} /> Call Now
           </a>
-          <button onClick={handleCopy}
-            className="px-4 py-2 text-sm border border-border font-medium hover:bg-muted flex items-center justify-center gap-1.5">
+          <button type="button" onClick={handleCopy} className={cn(GRID_KEY, "h-9 px-4 text-foreground")}>
             <Copy size={14} /> Copy Number
           </button>
-          <a href={`sms:${mobile}`}
-            className="px-4 py-2 text-sm border border-border font-medium hover:bg-muted flex items-center justify-center gap-1.5">
+          <a href={`sms:${mobile}`} className={cn(GRID_KEY, "h-9 px-4 text-foreground")}>
             <MessageSquare size={14} /> Send SMS Instead
           </a>
         </div>
-        <button onClick={onClose} className="text-xs text-muted-foreground hover:text-foreground pt-1">Close</button>
+        <button type="button" onClick={onClose} className="text-xs text-muted-foreground hover:text-foreground pt-1">
+          Close
+        </button>
       </DialogContent>
     </Dialog>
   );
@@ -57,38 +60,34 @@ export function CallDialog({ applicantName, mobile, onClose }: { applicantName: 
 // Optionally reports which channel was used back to the caller so a log
 // form can reflect it automatically.
 export function ContactActionBar({
-  applicantName, mobile, email, onUsed, compact,
-}: { applicantName: string; mobile: string | null; email: string | null; onUsed?: (channel: string) => void; compact?: boolean }) {
+  applicantName, mobile, email, onUsed, compact, onDark,
+}: { applicantName: string; mobile: string | null; email: string | null; onUsed?: (channel: string) => void; compact?: boolean; onDark?: boolean }) {
   const [calling, setCalling] = useState(false);
   if (!mobile && !email) return null;
-  const btnCls = compact
-    ? "flex items-center gap-1 text-[0.6875rem] px-2 py-1 border font-medium"
-    : "flex items-center gap-1.5 text-xs px-2.5 py-1.5 border font-medium";
+  const btnCls = onDark
+    ? cn("inline-flex items-center justify-center gap-1.5 rounded-md border border-white/25 font-medium text-white hover:bg-white/10 transition-colors", compact ? "h-7 px-2.5 text-[0.6875rem]" : "h-8 px-3 text-xs")
+    : cn(GRID_KEY, compact ? "h-7 px-2 text-[0.6875rem]" : "h-8 px-2.5");
 
   return (
     <>
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex items-center gap-1.5 flex-wrap">
         {mobile && (
-          <button onClick={() => { setCalling(true); onUsed?.("Call"); }}
-            className={`${btnCls} border-foreground/30 bg-card text-foreground hover:bg-primary/10`}>
+          <button type="button" onClick={() => { setCalling(true); onUsed?.("Call"); }} className={btnCls}>
             <Phone size={compact ? 11 : 13} /> Call
           </button>
         )}
         {mobile && (
-          <a href={`sms:${mobile}`} onClick={() => onUsed?.("SMS")}
-            className={`${btnCls} border-foreground/30 bg-card text-foreground hover:bg-primary/10`}>
+          <a href={`sms:${mobile}`} onClick={() => onUsed?.("SMS")} className={btnCls}>
             <MessageSquare size={compact ? 11 : 13} /> SMS
           </a>
         )}
         {mobile && (
-          <a href={`https://wa.me/${toWhatsAppNumber(mobile)}`} target="_blank" rel="noreferrer" onClick={() => onUsed?.("WhatsApp")}
-            className={`${btnCls} border-foreground/30 bg-card text-foreground hover:bg-primary/10`}>
+          <a href={`https://wa.me/${toWhatsAppNumber(mobile)}`} target="_blank" rel="noreferrer" onClick={() => onUsed?.("WhatsApp")} className={btnCls}>
             <MessageCircle size={compact ? 11 : 13} /> WhatsApp
           </a>
         )}
         {email && (
-          <a href={`mailto:${email}`} onClick={() => onUsed?.("Email")}
-            className={`${btnCls} border-foreground/30 bg-card text-foreground hover:bg-primary/10`}>
+          <a href={`mailto:${email}`} onClick={() => onUsed?.("Email")} className={btnCls}>
             <Mail size={compact ? 11 : 13} /> Email
           </a>
         )}

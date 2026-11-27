@@ -140,7 +140,7 @@ export function CollectionBar({ due, collected, finance, recorded, onDark, title
 export function Initials({ name, small }: { name: string | null; small?: boolean }) {
   const parts = String(name || "?").trim().split(/\s+/);
   const text = `${parts[0]?.[0] || "?"}${parts.length > 1 ? parts[parts.length - 1][0] : ""}`.toUpperCase();
-  return <span className={cn("shrink-0 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-200 font-semibold flex items-center justify-center", small ? "w-6 h-6 text-[0.625rem]" : "w-8 h-8 text-[0.6875rem]")}>{text}</span>;
+  return <span className={cn("shrink-0 rounded-full bg-primary/15 text-primary border border-primary/25 [[data-theme]_&]:bg-primary/10 font-semibold flex items-center justify-center", small ? "w-6 h-6 text-[0.625rem]" : "w-8 h-8 text-[0.6875rem]")}>{text}</span>;
 }
 /** Names come in as typed, often all capitals: on the list they read as names. */
 export const asName = (s: string | null) => String(s || "").toLowerCase();
@@ -153,7 +153,7 @@ export type StepState = "done" | "active" | "stopped" | "off";
 export function StepBar({ steps, onDark, caption }: { steps: { label: string; state: StepState }[]; onDark?: boolean; caption?: React.ReactNode }) {
   const fill: Record<StepState, string> = {
     done: onDark ? BAND_DOT.collected : "bg-emerald-500", active: onDark ? BAND_DOT.finance : "bg-amber-400", stopped: "bg-rose-500",
-    off: onDark ? "bg-white/15" : "bg-slate-200 dark:bg-slate-700",
+    off: onDark ? "bg-white/15" : "bg-muted border border-border/50 [[data-theme]_&]:bg-slate-200/80 [[data-theme]_&]:border-transparent",
   };
   const ink: Record<StepState, string> = {
     done: onDark ? "text-slate-200" : "text-foreground", active: onDark ? "text-white font-semibold" : "text-foreground font-semibold",
