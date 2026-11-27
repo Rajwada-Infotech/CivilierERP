@@ -13,7 +13,7 @@ const { requirePageRight, requireAnyPageRight } = require("../middleware/require
 const { actorId, isSaAdmin } = require("../services/saAccess");
 const { emitNotification } = require("../services/notify");
 const { getNextDocNumber } = require("../services/docNumber");
-const { maybeAutoCreateSalesDeed, maybeAutoCreateBrokerage, requireActiveBooking, recalculateRemainingMilestones, syncParkingPaymentStatus } = require("../services/crmWorkflowGuards");
+const { maybeAutoCreateAgreement, maybeAutoCreateSalesDeed, maybeAutoCreateBrokerage, requireActiveBooking, recalculateRemainingMilestones, syncParkingPaymentStatus } = require("../services/crmWorkflowGuards");
 const { postCrmOnAccountToGL, postCrmOnAccountApplied, getGstSplit } = require("../services/crmLedger");
 const { recordGLPosting } = require("../services/approvalService");
 const { applyPagination } = require("../services/crmListPagination");
@@ -1248,6 +1248,7 @@ async function applyCrmMilestonePaymentApproval(pool, rp, actorUserId, actorEmai
   if (!(await holdIfBookingCancelled(pool, targetRow.BookingId, onAccountId, actorUserId, actorEmail))
     && !(await require("../services/crmEntityCreation").forwardIfUnitChanged(pool, targetRow.BookingId, onAccountId, actorUserId, actorEmail))) {
     await autoApplyOnAccountIfFullyFunded(pool, targetRow.BookingId, actorUserId, actorEmail);
+    await startAgreementIfReady(pool, targetRow.BookingId, actorUserId);
   }
 
   // Every approved CRM payment gets its own Money Receipt — not just the
@@ -1270,6 +1271,13 @@ async function applyCrmMilestonePaymentApproval(pool, rp, actorUserId, actorEmai
     require("../services/pushNotifications").notifyBookingCustomers(targetRow.BookingId, "paymentReceived", { amount: rp.RPAmount });
   }
   return { bookingId: targetRow.BookingId, onAccountId, OnAccountReceiptNo: onAccountReceiptNo, brokerWarning: null };
+}
+
+// The booking amount is one of the agreement's prerequisites (with the welcome call and the bank / PAN / Aadhaar
+// details): when Finance approves the money last, this is where the agreement starts itself. Never fails the approval.
+async function startAgreementIfReady(pool, bookingId, actorUserId) {
+  try { await maybeAutoCreateAgreement(pool, bookingId, actorUserId); }
+  catch (e) { console.error("[crm-payments] agreement auto-start after payment failed:", e.message); }
 }
 
 // Runs once Finance approves a CRM-linked ReceivedPayment row that has
@@ -1328,6 +1336,7 @@ async function applyCrmOnAccountPaymentApproval(pool, rp, actorUserId, actorEmai
   if (!(await holdIfBookingCancelled(pool, rp.CrmBookingId, onAccountId, actorUserId, actorEmail))
     && !(await require("../services/crmEntityCreation").forwardIfUnitChanged(pool, rp.CrmBookingId, onAccountId, actorUserId, actorEmail))) {
     await autoApplyOnAccountIfFullyFunded(pool, rp.CrmBookingId, actorUserId, actorEmail);
+    await startAgreementIfReady(pool, rp.CrmBookingId, actorUserId);
   }
 
   // Same "every approved CRM payment gets its own Money Receipt" rule as
