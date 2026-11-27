@@ -9,7 +9,7 @@ export function Screen({ children, refreshing, onRefresh }: { children: React.Re
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={{ padding: 12, paddingTop: insets.top + 12, paddingBottom: 32, gap: 12 }}
+      contentContainerStyle={{ padding: 12, paddingTop: insets.top + 12, paddingBottom: insets.bottom + 32, gap: 12 }}
       refreshControl={onRefresh ? <RefreshControl refreshing={!!refreshing} onRefresh={onRefresh} tintColor={colors.primary} colors={[colors.primary]} /> : undefined}
       keyboardShouldPersistTaps="handled"
     >

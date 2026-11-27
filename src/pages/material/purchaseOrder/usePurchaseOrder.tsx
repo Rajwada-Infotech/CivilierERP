@@ -104,6 +104,7 @@ export function usePurchaseOrder() {
   // helper, same Rules-of-Hooks reasoning as the other list-view state here.
   const [collapsedProjectGroups, setCollapsedProjectGroups] = useState<Record<string, boolean>>({});
   const [projectFilter, setProjectFilter] = useState<string>("");
+  const [itemFilter, setItemFilter] = useState<string>(""); // "" = all items
 
   // ── Doc number state ──────────────────────────────────────────────────────
   const [poDocTypeId, setPoDocTypeId] = useState<number | null>(null);
@@ -290,7 +291,7 @@ export function usePurchaseOrder() {
 
   // ── Remote data ───────────────────────────────────────────────────────────
   const { data: dbData, isLoading } = useQuery({
-    queryKey: ["purchase-orders", page, limit, poTypeFilter, projectFilter],
+    queryKey: ["purchase-orders", page, limit, poTypeFilter, projectFilter, itemFilter],
     queryFn: () =>
       getPurchaseOrders({
         page,
@@ -298,6 +299,7 @@ export function usePurchaseOrder() {
         poType: poTypeFilter || undefined,
         includeShortClosed: true,
         projectId: projectFilter ? Number(projectFilter) : undefined,
+        itemId: itemFilter || undefined,
         groupBy: "project",
       }),
   });
@@ -2470,6 +2472,8 @@ export function usePurchaseOrder() {
     collapsedProjectGroups,
     setCollapsedProjectGroups,
     projectFilter,
+    itemFilter,
+    setItemFilter,
     setProjectFilter,
     poDocTypeId,
     setPoDocTypeId,

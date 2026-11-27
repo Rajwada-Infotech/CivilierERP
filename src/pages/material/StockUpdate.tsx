@@ -85,7 +85,7 @@ function EditStockUpdateDialog({ id, onClose }: { id: number; onClose: () => voi
   // dropped from the godown's list) must still show its name here rather
   // than looking blank.
   const itemOptions = useMemo(() => {
-    const byId = new Map((godownItems as any[]).map((i) => [String(i.M_Id), { value: String(i.M_Id), label: String(i.M_Name) }]));
+    const byId = new Map((godownItems as any[]).filter((i) => i.M_IsActive !== false).map((i) => [String(i.M_Id), { value: String(i.M_Id), label: String(i.M_Name) }]));
     for (const i of data?.items ?? []) {
       if (!byId.has(i.ItemId)) byId.set(i.ItemId, { value: i.ItemId, label: i.ItemName || i.ItemId });
     }
@@ -352,8 +352,11 @@ export default function StockUpdate() {
   }, [items]);
 
   const itemOptions = useMemo(
-    () => (items as any[]).map((i) => ({ value: String(i.M_Id), label: String(i.M_Name) })),
-    [items],
+    () =>
+      (items as any[])
+        .filter((i) => i.M_IsActive !== false || lines.some((l) => l.itemId === String(i.M_Id)))
+        .map((i) => ({ value: String(i.M_Id), label: String(i.M_Name) })),
+    [items, lines],
   );
 
   const setLine = (key: number, patch: Partial<Line>) =>

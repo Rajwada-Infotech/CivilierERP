@@ -3,6 +3,7 @@ import { Plus, X, Package, Settings2 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import React from "react";
 import { BoqItem, BoqActivity, UomOption, ItemOption, ActivityOption, ActivityGroupOption, fmt, calcAmount, activityBasis, fmtQty, blankItem, blankActivity } from "./config";
+import { SearchableSelect } from "@/components/SearchableSelect";
 
 export type LineMode = "item" | "activity";
 
@@ -71,8 +72,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
     44,
     ...(!isItem ? [190] : []),
     220,
-    ...(isItem ? [190] : []),
-    100,
+    ...(isItem ? [190] : []), // For Activity
     160,
     ...(isItem ? [96, 92] : []),
     isItem ? 140 : 110,
@@ -80,7 +80,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
     120,
     104, // Tax %
     124,
-    ...(!isItem ? [148] : []),
+    ...(!isItem ? [170] : []), // Per Activity Price
     120,
     ...(!readOnly ? [48] : []),
   ];
@@ -120,7 +120,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
   // Every mode shows 12 columns (+ delete when editable): items get "For Activity"
   // and "Per Unit Qty"; activities get "Area" and "Per Activity Price".
   // Activities also get a leading "Activity Group" column.
-  const colCount = (isItem ? 13 : 12) + (readOnly ? 0 : 1);
+  const colCount = (isItem ? 12 : 11) + (readOnly ? 0 : 1);
 
   return (
     <div
@@ -259,10 +259,9 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                   ...(!isItem ? [["Activity Group", "left"]] : []),
                   [isItem ? "Item" : "Activity", "left"],
                   ...(isItem ? [["For Activity", "left"]] : []),
-                  ["Code", "left"],
                   ["Spec / Notes", "left"],
                   ...(isItem ? [["Item Qty", "right"], ["Wastage %", "right"]] : []),
-                  [isItem ? "Per Unit Qty" : "Total Area", "right"],
+                  [isItem ? "Per Unit Qty" : "Total Qty", "right"],
                   ["UOM", "left"],
                   [isItem ? "Rate (₹)" : "Total Rate (₹)", "right"],
                   ["Tax %", "right"],
@@ -316,9 +315,6 @@ export const LineEditor: React.FC<LineEditorProps> = ({
             ) : (
               (rows as any[]).map((row, idx) => {
                 const amt = parseFloat(row.amount) || 0;
-                const codeVal = isItem
-                  ? row.itemCode || ""
-                  : row.activityCode || "";
 
                 const isEven = idx % 2 === 1;
 
@@ -416,9 +412,16 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                           {(isItem ? row.itemName : row.activityName) || "—"}
                         </span>
                       ) : isItem ? (
-                        <Select
+                        <SearchableSelect
+                          sheet
                           value={row.itemId ? String(row.itemId) : ""}
-                          onValueChange={(val) => {
+                          placeholder="— Select item —"
+                          searchPlaceholder="Search items…"
+                          className="h-8 text-xs"
+                          options={itemOptions
+                            .filter((o) => o.isActive !== false || o.id === String(row.itemId ?? ""))
+                            .map((o) => ({ value: o.id, label: o.name }))}
+                          onChange={(val) => {
                             const sel = itemOptions.find((o) => o.id === val);
                             if (!sel) return;
                             const matchedUom = uoms.find(
@@ -440,22 +443,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                               ),
                             );
                           }}
-                        >
-                          <SelectTrigger className="h-8 text-xs border-foreground/30 w-full">
-                            <SelectValue placeholder="— Select item —" />
-                          </SelectTrigger>
-                          <SelectContent className="z-[300] max-h-60">
-                            {itemOptions.map((o) => (
-                              <SelectItem
-                                key={o.id}
-                                value={o.id}
-                                className="text-xs"
-                              >
-                                {o.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        />
                       ) : (
                         <Select
                           disabled={!rowGroupId(row)}
@@ -560,32 +548,6 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                       </td>
                     )}
 
-                    {/* Code */}
-                    <td
-                      style={{
-                        borderRight: "1px solid hsl(var(--foreground) / 0.2)",
-                        padding: "8px 10px",
-                      }}
-                    >
-                      <span
-                        style={{
-                          fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
-                          fontVariantNumeric: "tabular-nums",
-                          fontSize: 10,
-                          color: "hsl(var(--muted-foreground))",
-                          background: "hsl(var(--card))",
-                          border: "1px solid hsl(var(--foreground) / 0.3)",
-                          padding: "2px 5px",
-                          display: "inline-block",
-                          maxWidth: "100%",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {codeVal || <em>Auto</em>}
-                      </span>
-                    </td>
 
                     {/* Spec/Notes */}
                     <td
@@ -744,7 +706,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                                 title={
                                   !act
                                     ? "Pick the activity this item is for"
-                                    : "Enter the activity's Total Area and this item's quantity"
+                                    : "Enter the activity's Total Qty and this item's quantity"
                                 }
                                 style={{ color: "hsl(var(--muted-foreground))" }}
                               >
@@ -754,7 +716,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                           }
                           return (
                             <span
-                              title={`${fmtQty(q)} ÷ ${fmtQty(basis.value)} (activity ${basis.kind === "area" ? "area" : "quantity"})`}
+                              title={`${fmtQty(q)} ÷ ${fmtQty(basis.value)} (activity qty)`}
                               style={{
                                 fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
                                 fontVariantNumeric: "tabular-nums",
@@ -765,7 +727,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                             >
                               {fmtQty(q / basis.value)}
                               <span style={{ fontSize: 9.5, fontWeight: 500, color: "hsl(var(--muted-foreground))" }}>
-                                {` ${row.uomName || ""} / ${basis.kind === "area" ? "area" : "unit"}`}
+                                {` ${row.uomName || ""} / activity unit`}
                               </span>
                             </span>
                           );
@@ -969,7 +931,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                           }
                           return (
                             <span
-                              title={`${fmt(amt)} ÷ ${fmtQty(basis.value)} (${basis.kind === "area" ? "total area" : "total qty"})`}
+                              title={`${fmt(amt)} ÷ ${fmtQty(basis.value)} (total qty)`}
                               style={{
                                 fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
                                 fontVariantNumeric: "tabular-nums",
@@ -979,7 +941,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                             >
                               {fmt(amt / basis.value)}
                               <span style={{ fontSize: 9.5, fontWeight: 500, color: "hsl(var(--muted-foreground))" }}>
-                                {basis.kind === "area" ? " / area" : " / unit"}
+                                {` / ${row.uomName ? row.uomName.toLowerCase() : "unit"}`}
                               </span>
                             </span>
                           );

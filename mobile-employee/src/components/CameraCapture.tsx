@@ -3,6 +3,7 @@
 // Returns a ~640 px JPEG data URL.
 import { useRef, useState } from "react";
 import { ActivityIndicator, Modal, Pressable, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import { X } from "lucide-react-native";
@@ -13,6 +14,7 @@ import { fonts } from "@/theme/fonts";
 export function CameraCapture({ open, title, hint, onClose, onPhoto }: {
   open: boolean; title: string; hint?: string; onClose: () => void; onPhoto: (dataUrl: string) => void;
 }) {
+  const insets = useSafeAreaInsets();
   const cam = useRef<CameraView>(null);
   const [perm, requestPerm] = useCameraPermissions();
   const [ready, setReady] = useState(false);
@@ -34,9 +36,9 @@ export function CameraCapture({ open, title, hint, onClose, onPhoto }: {
   };
 
   return (
-    <Modal visible={open} animationType="slide" onRequestClose={onClose} onShow={() => setReady(false)}>
+    <Modal visible={open} animationType="slide" statusBarTranslucent navigationBarTranslucent onRequestClose={onClose} onShow={() => setReady(false)}>
       <View style={{ flex: 1, backgroundColor: "#000" }}>
-        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 16, paddingTop: 44 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 16, paddingTop: Math.max(insets.top, 28) + 16 }}>
           <Text style={{ color: "#fff", fontFamily: fonts.heading.semibold, fontSize: 16 }}>{title}</Text>
           <Pressable onPress={onClose} hitSlop={12}><X size={22} color="#fff" /></Pressable>
         </View>
@@ -52,7 +54,7 @@ export function CameraCapture({ open, title, hint, onClose, onPhoto }: {
               {/* face guide */}
               <View pointerEvents="none" style={{ position: "absolute", left: "18%", right: "18%", top: "16%", bottom: "24%", borderWidth: 2, borderColor: "#ffffffb0", borderRadius: 999 }} />
             </View>
-            <View style={{ padding: 16, gap: 10, paddingBottom: 32 }}>
+            <View style={{ padding: 16, gap: 10, paddingBottom: insets.bottom + 32 }}>
               {hint && <Body size={12} color="#ddd">{hint}</Body>}
               {err && <Body size={12} color="#ff8a8a">{err}</Body>}
               <Pressable onPress={snap} disabled={!ready || busy} style={{ alignSelf: "center", width: 74, height: 74, borderRadius: 37, borderWidth: 4, borderColor: "#fff", alignItems: "center", justifyContent: "center", opacity: ready ? 1 : 0.4 }}>
