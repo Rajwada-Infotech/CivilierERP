@@ -40,11 +40,14 @@ const LINE_CSS = `
 .boq-lines-add { margin-top: 10px; display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 16px; border: 1px solid hsl(var(--foreground)); background: hsl(var(--foreground)); color: hsl(var(--card)); font-size: 10px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer; }
 .boq-lines-add:hover { opacity: .9; }
 /* The # and the Item / Activity name stay put while the rest of the row scrolls sideways. */
-.boq-lines-scroll .stk { position: sticky; z-index: 2; background-color: hsl(var(--background)); box-shadow: inset -1px 0 0 hsl(var(--foreground) / 0.2); }
-.boq-lines-scroll th.stk { background-color: hsl(var(--card)); z-index: 3; }
+.boq-lines-scroll .stk { position: sticky; z-index: 2; box-shadow: inset -1px 0 0 hsl(var(--foreground) / 0.2); }
+/* Opaque, and !important: a theme's see-through table rules must not let the scrolled columns show through. */
+.boq-lines-scroll table td.stk { background-color: hsl(var(--background)) !important; }
+.boq-lines-scroll table th.stk { background-color: hsl(var(--card)) !important; z-index: 3; }
 .boq-lines-scroll tr.alt td.stk { background-image: linear-gradient(hsl(var(--foreground) / 0.03), hsl(var(--foreground) / 0.03)); }
 .boq-lines-scroll .stk-0 { left: 0; }
 .boq-lines-scroll .stk-1 { left: 44px; }
+.boq-lines-scroll .stk-2 { left: 234px; }
 .boq-lines-scroll { scrollbar-width: thin; scrollbar-color: hsl(var(--foreground) / 0.35) transparent; }
 .boq-lines-scroll::-webkit-scrollbar { height: 6px; }
 .boq-lines-scroll::-webkit-scrollbar-thumb { background: hsl(var(--foreground) / 0.35); }
@@ -296,7 +299,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                 return (
                 <th
                   key={h}
-                  className={h === "#" ? "stk stk-0" : h === (isItem ? "Item" : "Activity") ? "stk stk-1" : undefined}
+                  className={h === "#" ? "stk stk-0" : h === "Activity Group" ? "stk stk-1" : h === (isItem ? "Item" : "Activity") ? (isItem ? "stk stk-1" : "stk stk-2") : undefined}
                   style={{
                     padding: "0 10px",
                     height: 38,
@@ -377,6 +380,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                     {/* Activity Group (activities only) — chosen before the activity */}
                     {!isItem && (
                       <td
+                        className="stk stk-1"
                         style={{
                           borderRight: "1px solid hsl(var(--foreground) / 0.2)",
                           padding: "8px 10px",
@@ -428,7 +432,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
 
                     {/* Name select */}
                     <td
-                      className="stk stk-1"
+                      className={isItem ? "stk stk-1" : "stk stk-2"}
                       style={{
                         borderRight: "1px solid hsl(var(--foreground) / 0.2)",
                         padding: "8px 10px",
