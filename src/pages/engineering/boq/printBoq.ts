@@ -4,7 +4,7 @@
 import { escapeHtml } from "@/utils/escapeHtml";
 import { printStatusLabel } from "@/utils/printStatus";
 import { openPrintWindow } from "@/lib/printList";
-import { fmt, fmtDate, type BoqRecord } from "./config";
+import { fmt, fmtDate, fmtQty, type BoqRecord } from "./config";
 
 const e = (v: unknown) => escapeHtml(v == null || v === "" ? "—" : String(v));
 const num = (v: unknown) => Number(v) || 0;
@@ -18,7 +18,11 @@ function tableRows(rows: Line[], kind: "item" | "activity") {
     const name = kind === "item" ? row.itemName ?? row.ItemName : row.activityName ?? row.ActivityName;
     const code = kind === "item" ? row.itemCode ?? row.ItemCode : row.activityCode ?? row.ActivityCode;
     const desc = row.description ?? row.Description ?? "";
-    const qty = row.quantity ?? row.Quantity ?? "";
+    // An item's quantity is its Qty. An activity's Qty is always 1 (its price is the whole activity); its real size -- the
+    // total quantity -- is the Total Area, so that is what the QTY column shows (older rows with no area keep their Qty).
+    const rawQty = row.quantity ?? row.Quantity ?? "";
+    const area = row.Area ?? row.area;
+    const qty = kind === "activity" && area != null && area !== "" ? fmtQty(num(area)) : rawQty;
     const uom = row.uomName ?? row.UomName ?? "";
     const rate = num(row.rate ?? row.Rate);
     const amount = num(row.amount ?? row.LineAmount ?? row.Amount);
