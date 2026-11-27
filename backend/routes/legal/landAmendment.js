@@ -25,7 +25,10 @@ const PAGE = "legal-land-master";
 const STAGE = "Amendment Approver";
 
 const TYPES = ["Clerical correction", "Mutation / LR record update", "Resurvey / area correction", "Conversion of land type", "Court order", "Boundary correction",
-  "Ownership correction", "Dag correction", "Khatian correction", "Land area correction", "Document replacement", "Other"];
+  "Ownership correction", "Dag correction", "Khatian correction", "Land area correction", "Document replacement",
+  // Legal V3 (spec 15.2)
+  "General data correction", "Legal status update", "Deed reference correction", "Inheritance update", "Post-registration update", "Ownership share correction",
+  "Record mapping correction", "Other"];
 // Plain fields of the land that an amendment may change: [column, label, kind, max/options]
 const FIELDS = [
   ["LandName", "Land title / name", "text", 200], ["RsKhatianNo", "RS Khatian number", "text", 50], ["RsDagNo", "RS Dag / Plot number", "text", 50],

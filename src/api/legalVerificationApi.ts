@@ -37,7 +37,7 @@ export interface Activity {
   SubmittedBy: number | null; SubmittedByName: string | null; SubmittedAt: string | null;
   NaReason: string | null; NaRequestedBy: number | null; NaRequestedByName: string | null; NaRequestedAt: string | null; NaApprovedByName: string | null; NaApprovedAt: string | null;
   GovSubmissionDate: string | null; AckDate: string | null; QueryDate: string | null; QueryResponseDate: string | null; HearingDate: string | null;
-  ReportReceiptDate: string | null; OrderDate: string | null; PeriodFromYear: number | null; PeriodToYear: number | null; PeriodYears: number | null; Mine?: number;
+  ReportReceiptDate: string | null; OrderDate: string | null; GovtExpectedDate?: string | null; NextActionDate?: string | null; Category?: string | null; PeriodFromYear: number | null; PeriodToYear: number | null; PeriodYears: number | null; Mine?: number;
   dependsOn?: { DependsOnId: number; ActivityNo: string; ActivityName: string; Status: string; VerifyStatus: string; IsMandatory: boolean }[];
   blocked?: boolean; overdue?: boolean; documents?: ActivityDoc[];
   VerificationNo?: string; EnquiryNo?: string;
@@ -51,7 +51,7 @@ export interface HistoryRow {
   OldAssignee: string | null; NewAssignee: string | null; Remarks: string | null; FileId: number | null; FileName: string | null; ChangedBy: string | null; ChangedAt: string;
 }
 
-export const getVerificationMeta = async () => handle<{ statuses: string[]; workStatuses: string[]; verifyStatuses: string[]; findings: string[]; priorities: string[] }>(await fetchWithAuth(`${BASE}/meta`));
+export const getVerificationMeta = async () => handle<{ statuses: string[]; workStatuses: string[]; verifyStatuses: string[]; findings: string[]; priorities: string[]; categories?: string[] }>(await fetchWithAuth(`${BASE}/meta`));
 export const getVerifications = async (qs = "") => handle<{ items: VerificationSummary[]; total?: number; page?: number; pageSize?: number }>(await fetchWithAuth(`${BASE}/list${qs ? `?${qs}` : ""}`));
 export const getStartableEnquiries = async () =>
   handle<{ EnquiryId: number; EnquiryNo: string; LandLocation: string | null; EnquiryStatus: string; ProjectName: string | null; MouzaName: string | null }[]>(await fetchWithAuth(`${BASE}/startable`));
@@ -132,7 +132,7 @@ export const saveFlowVersion = async (activityId: number, remarks: string) => ha
 // ── Legal review (phase 4) ───────────────────────────────────────────────────────────────────────
 export type CheckStatus = "ok" | "issue" | "na" | null;
 export interface ReviewRow {
-  ReviewId: number; VersionNo: number; Decision: string; Remarks: string | null; Risks?: string | null; SnapshotHash: string | null; ReviewedBy: string | null; ReviewedAt: string;
+  ReviewId: number; VersionNo: number; Decision: string; Remarks: string | null; Risks?: string | null; SnapshotHash: string | null; ChecklistVersion?: string | null; ReviewedBy: string | null; ReviewedAt: string;
   checklist: Record<string, { status: CheckStatus; note: string | null }>;
 }
 export const getReviews = async (id: number) =>
@@ -155,7 +155,7 @@ export interface VerificationDashboard {
 }
 export interface LegalReport { key: string; title: string; subtitle?: string; note?: string; columns: { key: string; label: string }[]; rows: Record<string, unknown>[];
   /** Dropdown choices for the filters, from the report's own rows. */
-  options?: Partial<Record<"enquiry" | "mouza" | "dag" | "employee" | "status" | "verify", string[]>> }
+  options?: Partial<Record<"enquiry" | "mouza" | "district" | "dag" | "employee" | "source" | "status" | "verify" | "risk", string[]>> }
 export const getVerificationDashboard = async (project: string) => handle<VerificationDashboard | null>(await fetchWithAuth(`${RBASE}/dashboard?project=${encodeURIComponent(project)}`));
 export const getReportList = async () => handle<{ key: string; title: string; needsVerification: boolean }[]>(await fetchWithAuth(`${RBASE}/list`));
 export const getReport = async (key: string, q: { project: string; from?: string; to?: string; verificationId?: number | null; enquiry?: string; mouza?: string; dag?: string; employee?: string; status?: string; verify?: string }) => {

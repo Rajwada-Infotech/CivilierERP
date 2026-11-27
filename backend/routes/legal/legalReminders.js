@@ -83,6 +83,16 @@ router.get("/", async (req, res) => {
     for (const x of r.recordset) add("legal_search", `${x.EnquiryId}-${x.OfficeType}`, `Deed search · ${x.EnquiryNo}`, x.OfficeType ?? "", x.DueDate, `/legal/land/deed-search`);
   });
 
+  // Pre-registration conversion due within a week or overdue — the assigned employee (or approvers when unassigned).
+  if (await has(pool, "LegalPreRegConversion")) await run(async () => {
+    const r = await pool.request().input("U", sql.Int, uid).input("A", sql.Bit, approver ? 1 : 0).query(sc(`
+      SELECT c.ConversionId, c.LandId, c.TargetDate, l.LandCode, p.ParcelCode FROM dbo.LegalPreRegConversion c
+      JOIN dbo.LegalLand l ON l.LandId = c.LandId AND l.IsActive = 1 JOIN dbo.LegalLandParcel p ON p.ParcelId = c.ParcelId
+      WHERE c.IsActive = 1 AND c.ConversionStatus NOT IN (N'Verified', N'Not Applicable – Approved', N'Rejected') AND c.TargetDate IS NOT NULL
+        AND c.TargetDate <= DATEADD(DAY, 7, CAST(GETDATE() AS DATE)) AND (c.AssignedUserId = @U OR (c.AssignedUserId IS NULL AND @A = 1))`));
+    for (const x of r.recordset) add("legal_prereg", x.ConversionId, `Pre-registration conversion · ${x.LandCode}`, x.ParcelCode, x.TargetDate, "/legal/land/pre-registration");
+  });
+
   // Post-registration tasks — assignee (or approvers when unassigned).
   if (await has(pool, "LegalPostRegTask")) await run(async () => {
     const r = await pool.request().input("U", sql.Int, uid).input("A", sql.Bit, approver ? 1 : 0).query(sc(`

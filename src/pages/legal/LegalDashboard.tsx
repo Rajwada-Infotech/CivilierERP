@@ -163,8 +163,8 @@ export default function LegalDashboard() {
           {!!searchOverdue.length && (
             <div className="border-2 border-destructive bg-destructive/10 p-4 sm:p-5">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-sm font-heading font-bold uppercase tracking-[0.12em] text-destructive">Deed search overdue · {searchOverdue.length}</p>
-                <button onClick={() => navigate("/legal/land/deed-search?view=overdue&project=all")} className="inline-flex items-center gap-1 text-xs font-semibold text-destructive hover:underline">Open Deed Registry Search <ChevronRight size={13} /></button>
+                <p className="text-sm font-heading font-bold uppercase tracking-[0.12em] text-destructive">Records search overdue · {searchOverdue.length}</p>
+                <button onClick={() => navigate("/legal/land/deed-search?view=overdue&project=all")} className="inline-flex items-center gap-1 text-xs font-semibold text-destructive hover:underline">Open Land Records Search <ChevronRight size={13} /></button>
               </div>
               <ul className="mt-2 space-y-1 text-sm">
                 {searchOverdue.map((s) => (

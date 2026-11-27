@@ -37,6 +37,9 @@ const FILTER_KEYS = {
   employee: ["AssignedName", "Employee", "searchedBy", "LeadName", "surveyor"],
   status: ["Status", "status", "result", "match", "continuity", "verification", "ApplicationStatus"],
   verify: ["VerifyStatus"],
+  district: ["DistrictName"],
+  risk: ["RiskLevel"],
+  source: ["OfficeType", "Kind", "Source"],
 };
 const dagKeys = (r) => Object.keys(r).filter((k) => /dag/i.test(k));
 /** The filters (picked from dropdowns), applied to the finished rows: exact match, case ignored. */
@@ -301,7 +304,7 @@ router.get("/:key", requirePageRight(PAGE, "view"), async (req, res) => {
   try {
     const pool = getPool();
     if (!(await ready(pool))) return res.json({ key: req.params.key, title: rep.title, columns: [], rows: [] });
-    const out = await rep.run(req, pool);
+    const out = await rep.run(req, pool, { scoped, inRange });
     const options = filterOptions(out.rows);
     const rows = filters(req, out.rows).map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, v instanceof Date ? d10(v) : v])));
     res.json({ key: req.params.key, title: rep.title, ...out, rows, options });
@@ -310,5 +313,8 @@ router.get("/:key", requirePageRight(PAGE, "view"), async (req, res) => {
     res.status(500).json({ error: "Could not build the report" });
   }
 });
+
+// Legal V3 reports (spec 17.2) — same screen, filters and export.
+Object.assign(REPORTS, require("./v3Reports"));
 
 module.exports = router;

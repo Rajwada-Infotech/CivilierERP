@@ -1,3 +1,4 @@
+import React from "react";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
@@ -36,8 +37,8 @@ export function DeedSearchReport() {
   return (
     <div className="border border-border bg-card p-4 sm:p-5">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm font-heading font-bold uppercase tracking-[0.12em] text-muted-foreground">Deed Registry Search</p>
-        <button onClick={() => open(here)} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">Open Deed Registry Search <ChevronRight size={13} /></button>
+        <p className="text-sm font-heading font-bold uppercase tracking-[0.12em] text-muted-foreground">Land Records Search</p>
+        <button onClick={() => open(here)} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">Open Land Records Search <ChevronRight size={13} /></button>
       </div>
       {/* Project switch */}
       <div className="mb-3 flex flex-wrap gap-1.5">
@@ -47,7 +48,7 @@ export function DeedSearchReport() {
       </div>
       <div className="grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-2">
         {tiles.map(([label, n, edge, view]) => (
-          <button key={label} onClick={() => open(here, view)} title={`Open ${label.toLowerCase()} in Deed Registry Search`}
+          <button key={label} onClick={() => open(here, view)} title={`Open ${label.toLowerCase()} in Land Records Search`}
             className={`border border-l-4 ${edge} ${label === "Overdue" && n ? "bg-destructive/10" : "bg-muted/20"} px-3 py-2 text-left transition-transform hover:-translate-y-0.5`}>
             <span className={`block text-xl font-bold tabular-nums leading-none ${label === "Overdue" && n ? "text-destructive" : ""}`}>{n}</span>
             <span className="mt-1 block text-[0.6875rem] leading-tight text-muted-foreground">{label}</span>
@@ -101,6 +102,27 @@ export function DeedSearchReport() {
           </table>
         </div>
       </div>
+      {data.investigation && (() => {
+        const x = data.investigation;
+        const groups: [string, [string, number | null, string?][]][] = [
+          ["Records found", [["CS", x.CsFound], ["RS", x.RsFound], ["LR", x.LrFound], ["Registry deeds", x.DeedsFound], ["Other / alternative", x.OtherFound]]],
+          ["Discrepancies", [["Open", x.OpenDiscrepancies, x.OpenDiscrepancies ? "text-amber-700" : ""], ["High / critical", x.SeriousDiscrepancies, x.SeriousDiscrepancies ? "text-destructive" : ""],
+            ["Owner differences", x.OwnerDifferences], ["Area mismatches", x.AreaMismatches], ["Mapping to review", x.MappingPending]]],
+          ["Legal review (latest per enquiry)", [["Pending review", x.ReviewsPending, x.ReviewsPending ? "text-amber-700" : ""], ["Proceed", x.Proceed, "text-emerald-700"], ["On hold", x.OnHold], ["Not recommended", x.NotRecommended, x.NotRecommended ? "text-destructive" : ""]]],
+        ];
+        return (
+          <div className="grid gap-3 border-t border-border p-4 md:grid-cols-3">
+            {groups.map(([title, cells]) => (
+              <div key={title}>
+                <p className="mb-1 text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground">{title}</p>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs">
+                  {cells.map(([l, n, tone]) => <React.Fragment key={l}><span>{l}</span><b className={`text-right tabular-nums ${tone ?? ""}`}>{n ?? 0}</b></React.Fragment>)}
+                </div>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
     </div>
   );
 }

@@ -48,6 +48,7 @@ export const LEGAL_MASTERS: LegalMasterEntry[] = [
   S("area-unit", "Area Unit", "Land records", Ruler, "Decimal, Cottah, Bigha, Acre… to sq ft"),
   S("copy-type", "Document Copy Type", "Land records", Copy, "Certified, online, office copy, photocopy"),
   S("enquiry-source", "Enquiry Source", "Land records", TrendUp, "Where land enquiries come from"),
+  S("alt-land-subcategory", "Alternative History Subcategory", "Land records", Copy, "Patta, lease, tenancy and claim kinds (Land Records Search)"),
   S("portal-link", "Government Site Links", "Land records", Link21, "Banglarbhumi, WB Registration and other official sites"),
   // ── Setup: Ownership ──
   S("ownership-type", "Ownership Type", "Ownership", Profile, "Individual, joint, inherited, company…"),
@@ -78,6 +79,7 @@ export const LEGAL_MASTERS: LegalMasterEntry[] = [
   S("verification-activity", "Verification Activities", "Workflow", ClipboardTick, "The legal verification checklist — admin only", "legal-verification-activity-master"),
   S("activity-dependency", "Activity Dependencies", "Workflow", Link21, "Which activity waits for which — admin only", "legal-activity-dependency-master"),
   S("activity-reminder", "Activity Reminder Days", "Workflow", Status, "Days before due when the assignee is reminded — admin only", "legal-activity-reminder-master"),
+  S("final-review-check", "Final Review Checklist", "Workflow", Status, "The Final Legal Review points (versioned on every review)", "legal-final-review-check-master"),
   // ── Setup: Parties ──
   // We are the company: we buy land from Sellers and sell land to Buyers; Owners are the people in a land's ownership chain.
   // Each list also fills itself when a new name is typed in a purchase, sale or ownership entry.

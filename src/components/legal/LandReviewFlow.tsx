@@ -1,4 +1,6 @@
 import React, { useRef, useState } from "react";
+import { OwnershipTree } from "@/components/legal/OwnershipTree";
+import { SectionStructure } from "@/components/legal/SectionStructure";
 import { LandVerificationCard } from "@/components/legal/LandVerificationCard";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -7,7 +9,7 @@ import { LegalFileLink } from "@/components/legal/LegalDocumentPreview";
 import { askLegal } from "@/components/legal/LegalAsk";
 import { InlineRecordEditor, SECTION_MASTERS } from "@/components/legal/InlineRecordEditor";
 import { clearCourtCase, getDiligence } from "@/api/legalDiligenceApi";
-import { checkReviewStep, decideReview, LandGateError, getLandReview, getSectionRights, returnReview, submitReview, type EntryField, type EntryRecord, type LandReview, type ReviewStep } from "@/api/legalFlowApi";
+import { checkReviewStep, decideReview, getApprovalContext, LandGateError, getLandReview, getSectionRights, returnReview, submitReview, type EntryField, type EntryRecord, type LandReview, type ReviewStep } from "@/api/legalFlowApi";
 
 const val = (x: unknown) => {
   if (x === null || x === undefined || x === "") return "—";
@@ -151,9 +153,15 @@ const NEW_LABEL: Record<string, string> = {
 };
 
 /** The land's record, every section row by row, read-only — every field shown, empty ones marked (land page). */
-export function LandRecordView({ landId, editor }: { landId: number; editor?: (key: string) => React.ReactNode }) {
+export function LandRecordView({ landId, editor, extraTabs = [] }: { landId: number; editor?: (key: string) => React.ReactNode;
+  /** More tabs after the land's sections (Land intelligence, Versions, Activity history…). */
+  extraTabs?: { key: string; label: string; render: () => React.ReactNode }[] }) {
   const qc = useQueryClient();
+  // One section at a time (tabs); remembered per land for the visit.
+  const [active, setActive] = useState<string | null>(() => { try { return sessionStorage.getItem(`land-tab-${landId}`); } catch { return null; } });
+  const pick = (k: string) => { setActive(k); try { sessionStorage.setItem(`land-tab-${landId}`, k); } catch { /* storage off */ } };
   const [editing, setEditing] = useState<string | null>(null);
+  const [views, setViews] = useState<Record<string, "records" | "tree">>({});
   // Inline editing: "<master>#<id>" for an entry, "new:<section>:<master>" for a new one.
   const [inline, setInline] = useState<string | null>(null);
   // Per-section rights: a section without create / edit right shows no + New / Edit.
@@ -163,9 +171,38 @@ export function LandRecordView({ landId, editor }: { landId: number; editor?: (k
   const { data, isLoading, error } = useQuery({ queryKey: ["legal-review", landId], queryFn: () => getLandReview(landId) });
   if (isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>;
   if (error || !data) return <p className="text-sm text-destructive">{(error as Error)?.message ?? "Could not load"}</p>;
+  const cur = active && (data.steps.some((x) => x.key === active) || extraTabs.some((x) => x.key === active)) ? active : data.steps[0]?.key;
+  const extra = extraTabs.find((x) => x.key === cur);
   return (
     <div className="space-y-4">
+      {/* Section tabs: number, name, entries and what is wrong / missing */}
+      <nav className="sticky top-0 z-10 flex overflow-x-auto border border-border bg-card" role="tablist" aria-label="Land sections">
+        {data.steps.map((s, i) => {
+          const wrong = Object.values(s.decisions ?? {}).filter((d) => d === "bad").length;
+          const missing = s.missingRequired.length + (s.records.length ? 0 : s.needed ? 1 : 0);
+          const on = cur === s.key;
+          return (
+            <button key={s.key} role="tab" aria-selected={on} onClick={() => { pick(s.key); setInline(null); setEditing(null); }}
+              className={`-mb-px shrink-0 border-b-2 px-3 py-2 text-left ${on ? "border-foreground bg-muted/40" : "border-transparent hover:bg-muted/30"}`}>
+              <span className="flex items-center gap-1.5 text-sm">
+                <span className={`flex h-5 w-5 items-center justify-center text-[0.625rem] font-bold ${on ? "bg-foreground text-background" : "bg-muted"}`}>{i + 1}</span>
+                <span className={on ? "font-semibold" : ""}>{s.label}</span>
+              </span>
+              <span className="mt-0.5 block pl-6 text-[0.6875rem] text-muted-foreground">
+                {s.records.length} entr{s.records.length === 1 ? "y" : "ies"}
+                {wrong ? <b className="text-destructive"> · {wrong} ✗</b> : missing ? <b className="text-amber-700"> · {missing} missing</b> : null}
+              </span>
+            </button>
+          );
+        })}
+        {extraTabs.map((x) => (
+          <button key={x.key} role="tab" aria-selected={cur === x.key} onClick={() => pick(x.key)}
+            className={`-mb-px shrink-0 border-b-2 border-l border-l-border px-3 py-2 text-sm ${cur === x.key ? "border-b-foreground bg-muted/40 font-semibold" : "border-b-transparent hover:bg-muted/30"}`}>{x.label}</button>
+        ))}
+      </nav>
+      {extra && <div>{extra.render()}</div>}
       {data.steps.map((s, i) => {
+        if (s.key !== cur) return null;
         const req = s.missingRequired.length, docs = (s.checklist ?? []).filter((c) => c.state === "Missing").length;
         const wrong = Object.values(s.decisions ?? {}).filter((d) => d === "bad").length;
         const empty = !s.records.length;
@@ -177,6 +214,16 @@ export function LandRecordView({ landId, editor }: { landId: number; editor?: (k
               <span className="text-xs text-muted-foreground">{s.records.length} entr{s.records.length === 1 ? "y" : "ies"} · {s.filled} / {s.total} fields filled{s.files ? ` · ${s.files} file${s.files === 1 ? "" : "s"}` : ""}</span>
               {wrong > 0 && <span className="bg-destructive px-2 py-0.5 text-[0.625rem] font-semibold uppercase tracking-[0.06em] text-white">✗ {wrong} field{wrong === 1 ? "" : "s"} to correct</span>}
               {(req > 0 || docs > 0 || (empty && s.needed)) && <span className="text-xs font-semibold text-destructive">{[empty && s.needed ? "nothing entered" : "", req ? `${req} required empty` : "", docs ? `${docs} document${docs === 1 ? "" : "s"} missing` : ""].filter(Boolean).join(" · ")}</span>}
+              {s.records.length > 0 && (
+                <span className="flex border border-foreground" role="tablist">
+                  {(["records", "tree"] as const).map((v) => (
+                    <button key={v} role="tab" aria-selected={(views[s.key] ?? "records") === v} onClick={() => setViews((x) => ({ ...x, [s.key]: v }))}
+                      className={`h-7 px-3 text-[0.6875rem] font-semibold uppercase tracking-[0.06em] ${(views[s.key] ?? "records") === v ? "bg-foreground text-background" : "hover:bg-muted"}`}>
+                      {v === "records" ? "Records" : s.key === "ownership" ? "Tree view" : "Structure"}
+                    </button>
+                  ))}
+                </span>
+              )}
               {editor && SECTION_MASTERS[s.key] && s.key !== "basic" && can(s.key, "create") && (
                 <span className="ml-auto flex flex-wrap justify-end gap-1">
                   {SECTION_MASTERS[s.key].map((m) => (
@@ -197,7 +244,7 @@ export function LandRecordView({ landId, editor }: { landId: number; editor?: (k
             </header>
             <div className="space-y-2 p-3">
               {inline?.startsWith(`new:${s.key}:`) && <InlineRecordEditor master={inline.split(":")[2]} id={null} landId={landId} onDone={done} />}
-              {editing === s.key && editor ? editor(s.key) : (
+              {views[s.key] === "tree" && !inline && editing !== s.key ? (s.key === "ownership" ? <OwnershipTree records={s.records} /> : <SectionStructure s={s} />) : editing === s.key && editor ? editor(s.key) : (
                 <StepBody s={s} first renderRecord={editor && SECTION_MASTERS[s.key] && can(s.key, "edit") ? (rec, card) => inline === `${rec.master}#${rec.id}`
                   ? <InlineRecordEditor master={rec.master} id={rec.id} landId={landId} title={rec.title} onDone={done} />
                   : React.cloneElement(card as React.ReactElement, { onEdit: () => setInline(`${rec.master}#${rec.id}`) }) : undefined} />
@@ -243,28 +290,59 @@ function CourtClearance({ landId }: { landId: number }) {
 export function ReviewDecision({ landId, versionNo }: { landId: number; versionNo: number }) {
   const qc = useQueryClient();
   const [remark, setRemark] = useState("");
+  // Land Approval is the company's acquisition decision (spec 10): price, conditions, outstanding risks, risk acceptance.
+  const ctx = useQuery({ queryKey: ["legal-approval-context", landId], queryFn: () => getApprovalContext(landId) });
+  const [terms, setTerms] = useState({ negotiated: "", approved: "", conditions: "", acceptance: "" });
+  const num = (x: string) => (x.trim() === "" ? null : Number(x));
+  const payload = () => ({ offeredPrice: ctx.data?.land.ExpectedPrice ?? null, negotiatedPrice: num(terms.negotiated), approvedPrice: num(terms.approved),
+    conditions: terms.conditions.trim() || undefined, riskAcceptance: terms.acceptance.trim() || undefined });
+  const serious = (ctx.data?.risks ?? []).filter((x) => x.level === "High" || x.level === "Critical");
   const decide = useMutation({
     mutationFn: async (a: "Approve" | "Return") => {
-      try { return await decideReview(landId, a, remark.trim() || undefined); }
+      try { return await decideReview(landId, a, remark.trim() || undefined, undefined, payload()); }
       catch (e) {
         if (!(e instanceof LandGateError)) throw e;
         // Final Legal Review not approved: only an authorised exception (recorded) lets the land through.
         const reason = await askLegal({ title: "Final Legal Review not approved", message: `${e.message}. Approving now records a land-approval exception (Legal Reviewer, Legal Admin or admin only).`,
           input: { label: "Reason for the exception", required: true }, confirmText: "Approve with exception" });
         if (!reason) throw new Error("Not approved — the Final Legal Review is pending");
-        return decideReview(landId, a, remark.trim() || undefined, reason);
+        return decideReview(landId, a, remark.trim() || undefined, reason, payload());
       }
     },
-    onSuccess: (r) => { toast.success(r.message); setRemark(""); ["legal-review", "legal-flow", "legal-review-queue"].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); },
+    onSuccess: (r) => { toast.success(r.message); setRemark(""); ["legal-review", "legal-flow", "legal-review-queue", "legal-approval-context"].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); },
     onError: (e: Error) => { toast.error(e.message); qc.invalidateQueries({ queryKey: ["legal-review-queue"] }); },
   });
+  const fld = "h-8 w-full border border-foreground/30 bg-background px-2 text-sm";
+  const RISK: Record<string, string> = { Critical: "bg-destructive text-white", High: "bg-destructive/15 text-destructive", Medium: "bg-amber-500/15 text-amber-800", Low: "bg-muted" };
   return (
+    <div className="space-y-2">
+      {ctx.data && (
+        <div className="space-y-2 border border-border bg-muted/20 p-2 text-xs">
+          <p className={ctx.data.finalReview.ok ? "text-emerald-700" : "font-semibold text-destructive"}>
+            Final Legal Review: {ctx.data.finalReview.ok ? "approved — the legal investigation is acceptable" : ctx.data.finalReview.message}
+          </p>
+          {ctx.data.risks.length > 0 ? (
+            <div><p className="mb-0.5 font-semibold uppercase tracking-[0.06em]">Outstanding risks · {ctx.data.risks.length}</p>
+              <ul className="space-y-0.5">{ctx.data.risks.map((x) => <li key={x.key + x.text}><span className={`mr-1.5 px-1 text-[0.625rem] font-semibold uppercase ${RISK[x.level]}`}>{x.level}</span>{x.text}</li>)}</ul></div>
+          ) : <p className="text-muted-foreground">No outstanding risks flagged.</p>}
+          <div className="grid gap-2 sm:grid-cols-3">
+            <label><span className="text-muted-foreground">Offered price (enquiry)</span><span className="block h-8 leading-8">{ctx.data.land.ExpectedPrice != null ? `₹ ${Number(ctx.data.land.ExpectedPrice).toLocaleString("en-IN")}` : "—"}</span></label>
+            <label><span className="text-muted-foreground">Negotiated price (₹)</span><input className={fld} inputMode="decimal" value={terms.negotiated} onChange={(e) => setTerms({ ...terms, negotiated: e.target.value })} /></label>
+            <label><span className="text-muted-foreground">Approved price (₹)</span><input className={fld} inputMode="decimal" value={terms.approved} onChange={(e) => setTerms({ ...terms, approved: e.target.value })} /></label>
+            <label className="sm:col-span-3"><span className="text-muted-foreground">Approval conditions</span><input className={fld} value={terms.conditions} maxLength={2000} onChange={(e) => setTerms({ ...terms, conditions: e.target.value })} /></label>
+            {serious.length > 0 && <label className="sm:col-span-3"><span className="font-semibold text-destructive">Risk acceptance (required — {serious.length} high / critical risk{serious.length > 1 ? "s" : ""} open)</span>
+              <input className={fld} value={terms.acceptance} maxLength={2000} onChange={(e) => setTerms({ ...terms, acceptance: e.target.value })} placeholder="Which risks the company accepts and why" /></label>}
+          </div>
+          {ctx.data.history.length > 0 && <p className="text-muted-foreground">Earlier: {ctx.data.history.slice(0, 3).map((h) => `${h.Decision} by ${h.DecidedByName ?? "—"} ${new Date(h.DecidedAt).toLocaleDateString("en-IN")}${h.ApprovedPrice != null ? ` at ₹ ${Number(h.ApprovedPrice).toLocaleString("en-IN")}` : ""}`).join(" · ")}</p>}
+        </div>
+      )}
     <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
       <input value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="Remarks (needed to send back)" className="h-8 flex-1 border border-foreground/30 bg-background px-2 text-sm" />
       <div className="flex gap-2">
         <button disabled={decide.isPending || !remark.trim()} onClick={() => decide.mutate("Return")} className="h-8 border border-destructive px-3 text-xs font-semibold uppercase tracking-[0.06em] text-destructive hover:bg-destructive hover:text-white disabled:opacity-40">Send back</button>
-        <button disabled={decide.isPending} onClick={() => decide.mutate("Approve")} className="h-8 border border-emerald-700 bg-emerald-700 px-3 text-xs font-semibold uppercase tracking-[0.06em] text-white hover:opacity-90 disabled:opacity-40">Approve — send to Deed Process</button>
+        <button disabled={decide.isPending || (serious.length > 0 && !terms.acceptance.trim())} onClick={() => decide.mutate("Approve")} className="h-8 border border-emerald-700 bg-emerald-700 px-3 text-xs font-semibold uppercase tracking-[0.06em] text-white hover:opacity-90 disabled:opacity-40">Approve — send to Deed Process</button>
       </div>
+    </div>
     </div>
   );
 }

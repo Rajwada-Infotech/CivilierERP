@@ -1,5 +1,5 @@
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { MessageQuestion } from "iconsax-react";
@@ -31,6 +31,12 @@ export default function LandEnquiryPage() {
   const [filter, setFilter] = useState<string>("all");
   // The enquiry whose RS / LR records are open under the table (opens by itself after a new enquiry is saved).
   const [plotsId, setPlotsId] = useState<number | null>(null);
+  // Opening the panel brings it into view (it sits under the table).
+  useEffect(() => {
+    if (!plotsId) return;
+    const t = setTimeout(() => document.getElementById("enquiry-plots")?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+    return () => clearTimeout(t);
+  }, [plotsId]);
   // Same rows the table loads (shared cache): counts for the summary tiles.
   const { data: allRows = [] } = useQuery({ queryKey: ["legal-master", "land-enquiry", null], queryFn: () => getLegalRows("land-enquiry"), staleTime: 60 * 1000 });
   // Enquiries raised before a project was required belong to no project: they are listed apart ("Without a project")
@@ -46,7 +52,7 @@ export default function LandEnquiryPage() {
   const rows = allRows.filter((r) => inScope(r) && isActive(r));
   const FILTERS: [string, string, (r: LegalRow) => boolean, string][] = [
     ["all", "All open", (r) => !r.LandId, "border-border"],
-    ["search", "Deed search pending", (r) => !r.LandId && Number(r.OfficesPending) > 0, "border-amber-500"],
+    ["search", "Records search pending", (r) => !r.LandId && Number(r.OfficesPending) > 0, "border-amber-500"],
     ["overdue", "Search overdue", (r) => !r.LandId && Number(r.OfficesOverdue) > 0, "border-destructive"],
     ["ready", "Ready to convert", (r) => !r.LandId && Number(r.OfficesPending) === 0 && !["Rejected", "On Hold"].includes(String(r.EnquiryStatus)), "border-emerald-600"],
     ["New", "New", (r) => !r.LandId && r.EnquiryStatus === "New", "border-zinc-300"],
@@ -212,7 +218,7 @@ export default function LandEnquiryPage() {
                   {map}{portal}
                   <button onClick={() => navigate(`/legal/land/deed-search?view=all&q=${encodeURIComponent(no)}&project=${raw.ProjectId ?? "none"}`)} className={`${small} font-semibold ${Number(raw.OfficesOverdue) > 0 ? "border-destructive bg-destructive/10 text-destructive" : "border-amber-500 bg-amber-500/10 text-amber-800"}`}
                     title="Search every registration office first; the other actions open when all are complete">
-                    Deed search {Number(raw.OfficesTotal ?? 0) - openOffices}/{Number(raw.OfficesTotal ?? 0)}{Number(raw.OfficesOverdue) > 0 ? ` · ${raw.OfficesOverdue} overdue` : ""}
+                    Records search {Number(raw.OfficesTotal ?? 0) - openOffices}/{Number(raw.OfficesTotal ?? 0)}{Number(raw.OfficesOverdue) > 0 ? ` · ${raw.OfficesOverdue} overdue` : ""}
                   </button>
                   {holdReject}
                 </span>
@@ -229,7 +235,7 @@ export default function LandEnquiryPage() {
           }}
         />
         ) : null}
-        {projectId && plotsId && (() => {
+        {plotsId && (() => {
           const e = allRows.find((r) => Number(r.EnquiryId) === plotsId);
           const locked = !!e?.LandId;
           const defaults = { MouzaId: String(e?.MouzaId ?? ""), AreaUnitId: String(e?.AreaUnitId ?? "") };
