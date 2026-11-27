@@ -1,4 +1,7 @@
--- Legal module: clear the sample / test data on every server except dev, then load the TEST RESIDENCE demo set
+-- DEV SERVER ONLY (changed 2026-11-27): as first written this ran on every server EXCEPT dev, and on production —
+-- which never got the 720 demo, so the TR-ENQ guard below would not stop it — it would have deleted every Legal record
+-- and entered Legal master. Both batches now return unless they run on the dev server (CTO / Civilier), like 720.
+-- (Originally:) Legal module: clear the sample / test data on every server except dev, then load the TEST RESIDENCE demo set
 -- (same data as 720) so every Legal page, stage and feature can be seen and learned.
 --   Batch 1 removes every Legal record and the entered masters (locations, offices, persons, advocates, RS / LR
 --   registers, Approval Control, land types, files). Reference lists stay: lookups, area units, deed / document
@@ -7,7 +10,7 @@
 --   Batch 2 loads the demo under the TEST RESIDENCE project (created if it does not exist).
 -- Dev (CTO / Civilier) is skipped: it already has the demo from 720. One transaction per batch.
 SET NOCOUNT ON;
-IF @@SERVERNAME = N'CTO' AND DB_NAME() = N'Civilier' RETURN;
+IF @@SERVERNAME <> N'CTO' OR DB_NAME() <> N'Civilier' RETURN; -- dev server only (never live data)
 IF EXISTS (SELECT 1 FROM dbo.LegalLandEnquiry WHERE EnquiryNo LIKE N'TR-ENQ-%') RETURN;
 SET XACT_ABORT OFF;
 BEGIN TRAN;
@@ -56,7 +59,7 @@ GO
 
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
-IF @@SERVERNAME = N'CTO' AND DB_NAME() = N'Civilier' RETURN;
+IF @@SERVERNAME <> N'CTO' OR DB_NAME() <> N'Civilier' RETURN; -- dev server only (never live data)
 -- All demo data belongs to the TEST RESIDENCE project; it is created (under the same company as the first project) if missing.
 IF NOT EXISTS (SELECT 1 FROM dbo.enterprise WHERE name = N'TEST RESIDENCE' AND business_type = 'P')
   INSERT INTO dbo.enterprise (name, business_identity, business_type, short_name, status, currency, city, state, country, fiscal_year_start, entity_type, discontinue, enterprise_id, company_id, project_type_id, date_of_entry)
