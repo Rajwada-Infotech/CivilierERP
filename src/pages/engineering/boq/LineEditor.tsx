@@ -119,8 +119,9 @@ export const LineEditor: React.FC<LineEditorProps> = ({
   const remove = (idx: number) =>
     onChange((rows as any[]).filter((_, i) => i !== idx));
 
+  // A new line goes on top, so it's in view straight away instead of at the bottom of a long list.
   const add = () =>
-    onChange([...(rows as any[]), isEquipment ? blankEquipment() : isItem ? blankItem() : blankActivity()]);
+    onChange([isEquipment ? blankEquipment() : isItem ? blankItem() : blankActivity(), ...(rows as any[])]);
 
   const subtotal = (rows as any[]).reduce(
     (s: number, r: any) => s + (parseFloat(r.amount) || 0),
