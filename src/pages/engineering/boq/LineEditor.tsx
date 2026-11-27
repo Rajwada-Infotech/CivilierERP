@@ -1,15 +1,18 @@
-// The BOQ lines: items or activities, quantities, rates and amounts.
-import { Plus, X, Package, Settings2 } from "lucide-react";
+// The BOQ lines: activities, items or equipment, quantities, rates and amounts.
+import { Plus, X, Package, Settings2, Truck } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import React from "react";
-import { BoqItem, BoqActivity, UomOption, ItemOption, ActivityOption, ActivityGroupOption, fmt, calcAmount, activityBasis, fmtQty, blankItem, blankActivity } from "./config";
+import { BoqItem, BoqActivity, BoqEquipmentLine, EquipmentOption, UomOption, ItemOption, ActivityOption, ActivityGroupOption, fmt, calcAmount, activityBasis, fmtQty, blankItem, blankActivity, blankEquipment } from "./config";
+import { EquipmentLines } from "./EquipmentLines";
 import { SearchableSelect } from "@/components/SearchableSelect";
 
-export type LineMode = "item" | "activity";
+export type LineMode = "item" | "activity" | "equipment";
+export type LineTab = "items" | "activities" | "equipment";
+const TAB_OF_MODE: Record<LineMode, LineTab> = { item: "items", activity: "activities", equipment: "equipment" };
 
 export interface LineEditorProps {
   mode: LineMode;
-  rows: BoqItem[] | BoqActivity[];
+  rows: BoqItem[] | BoqActivity[] | BoqEquipmentLine[];
   uoms: UomOption[];
   itemOptions?: ItemOption[];
   activityOptions?: ActivityOption[];
@@ -18,9 +21,12 @@ export interface LineEditorProps {
   boqActivities?: BoqActivity[];
   itemsTotal?: number;
   activitiesTotal?: number;
+  equipmentTotal?: number;
+  /** Equipment mode: the Equipment Master records the picker offers. */
+  equipmentOptions?: EquipmentOption[];
   onChange: (rows: any[]) => void;
   readOnly?: boolean;
-  onTabChange?: (tab: "items" | "activities") => void;
+  onTabChange?: (tab: LineTab) => void;
   // Activity mode only — fired with the chosen activity's id so the parent
   // can auto-fetch and merge its linked items into the Items tab.
   onActivitySelected?: (activityId: string) => void;
@@ -61,12 +67,16 @@ export const LineEditor: React.FC<LineEditorProps> = ({
   boqActivities = [],
   itemsTotal = 0,
   activitiesTotal = 0,
+  equipmentTotal = 0,
+  equipmentOptions = [],
   onChange,
   readOnly,
   onTabChange,
   onActivitySelected,
 }) => {
   const isItem = mode === "item";
+  const isEquipment = mode === "equipment";
+  const noun = isEquipment ? "equipment" : isItem ? "item" : "activity";
   // Column widths (px), in header order. Tax % is wide enough for a rate like 12.5 plus the input's spinner.
   const colWidths: number[] = [
     44,
@@ -110,13 +120,13 @@ export const LineEditor: React.FC<LineEditorProps> = ({
     onChange((rows as any[]).filter((_, i) => i !== idx));
 
   const add = () =>
-    onChange([...(rows as any[]), isItem ? blankItem() : blankActivity()]);
+    onChange([...(rows as any[]), isEquipment ? blankEquipment() : isItem ? blankItem() : blankActivity()]);
 
   const subtotal = (rows as any[]).reduce(
     (s: number, r: any) => s + (parseFloat(r.amount) || 0),
     0,
   );
-  const grandTotal = itemsTotal + activitiesTotal;
+  const grandTotal = itemsTotal + activitiesTotal + equipmentTotal;
   // Every mode shows 12 columns (+ delete when editable): items get "For Activity"
   // and "Per Unit Qty"; activities get "Area" and "Per Activity Price".
   // Activities also get a leading "Activity Group" column.
@@ -151,8 +161,8 @@ export const LineEditor: React.FC<LineEditorProps> = ({
             border: "1px solid hsl(var(--foreground))",
           }}
         >
-          {(["activities", "items"] as const).map((t) => {
-            const active = (t === "items") === isItem;
+          {(["activities", "items", "equipment"] as const).map((t) => {
+            const active = t === TAB_OF_MODE[mode];
             return (
               <button
                 key={t}
@@ -174,12 +184,8 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                   color: active ? "hsl(var(--card))" : "hsl(var(--muted-foreground))",
                 }}
               >
-                {t === "items" ? (
-                  <Package size={12} />
-                ) : (
-                  <Settings2 size={12} />
-                )}
-                {t === "items" ? "Items" : "Activities"}
+                {t === "items" ? <Package size={12} /> : t === "equipment" ? <Truck size={12} /> : <Settings2 size={12} />}
+                {t === "items" ? "Items" : t === "equipment" ? "Equipment" : "Activities"}
               </button>
             );
           })}
@@ -206,7 +212,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
             }}
           >
             <Plus size={13} />
-            Add {isItem ? "item" : "activity"}
+            Add {noun}
           </button>
         )}
       </div>
@@ -214,20 +220,30 @@ export const LineEditor: React.FC<LineEditorProps> = ({
       {/* ── Table (or, with nothing added yet, a short empty panel) ── */}
       {(rows as any[]).length === 0 ? (
         <div className="boq-lines-empty">
-          <p className="boq-lines-empty-title font-heading">No {isItem ? "items" : "activities"} yet</p>
+          <p className="boq-lines-empty-title font-heading">No {isEquipment ? "equipment" : isItem ? "items" : "activities"} yet</p>
           <p className="boq-lines-empty-text">
             {readOnly
-              ? `This BOQ has no ${isItem ? "material items" : "work activities"}.`
-              : isItem
-                ? "Add the material items priced in this BOQ, each against one of its activities."
-                : "Add the work activities priced in this BOQ — their linked items are added for you."}
+              ? `This BOQ has no ${isEquipment ? "equipment" : isItem ? "material items" : "work activities"}.`
+              : isEquipment
+                ? "Add the machines and plant this BOQ needs — from the Equipment Master — with the hours or days and the rate."
+                : isItem
+                  ? "Add the material items priced in this BOQ, each against one of its activities."
+                  : "Add the work activities priced in this BOQ."}
           </p>
           {!readOnly && (
             <button type="button" onClick={add} className="boq-lines-add font-heading">
-              <Plus size={12} /> Add {isItem ? "item" : "activity"}
+              <Plus size={12} /> Add {noun}
             </button>
           )}
         </div>
+      ) : isEquipment ? (
+        <EquipmentLines
+          rows={rows as BoqEquipmentLine[]}
+          options={equipmentOptions}
+          boqActivities={boqActivities}
+          onChange={onChange}
+          readOnly={readOnly}
+        />
       ) : (
       <div className="boq-lines-scroll" style={{ overflowX: "auto" }}>
         <table
@@ -1071,6 +1087,10 @@ export const LineEditor: React.FC<LineEditorProps> = ({
           <div>
             <span className="boq-lines-lbl">Activities</span>
             <span className="boq-lines-fig font-heading">{fmt(activitiesTotal)}</span>
+          </div>
+          <div>
+            <span className="boq-lines-lbl">Equipment</span>
+            <span className="boq-lines-fig font-heading">{fmt(equipmentTotal)}</span>
           </div>
         </div>
         <div className="boq-lines-grand">

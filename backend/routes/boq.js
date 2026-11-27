@@ -58,8 +58,11 @@ const safeJson = (str) => {
 // Wastage % on a BOQ item line, clamped to 0–100.
 const wastageOf = (it) => Math.min(100, Math.max(0, parseFloat(it?.wastage ?? it?.wastagePct ?? it?.WastagePct) || 0));
 // Compute total from both Items (Quantity * (1 + Wastage %) * Rate) and Activities (Quantity * Rate)
-const computeTotal = (items, activities) => {
+const computeTotal = (items, activities, equipment = []) => {
   let sum = 0;
+  if (Array.isArray(equipment)) {
+    sum += equipment.reduce((s, eq) => s + (parseFloat(eq.quantity) || 0) * (parseFloat(eq.rate) || 0), 0);
+  }
   if (Array.isArray(items)) {
     sum += items.reduce(
       (s, it) =>
@@ -142,6 +145,42 @@ const syncBoqItems = async (transaction, sqlRef, boqID, items, uomMap) => {
           (@BoqID, @ActivityId, @ActivityName, @ItemId, @ItemName, @ItemCode, @Description,
            @Quantity, @WastagePct, @UomId, @UomName, @Rate, @TaxPct, @LineAmount, @SortOrder)
       `);
+  }
+};
+
+// A BOQ's equipment lines (dbo.BoqEquipment, migration 724): replaced wholesale on every save — an empty list clears
+// them, so removing the last line sticks. Amount = Qty × Rate, like an item line.
+const syncBoqEquipment = async (transaction, sqlRef, boqID, equipment) => {
+  if (!Array.isArray(equipment)) return;
+  await transaction.request().input("BoqID", sqlRef.Int, boqID).query("DELETE FROM dbo.BoqEquipment WHERE BoqID = @BoqID");
+  for (let i = 0; i < equipment.length; i++) {
+    const eq = equipment[i];
+    const name = String(eq.equipmentName || "").trim().substring(0, 150);
+    if (!name) continue;
+    const qty = parseFloat(eq.quantity) || 0;
+    const rate = parseFloat(eq.rate) || 0;
+    const equipmentId = parseInt(eq.equipmentId, 10);
+    await transaction
+      .request()
+      .input("BoqID", sqlRef.Int, boqID)
+      .input("EquipmentId", sqlRef.Int, Number.isFinite(equipmentId) ? equipmentId : null)
+      .input("EquipmentName", sqlRef.NVarChar(150), name)
+      .input("EquipmentCode", sqlRef.NVarChar(30), eq.equipmentCode || null)
+      .input("ActivityId", sqlRef.NVarChar(100), eq.activityId || null)
+      .input("ActivityName", sqlRef.NVarChar(255), eq.activityName ? String(eq.activityName).substring(0, 255) : null)
+      .input("Description", sqlRef.NVarChar(sqlRef.MAX), eq.description || null)
+      .input("Quantity", sqlRef.Decimal(18, 4), qty)
+      .input("UomName", sqlRef.NVarChar(50), String(eq.uomName || "").substring(0, 50) || null)
+      .input("Rate", sqlRef.Decimal(18, 4), rate)
+      .input("TaxPct", sqlRef.Decimal(5, 2), parseFloat(eq.tax) || 0)
+      .input("LineAmount", sqlRef.Decimal(18, 2), Math.round(qty * rate * 100) / 100)
+      .input("SortOrder", sqlRef.Int, i).query(`
+        INSERT INTO dbo.BoqEquipment
+          (BoqID, EquipmentId, EquipmentName, EquipmentCode, ActivityId, ActivityName, Description,
+           Quantity, UomName, Rate, TaxPct, LineAmount, SortOrder)
+        VALUES
+          (@BoqID, @EquipmentId, @EquipmentName, @EquipmentCode, @ActivityId, @ActivityName, @Description,
+           @Quantity, @UomName, @Rate, @TaxPct, @LineAmount, @SortOrder)`);
   }
 };
 
@@ -437,8 +476,14 @@ router.get("/:id", async (req, res) => {
         "SELECT * FROM dbo.BoqActivities WHERE BoqID = @BoqID ORDER BY SortOrder",
       );
 
+    const equipmentResult = await pool
+      .request()
+      .input("BoqID", sql.Int, boq.BoqID)
+      .query("SELECT * FROM dbo.BoqEquipment WHERE BoqID = @BoqID ORDER BY SortOrder");
+
     res.json({
       ...boq,
+      BoqEquipment: equipmentResult.recordset,
       BoqItems:
         itemsResult.recordset.length > 0
           ? itemsResult.recordset
@@ -465,6 +510,7 @@ router.post("/", requirePageRight("boq", "create"), async (req, res) => {
     Description,
     BoqItems,
     BoqActivities,
+    BoqEquipment,
     Status,
     Remarks,
     DocTypeId,
@@ -478,9 +524,11 @@ router.post("/", requirePageRight("boq", "create"), async (req, res) => {
   const activitiesArray = Array.isArray(BoqActivities)
     ? BoqActivities
     : (safeJson(parseJson(BoqActivities)) ?? []);
+  // Undefined on a client that predates the Equipment tab — leave that BOQ's equipment as it is.
+  const equipmentArray = BoqEquipment === undefined ? undefined : Array.isArray(BoqEquipment) ? BoqEquipment : (safeJson(parseJson(BoqEquipment)) ?? []);
   const itemsJson = JSON.stringify(itemsArray);
   const activitiesJson = JSON.stringify(activitiesArray);
-  const totalAmount = computeTotal(itemsArray, activitiesArray);
+  const totalAmount = computeTotal(itemsArray, activitiesArray, equipmentArray ?? []);
 
   let transaction;
   try {
@@ -552,6 +600,9 @@ router.post("/", requirePageRight("boq", "create"), async (req, res) => {
 
     await syncBoqItems(transaction, sql, newId, itemsArray, uomMap);
     await syncBoqActivities(transaction, sql, newId, activitiesArray, uomMap);
+    await syncBoqEquipment(transaction, sql, newId, equipmentArray);
+    if (equipmentArray) await transaction.request().input("Id", sql.Int, newId).input("J", sql.NVarChar(sql.MAX), JSON.stringify(equipmentArray))
+      .query("UPDATE dbo.BOQ SET BoqEquipment = @J WHERE BoqID = @Id");
 
     if (DocTypeId) {
       await backPatchRecordId(transaction, sql, finalDocNo, "BOQ", newId);
@@ -601,6 +652,7 @@ router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
     Description,
     BoqItems,
     BoqActivities,
+    BoqEquipment,
     Status,
     Remarks,
     DocTypeId,
@@ -614,9 +666,11 @@ router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
   const activitiesArray = Array.isArray(BoqActivities)
     ? BoqActivities
     : (safeJson(parseJson(BoqActivities)) ?? []);
+  // Undefined on a client that predates the Equipment tab — leave that BOQ's equipment as it is.
+  const equipmentArray = BoqEquipment === undefined ? undefined : Array.isArray(BoqEquipment) ? BoqEquipment : (safeJson(parseJson(BoqEquipment)) ?? []);
   const itemsJson = JSON.stringify(itemsArray);
   const activitiesJson = JSON.stringify(activitiesArray);
-  const totalAmount = computeTotal(itemsArray, activitiesArray);
+  let totalAmount = computeTotal(itemsArray, activitiesArray, equipmentArray ?? []);
 
   let transaction;
   try {
@@ -645,6 +699,12 @@ router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
     // The form always sends the location; an amendment or an older BOQ edited without one keeps what is saved.
     const saved = (await pool.request().input("Id", sql.Int, id).query("SELECT BlockId, FloorNo, RoomId FROM dbo.BOQ WHERE BoqID = @Id")).recordset[0] || {};
     const loc = locSent.blockId || locSent.floorNo ? locSent : locOf(saved);
+    // A client without the Equipment tab sends none: the saved equipment still counts in the total.
+    if (equipmentArray === undefined) {
+      const kept = (await pool.request().input("Id", sql.Int, id)
+        .query("SELECT ISNULL(SUM(Quantity * Rate), 0) AS t FROM dbo.BoqEquipment WHERE BoqID = @Id")).recordset[0].t;
+      totalAmount += Number(kept) || 0;
+    }
     const dupsEdit = await activitiesAlreadyEstimated(pool, {
       projectId: ProjectId ? parseInt(ProjectId, 10) : null, ...loc, excludeBoqId: id, activityIds: activityIdsOf(activitiesArray),
     });
@@ -688,6 +748,9 @@ router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
 
     await syncBoqItems(transaction, sql, id, itemsArray, uomMap);
     await syncBoqActivities(transaction, sql, id, activitiesArray, uomMap);
+    await syncBoqEquipment(transaction, sql, id, equipmentArray);
+    if (equipmentArray) await transaction.request().input("Id", sql.Int, id).input("J", sql.NVarChar(sql.MAX), JSON.stringify(equipmentArray))
+      .query("UPDATE dbo.BOQ SET BoqEquipment = @J WHERE BoqID = @Id");
 
     await transaction.commit();
     await bumpCacheVersion("boq");
@@ -796,6 +859,11 @@ router.delete("/:id", requirePageRight("boq", "delete"), async (req, res) => {
       .request()
       .input("BoqID", sql.Int, boqID)
       .query("DELETE FROM dbo.BoqActivities WHERE BoqID = @BoqID");
+
+    await transaction
+      .request()
+      .input("BoqID", sql.Int, boqID)
+      .query("DELETE FROM dbo.BoqEquipment WHERE BoqID = @BoqID");
 
     const result = await transaction
       .request()

@@ -243,7 +243,7 @@ const SOURCES = {
         'saleorder' AS Kind, 'sales' AS Module,
         so.DocNo AS DocNo,
         CONCAT('Sale Order ', ISNULL(so.DocNo, CONCAT('#', so.SaleOrderID))) AS Title,
-        ISNULL(tc.name, '—') AS Subtitle,
+        COALESCE(buyer.LHeadName, tc.name, '—') AS Subtitle,
         NULL AS Actor,
         CAST(so.TotalAmount AS DECIMAL(18,2)) AS Amount,
         so.Status AS Status,
@@ -251,6 +251,7 @@ const SOURCES = {
         '/sales/sale-order' AS Href
       FROM dbo.SaleOrders so
       LEFT JOIN dbo.enterprise tc ON tc.id = so.ToCompanyID
+      LEFT JOIN dbo.AccountHeadMaster buyer ON buyer.LHeadId = so.BuyerLHeadId
       ORDER BY so.SaleOrderID DESC`,
   },
   sales_invoice: {
