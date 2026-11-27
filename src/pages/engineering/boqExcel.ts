@@ -130,7 +130,7 @@ export async function downloadBoqTemplate(m: BoqImportMasters) {
     name: SHEET_ACTIVITIES,
     widths: [26, 30, 16, 16, 18, 10, 40],
     freezeBelowRow: 2,
-    rows: [[req("Activity Group *"), req("Activity *"), req("Total Area *"), req("UOM *"), req("Total Rate (₹) *"), opt("Tax %"), opt("Spec / Notes")]],
+    rows: [[req("Activity Group *"), req("Activity *"), req("Total Qty *"), req("UOM *"), req("Total Rate (₹) *"), opt("Tax %"), opt("Spec / Notes")]],
     lists: [
       { sqref: "A2:A1000", formula: range("F", groupNames.length) },
       { sqref: "D2:D1000", formula: range("I", uomNames.length) },
@@ -161,9 +161,9 @@ export async function downloadBoqTemplate(m: BoqImportMasters) {
       [{ v: "1. BOQ Header", s: "label" }],
       note("Company, Project, Document Type, Financial Year and BOQ Date are required. Values must match the Masters sheet exactly (use the dropdowns). The BOQ number is generated automatically from the Document Type."),
       [{ v: "2. Activities", s: "label" }],
-      note("One row per activity. Pick the Activity Group first, then an Activity that belongs to that group. Total Area and Total Rate are required: Total Rate is the price for the WHOLE activity (not per unit), so Per Activity Price = Total Rate ÷ Total Area. Tax % defaults to 18 when left blank."),
+      note("One row per activity. Pick the Activity Group first, then an Activity that belongs to that group. Total Qty and Total Rate are required: Total Rate is the price for the WHOLE activity (not per unit), so Per Activity Price = Total Rate ÷ Total Qty. Tax % defaults to 18 when left blank."),
       [{ v: "3. Items", s: "label" }],
-      note("One row per item required by an activity. Activity Group + Activity must match a row on the Activities sheet. Item Qty is the TOTAL quantity of the item for that whole activity; the per-unit quantity is worked out as Item Qty ÷ the activity's Total Area. UOM defaults to the item's own unit when left blank. Tax % defaults to 18."),
+      note("One row per item required by an activity. Activity Group + Activity must match a row on the Activities sheet. Item Qty is the TOTAL quantity of the item for that whole activity; the per-unit quantity is worked out as Item Qty ÷ the activity's Total Qty. UOM defaults to the item's own unit when left blank. Tax % defaults to 18."),
       [{ v: "Rules", s: "label" }],
       note("• Every required cell (dark orange headers) must be filled; Area, Total Rate and Item Qty must be numbers greater than 0."),
       note("• The same Activity can't be listed twice, and the same Item can't be listed twice under one Activity."),
@@ -172,7 +172,7 @@ export async function downloadBoqTemplate(m: BoqImportMasters) {
       note(""),
       [{ v: "Example", s: "label" }],
       note("Activities:  PILING | PILING01 | 1000 | Square Feet | 2800 | 18 | Bored piles"),
-      note("Items:  PILING | PILING01 | Cement 53 Grade | 60000 | Bag | 380 | 18     →  per-unit qty = 60000 ÷ 1000 = 60 Bag / area"),
+      note("Items:  PILING | PILING01 | Cement 53 Grade | 60000 | Bag | 380 | 18     →  per-unit qty = 60000 ÷ 1000 = 60 Bag / Square Feet"),
     ],
   };
 
@@ -222,7 +222,7 @@ function readTable(rows: string[][], aliases: Record<string, string[]>): { table
 const ACT_ALIASES = {
   group: ["activitygroup", "group"],
   activity: ["activity"],
-  area: ["totalarea", "area"],
+  area: ["totalqty", "totalquantity", "qty", "quantity", "totalarea", "area"],
   uom: ["uom", "unit"],
   rate: ["totalrate", "rate"],
   tax: ["tax", "taxpercent", "tax%"],
@@ -319,7 +319,7 @@ export async function parseBoqWorkbook(file: File, m: BoqImportMasters): Promise
     m.uoms.find((u) => norm(u.UOMName) === norm(txt) || (u.UOMCode && norm(u.UOMCode) === norm(txt)));
   const act = readTable(actRows, ACT_ALIASES);
   for (const f of act.missing.filter((f) => f !== "tax" && f !== "notes")) {
-    add(SHEET_ACTIVITIES, 1, `Column for "${f === "group" ? "Activity Group" : f === "area" ? "Total Area" : f === "rate" ? "Total Rate" : f.toUpperCase()}" is missing — use the template headers.`);
+    add(SHEET_ACTIVITIES, 1, `Column for "${f === "group" ? "Activity Group" : f === "area" ? "Total Qty" : f === "rate" ? "Total Rate" : f.toUpperCase()}" is missing — use the template headers.`);
   }
   if (act.table.length === 0 && act.missing.length === 0) add(SHEET_ACTIVITIES, 0, "Add at least one activity — a BOQ can't be imported without activities.");
 
@@ -351,8 +351,8 @@ export async function parseBoqWorkbook(file: File, m: BoqImportMasters): Promise
         }
       }
       const area = toNumber(c.area);
-      if (c.area === "") bad("Total Area is required.");
-      else if (!(area > 0)) bad(`Total Area "${c.area}" must be a number greater than 0.`);
+      if (c.area === "") bad("Total Qty is required.");
+      else if (!(area > 0)) bad(`Total Qty "${c.area}" must be a number greater than 0.`);
       const uom = c.uom ? uomByText(c.uom) : undefined;
       if (!c.uom) bad("UOM is required.");
       else if (!uom) bad(`UOM "${c.uom}" is not in the UOM master.`);

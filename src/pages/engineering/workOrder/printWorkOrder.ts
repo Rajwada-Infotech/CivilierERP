@@ -140,7 +140,7 @@ export function printWorkOrder(d: WorkOrderDetail) {
 
     <h2>Activities · ${acts.length} activit${acts.length === 1 ? "y" : "ies"}</h2>
     <table>
-      <thead><tr><th class="n">No.</th><th>Activity</th><th>HSN / GST</th><th>Unit</th><th class="r">Rate / unit</th><th class="r">Area</th><th class="r">Labour</th><th class="r">Materials</th><th class="r">Basic</th><th class="r">Tax</th><th class="r">Total</th></tr></thead>
+      <thead><tr><th class="n">No.</th><th>Activity</th><th>HSN / GST</th><th>Unit</th><th class="r">Rate / unit</th><th class="r">Qty</th><th class="r">Labour</th><th class="r">Materials</th><th class="r">Basic</th><th class="r">Tax</th><th class="r">Total</th></tr></thead>
       ${body || `<tbody><tr><td colspan="11" class="muted">No activities.</td></tr></tbody>`}
     </table>
 

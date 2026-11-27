@@ -169,7 +169,7 @@ export const ActivityGroupCard: React.FC<{
                   "Activity",
                   "Unit",
                   "Total Rate (Labour)",
-                  "Area",
+                  "Qty",
                   "Materials",
                   "SAC / GST",
                   "Activity Total",
