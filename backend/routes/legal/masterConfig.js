@@ -39,6 +39,7 @@
  * projects, and returns a message naming the existing one and its project — or null. `self` leaves out the record being
  * saved: { enquiryId } and/or { landId }. Dag fields may hold a list ("433, 434").
  */
+const DUPLICATE = "DUPLICATE:";
 async function dagClash(pool, mouzaId, dags, self = {}) {
   if (!mouzaId) return null;
   for (const [kind, raw] of dags) {
@@ -61,13 +62,48 @@ async function dagClash(pool, mouzaId, dags, self = {}) {
               OR EXISTS (SELECT 1 FROM dbo.LegalEnquiry${rec}Record x WHERE x.EnquiryId = e.EnquiryId AND x.IsActive = 1 AND x.MouzaId = @M AND ${has("x." + col)}))
         ) z ORDER BY o`);
       const c = r.recordset[0];
-      if (c) return `${kind} Dag ${dag} in this Mouza is already ${c.Kind} ${c.Ref}${c.Project ? ` (project ${c.Project})` : " (no project)"}${c.St ? ` · ${c.St}` : ""} — the same land cannot be entered twice; open that one instead`;
+      // Not refused outright (spec 3.2B): it may be a data-entry error or a genuinely shared / related parcel — an
+      // authorised user (approve right) sees the match and confirms; the confirmation is audited.
+      if (c) return `${DUPLICATE}${kind} Dag ${dag} in this Mouza is already on ${c.Kind} ${c.Ref}${c.Project ? ` (project ${c.Project})` : " (no project)"}${c.St ? ` · ${c.St}` : ""}. Open that one if it is the same land; confirm only if this is a different or related parcel.`;
     }
   }
   return null;
 }
 
 const LAND_CLASSES = ["Sali", "Suna", "Danga", "Bastu", "Doba", "Pukur", "Bagan", "Khamar", "Karkhana", "Commercial", "Others"];
+// Land Records Search: how a record was obtained, and what was found (finding a record is not verifying it).
+const SOURCE_METHODS = ["Online portal", "Certified copy", "Office inspection", "Manual entry"];
+const RECORD_STATUSES = ["Pending", "Found", "Partially Matched", "Verified", "Not Found", "Disputed", "Unable to Verify"];
+const OWNER_KINDS = ["Individual", "Joint Owner", "Co-owner", "Legal Heir / Successor", "Company / Organisation", "Government", "Trust / Institution"];
+const FAMILY_RELATIONS = ["Deceased owner", "Husband", "Wife", "Son", "Daughter", "Father", "Mother", "Brother", "Sister", "Grandfather", "Grandmother", "Grandson",
+  "Granddaughter", "Son's widow", "Son's son", "Son's daughter", "Daughter's son", "Daughter's daughter", "Other legally relevant relation"];
+const INHERITANCE_FRAMEWORKS = ["Hindu Succession Act, 1956", "Muslim Personal Law (Shariat)", "Indian Succession Act, 1925", "Special Statutory Succession", "Court-Determined Succession",
+  "Testamentary Succession", "Other Applicable Law", "Requires Legal Review"];
+// A verified ownership event (and its parties) is changed only through an amendment.
+const eventLocked = async (pool, eventId) => {
+  if (!eventId) return null;
+  const e = (await pool.request().input("E", eventId).query("SELECT ApprovalStatus FROM dbo.LegalOwnershipEvent WHERE EventId = @E")).recordset[0];
+  return e?.ApprovalStatus === "Verified" ? "This ownership event is verified — change it through an amendment (Land Profile → Amendments)" : null;
+};
+const inheritanceLocked = async (pool, id) => {
+  if (!id) return null;
+  const e = (await pool.request().input("I", id).query("SELECT ReviewStatus FROM dbo.LegalInheritance WHERE InheritanceId = @I")).recordset[0];
+  return e?.ReviewStatus === "Approved" ? "This inheritance case is approved — reopen it through the case workflow or an amendment" : null;
+};
+// Same Mouza + Dag on another parcel (another enquiry or land): a possible duplicate — confirmed, never refused.
+const parcelClash = async (pool, v, id) => {
+  if (!v.MouzaId) return null;
+  for (const [kind, col] of [["CS", "CsDagNo"], ["RS", "RsDagNo"], ["LR", "LrDagNo"]]) {
+    for (const dag of String(v[col] || "").split(/[,;/]/).map((x) => x.trim()).filter(Boolean)) {
+      const hit = (await pool.request().input("M", v.MouzaId).input("D", dag.replace(/\s/g, "")).input("I", id || 0).input("E", v.EnquiryId || 0).input("L", v.LandId || 0).query(`
+        SELECT TOP 1 p.ParcelCode, e.EnquiryNo, l.LandCode FROM dbo.LegalLandParcel p LEFT JOIN dbo.LegalLandEnquiry e ON e.EnquiryId = p.EnquiryId LEFT JOIN dbo.LegalLand l ON l.LandId = p.LandId
+        WHERE p.IsActive = 1 AND p.ParcelId <> @I AND p.MouzaId = @M AND ISNULL(p.EnquiryId, -1) <> @E AND ISNULL(p.LandId, -1) <> @L
+          AND (',' + REPLACE(ISNULL(p.${col}, N''), N' ', N'') + ',') LIKE N'%,' + @D + N',%'`)).recordset[0];
+      if (hit) return `${DUPLICATE}${kind} Dag ${dag} in this Mouza is already parcel ${hit.ParcelCode} (${hit.LandCode ?? hit.EnquiryNo ?? ""}). Open that one if it is the same land; confirm only if this is a different or related portion.`;
+    }
+  }
+  return null;
+};
 const ACTIVE = { name: "IsActive", label: "Status", type: "bit", default: true };
 const PAN = { name: "Pan", label: "PAN", type: "text", max: 10, upper: true, pattern: "^[A-Z]{5}[0-9]{4}[A-Z]$", patternMsg: "PAN must look like ABCDE1234F" };
 const EMAIL = { name: "Email", label: "Email", type: "text", max: 150, pattern: "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", patternMsg: "Enter a valid email" };
@@ -114,12 +150,12 @@ const enquiryOpen = async (pool, values) => {
   const e = values?.EnquiryId && (await pool.request().input("E", values.EnquiryId).query("SELECT LandId FROM dbo.LegalLandEnquiry WHERE EnquiryId = @E")).recordset[0];
   return e?.LandId ? "This enquiry is converted — edit the RS / LR records on its land" : null;
 };
-// Keep the enquiry's Dag / Khatian summary (list and search) in step with its RS / LR records.
+// Keep the enquiry's Dag / Khatian numbers (list and search) in step with its RS / LR records; with none, the typed numbers stay.
 const syncEnquiryPlots = async (pool, _req, row) => {
   const agg = (t, c) => `(SELECT STRING_AGG(v, N', ') FROM (SELECT DISTINCT ${c} AS v FROM dbo.${t} WHERE EnquiryId = e.EnquiryId AND IsActive = 1) x)`;
   await pool.request().input("E", row.EnquiryId).query(`UPDATE e SET
-      RsDagNo = ${agg("LegalEnquiryRsRecord", "RsDagNo")}, RsKhatianNo = ${agg("LegalEnquiryRsRecord", "RsKhatianNo")},
-      LrDagNo = ${agg("LegalEnquiryLrRecord", "LrDagNo")}, LrKhatianNo = ${agg("LegalEnquiryLrRecord", "LrKhatianNo")}
+      RsDagNo = ISNULL(${agg("LegalEnquiryRsRecord", "RsDagNo")}, e.RsDagNo), RsKhatianNo = ISNULL(${agg("LegalEnquiryRsRecord", "RsKhatianNo")}, e.RsKhatianNo),
+      LrDagNo = ISNULL(${agg("LegalEnquiryLrRecord", "LrDagNo")}, e.LrDagNo), LrKhatianNo = ISNULL(${agg("LegalEnquiryLrRecord", "LrKhatianNo")}, e.LrKhatianNo)
     FROM dbo.LegalLandEnquiry e WHERE e.EnquiryId = @E`);
 };
 const MORTGAGE_STATUSES = ["No Mortgage Found", "Mortgage Active", "Loan Outstanding", "Loan Closed", "Release Pending", "Release Verified", "Needs Investigation"];
@@ -397,7 +433,7 @@ const MASTERS = {
       // Earlier rejected enquiries for the same plot (Mouza + RS or LR Dag), in any project.
       { name: "RejectedBefore", label: "Rejected before", hidden: true, sql: "(SELECT STRING_AGG(r.EnquiryNo, N', ') FROM dbo.LegalLandEnquiry r WHERE r.EnquiryId <> t.EnquiryId AND r.EnquiryStatus = N'Rejected' AND r.MouzaId = t.MouzaId AND ((t.RsDagNo IS NOT NULL AND r.RsDagNo = t.RsDagNo) OR (t.LrDagNo IS NOT NULL AND r.LrDagNo = t.LrDagNo)))" },
       // Deed Registry Search: offices still open (the enquiry's actions open once every office's search is complete).
-      { name: "OfficesPending", label: "Deed search offices open", sql: "(SELECT COUNT(*) FROM dbo.LegalEnquiryOfficeSearch x WHERE x.EnquiryId = t.EnquiryId AND x.Status = N'Pending')" },
+      { name: "OfficesPending", label: "Deed search offices open", sql: "(SELECT COUNT(*) FROM dbo.LegalEnquiryOfficeSearch x WHERE x.EnquiryId = t.EnquiryId AND x.Status = N'Pending' AND x.Mandatory = 1)" },
       { name: "OfficesTotal", label: "Deed search offices", sql: "(SELECT COUNT(*) FROM dbo.LegalEnquiryOfficeSearch x WHERE x.EnquiryId = t.EnquiryId)" },
       // Office types that apply to the enquiry's state: 0 means the setup is missing; more means its timelines just need creating.
       { name: "OfficeTypesForState", label: "Office types for the state", hidden: true, sql: "(SELECT COUNT(*) FROM dbo.LegalRegistrationOfficeType ot LEFT JOIN dbo.LegalDistrict dd ON dd.DistrictId = t.DistrictId WHERE ot.IsActive = 1 AND ot.OnEnquiry = 1 AND (ot.StateName IS NULL OR ot.StateName = dd.State))" },
@@ -410,6 +446,13 @@ const MASTERS = {
     // + that office's time limit.
     afterWrite: async (pool, req, row, before) => {
       await require("./enquirySearch").ensureOfficeTimelines(pool, row.EnquiryId);
+      // Every enquiry has at least one parcel (spec 3.2A): the first is built from the enquiry's own references.
+      await pool.request().input("E", row.EnquiryId).input("U", req?.user?.userId ?? null).query(`
+        IF OBJECT_ID('dbo.LegalLandParcel', 'U') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM dbo.LegalLandParcel WHERE EnquiryId = @E)
+          INSERT INTO dbo.LegalLandParcel (ParcelCode, EnquiryId, DistrictId, MouzaId, JLNo, RsDagNo, LrDagNo, RsKhatianNo, LrKhatianNo, Area, AreaUnitId, OfferedArea, DeedArea, OfferedOwner, Source, CreatedBy)
+          SELECT LEFT(N'PCL/' + e.EnquiryNo + N'/1', 40), e.EnquiryId, e.DistrictId, e.MouzaId, e.JLNo, LEFT(e.RsDagNo, 100), LEFT(e.LrDagNo, 100), LEFT(e.RsKhatianNo, 100), LEFT(e.LrKhatianNo, 100),
+            e.ApproxArea, e.AreaUnitId, e.ApproxArea, e.DeedArea, LEFT(e.ContactPerson, 300), N'From the enquiry', @U
+          FROM dbo.LegalLandEnquiry e WHERE e.EnquiryId = @E AND e.EnquiryNo IS NOT NULL`);
       // A new enquiry: the legal team (verifiers) hears of it.
       if (!before) await require("../../services/legalNotify").notify(pool, { roles: ["Verifier"], except: req?.user?.userId, type: "legal_enquiry_new",
         title: `New land enquiry: ${row.EnquiryNo ?? ""}`, body: `${row.LandLocation ?? ""} — deed registry search starts now.`.slice(0, 300), refId: row.EnquiryId, refType: "legal_enquiry" });
@@ -439,11 +482,12 @@ const MASTERS = {
       { name: "DistrictId", label: "District", type: "ref", ref: "district", required: true },
       { name: "MouzaId", label: "Mouza", type: "ref", ref: "mouza", required: true, filterBy: "DistrictId", blankOk: true, fill: { JLNo: "JLNo" } },
       { name: "JLNo", label: "J.L. number", type: "text", max: 30 },
-      // Plot references: kept from the enquiry's RS / LR records (below the enquiry), shown in the list and used by search.
-      { name: "RsDagNo", label: "RS Dag", type: "text", max: 400, system: true },
-      { name: "RsKhatianNo", label: "RS Khatian", type: "text", max: 400, system: true },
-      { name: "LrDagNo", label: "LR Dag", type: "text", max: 400, system: true },
-      { name: "LrKhatianNo", label: "LR Khatian", type: "text", max: 400, system: true },
+      // Plot references, typed in the form (several comma-separated). Adding RS / LR records under the enquiry keeps
+      // them in step with those records. Shown in the list, used by search and by the same-plot check.
+      { name: "RsDagNo", label: "RS Dag / Plot number", type: "text", max: 400 },
+      { name: "LrDagNo", label: "LR Dag / Plot number", type: "text", max: 400 },
+      { name: "RsKhatianNo", label: "RS Khatian number", type: "text", max: 400 },
+      { name: "LrKhatianNo", label: "LR Khatian number", type: "text", max: 400 },
       { name: "GpsLatitude", label: "GPS latitude", type: "decimal", signed: true, min: -90, maxValue: 90 },
       { name: "GpsLongitude", label: "GPS longitude", type: "decimal", signed: true, min: -180, maxValue: 180 },
       { name: "ApproxArea", label: "Total area", type: "decimal" },
@@ -456,6 +500,9 @@ const MASTERS = {
       { name: "AssignedUserId", label: "Assigned employee", type: "ref", ref: "user", hidden: true, self: true },
       // "Converted to Land Record" is set only by Convert to land (and such an enquiry is read-only), so it is not offered here.
       { name: "EnquiryStatus", label: "Enquiry status", type: "select", required: true, options: ["New", "Under Review", "Interested", "Rejected", "On Hold"], default: "New" },
+      // Spec 3.2C: when to act next, and why it was last put on hold / rejected (set by Hold / Reject with the reason).
+      { name: "NextActionDate", label: "Next action date", type: "date" },
+      { name: "StatusReason", label: "Hold / rejection reason", type: "text", max: 500, system: true },
       { name: "InitialDocFileId", label: "Initial document", type: "file" },
       { name: "InitialNotes", label: "Initial notes", type: "textarea", max: 2000 },
       ACTIVE,
@@ -471,14 +518,152 @@ const MASTERS = {
     check: async (pool, values, id) => (await enquiryOpen(pool, values, id)) || dagClash(pool, values.MouzaId, [["RS", values.RsDagNo]], { enquiryId: values.EnquiryId }), afterWrite: syncEnquiryPlots, afterDelete: syncEnquiryPlots,
     fields: [
       { name: "EnquiryId", label: "Enquiry", type: "ref", ref: "land-enquiry", required: true },
+      { name: "ParcelId", label: "Parcel", type: "ref", ref: "enquiry-parcel", filterBy: "EnquiryId" },
       { name: "MouzaId", label: "Mouza", type: "ref", ref: "mouza" },
       { name: "RsKhatianNo", label: "RS Khatian number", type: "text", required: true, max: 30 },
       { name: "RsDagNo", label: "RS Dag number", type: "text", required: true, max: 30 },
+      { name: "JLNo", label: "J.L. number", type: "text", max: 30 },
+      { name: "PrevCsDagNo", label: "Previous CS Dag (as shown on the RS record)", type: "text", max: 60 },
+      { name: "PrevCsKhatianNo", label: "Previous CS Khatian", type: "text", max: 60 },
       { name: "RecordedHolder", label: "Recorded holder", type: "text", max: 200 },
+      { name: "GuardianName", label: "Father / husband name", type: "text", max: 200 },
+      { name: "LandClass", label: "Land classification", type: "text", max: 100 },
+      { name: "RecordYear", label: "Record year / publication", type: "int", min: 1800, maxValue: 2100 },
+      { name: "RecordOffice", label: "Record office", type: "text", max: 200 },
+      { name: "SourceMethod", label: "Source", type: "select", options: SOURCE_METHODS },
+      { name: "SourceRef", label: "Source reference", type: "text", max: 200 },
+      { name: "RecordStatus", label: "Record status", type: "select", required: true, options: RECORD_STATUSES, default: "Found" },
+      { name: "DocFileId", label: "Record copy", type: "file" },
       { name: "Area", label: "Area", type: "decimal" },
       { name: "AreaUnitId", label: "Area unit", type: "ref", ref: "area-unit", requiredWith: "Area" },
       { name: "Share", label: "Share", type: "text", max: 30 },
       { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+      ACTIVE,
+    ],
+  },
+  // CS (Cadastral Survey) records of the enquiry land — the oldest survey.
+  "enquiry-cs-record": {
+    title: "Enquiry CS Record", group: "Land Management", pageKey: "legal-land-enquiry", table: "LegalEnquiryCsRecord", pk: "CsRecordId", parent: "EnquiryId",
+    desc: "Cadastral Survey Khatian / Dag of this enquiry land.",
+    label: "'CS Kh ' + CsKhatianNo + ' / Dag ' + CsDagNo", orderBy: "CsKhatianNo, CsDagNo",
+    unique: [["EnquiryId", "CsKhatianNo", "CsDagNo"], "This CS Khatian and Dag are already on this enquiry"],
+    check: async (pool, values, id) => enquiryOpen(pool, values, id),
+    fields: [
+      { name: "EnquiryId", label: "Enquiry", type: "ref", ref: "land-enquiry", required: true },
+      { name: "ParcelId", label: "Parcel", type: "ref", ref: "enquiry-parcel", filterBy: "EnquiryId" },
+      { name: "MouzaId", label: "Mouza", type: "ref", ref: "mouza" },
+      { name: "CsKhatianNo", label: "CS Khatian number", type: "text", required: true, max: 30 },
+      { name: "CsDagNo", label: "CS Dag number", type: "text", required: true, max: 30 },
+      { name: "JLNo", label: "J.L. number", type: "text", max: 30 },
+      { name: "RecordedHolder", label: "Recorded holder / raiyat", type: "text", max: 200 },
+      { name: "GuardianName", label: "Father / husband name", type: "text", max: 200 },
+      { name: "LandClass", label: "Land classification", type: "text", max: 100 },
+      { name: "RecordYear", label: "Record year / publication", type: "int", min: 1800, maxValue: 2100 },
+      { name: "RecordOffice", label: "Record office", type: "text", max: 200 },
+      { name: "SourceMethod", label: "Source", type: "select", options: SOURCE_METHODS },
+      { name: "SourceRef", label: "Source reference", type: "text", max: 200 },
+      { name: "RecordStatus", label: "Record status", type: "select", required: true, options: RECORD_STATUSES, default: "Found" },
+      { name: "DocFileId", label: "Record copy", type: "file" },
+      { name: "Area", label: "Area", type: "decimal" },
+      { name: "AreaUnitId", label: "Area unit", type: "ref", ref: "area-unit", requiredWith: "Area" },
+      { name: "Share", label: "Share", type: "text", max: 30 },
+      { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+      ACTIVE,
+    ],
+  },
+  // ── Land Records Search, phases 2–3: per enquiry, frozen once converted (enquiryOpen). None of these prove ownership. ──
+  "enquiry-discrepancy": {
+    title: "Discrepancy & Observation", group: "Land Management", pageKey: "legal-land-enquiry", table: "LegalLandDiscrepancy", pk: "DiscrepancyId", parent: "EnquiryId",
+    desc: "Differences between records to investigate — an alert, not proof of a defective title.",
+    label: "DiscrepancyType + ISNULL(' · ' + RelatedRecord, '')", orderBy: "CreatedAt DESC",
+    check: async (pool, values, id) => enquiryOpen(pool, values, id),
+    fields: [
+      { name: "EnquiryId", label: "Enquiry", type: "ref", ref: "land-enquiry", required: true },
+      { name: "DiscrepancyType", label: "Discrepancy type", type: "select", required: true, options: ["Holder name change", "Dag number change", "Khatian number change", "Area difference",
+        "Partial transfer indicator", "Missing intermediate record", "Conflicting land description", "Classification change", "Other"] },
+      { name: "RelatedRecord", label: "Related record", type: "text", max: 200 },
+      { name: "PreviousInfo", label: "Previous information", type: "text", max: 500 },
+      { name: "CurrentInfo", label: "Current information", type: "text", max: 500 },
+      { name: "Severity", label: "Severity", type: "select", required: true, options: ["Low", "Medium", "High", "Critical"], default: "Medium" },
+      { name: "InvestigationStatus", label: "Investigation status", type: "select", required: true, options: ["Open", "Under Investigation", "Resolved", "Unresolved", "Referred to Legal Team"], default: "Open" },
+      { name: "AssignedUserId", label: "Assigned to", type: "ref", ref: "user" },
+      { name: "Description", label: "Description", type: "textarea", max: 2000 },
+      { name: "EvidenceFileId", label: "Supporting evidence", type: "file" },
+      { name: "ResolutionRemarks", label: "Resolution remarks", type: "textarea", max: 2000 },
+      ACTIVE,
+    ],
+  },
+  "enquiry-alt-history": {
+    title: "Alternative Land History", group: "Land Management", pageKey: "legal-land-enquiry", table: "LegalLandAltHistory", pk: "AltId", parent: "EnquiryId",
+    desc: "Patta, lease, settlement, tenancy and other claims — information and claims, not proof of ownership.",
+    label: "Category + ISNULL(' · ' + ReferenceNo, '')", orderBy: "RelevantDate, AltId",
+    check: async (pool, values, id) => enquiryOpen(pool, values, id),
+    fields: [
+      { name: "EnquiryId", label: "Enquiry", type: "ref", ref: "land-enquiry", required: true },
+      { name: "Category", label: "Category", type: "select", required: true, options: ["Government land / settlement", "Private land / other acquisition", "Tenancy / occupancy", "Disputed / possession claim", "Other"] },
+      { name: "SubcategoryId", label: "Subcategory", type: "ref", ref: "alt-land-subcategory" },
+      { name: "ReferenceNo", label: "Reference number (patta, lease, order…)", type: "text", max: 100 },
+      { name: "HolderClaimant", label: "Original holder / claimant", type: "text", max: 200 },
+      { name: "IssuingAuthority", label: "Issuing authority", type: "text", max: 200 },
+      { name: "RelevantDate", label: "Relevant date", type: "date" },
+      { name: "ValidFrom", label: "Valid from (lease)", type: "date" },
+      { name: "ValidTo", label: "Valid to / expiry", type: "date" },
+      { name: "PermittedUse", label: "Permitted land use", type: "text", max: 200 },
+      { name: "Area", label: "Land area", type: "decimal" },
+      { name: "AreaUnitId", label: "Area unit", type: "ref", ref: "area-unit", requiredWith: "Area" },
+      { name: "DagKhatianRef", label: "Dag / Khatian reference", type: "text", max: 200 },
+      { name: "Source", label: "Source", type: "text", max: 200 },
+      { name: "VerificationStatus", label: "Verification status", type: "select", required: true, options: ["Pending", "Verified", "Disputed", "Rejected", "Unable to Verify"], default: "Pending" },
+      { name: "DocFileId", label: "Supporting document", type: "file" },
+      { name: "Conditions", label: "Conditions", type: "textarea", max: 1000 },
+      { name: "Remarks", label: "Remarks", type: "textarea", max: 2000 },
+      ACTIVE,
+    ],
+  },
+  "enquiry-possession": {
+    title: "Possession History", group: "Land Management", pageKey: "legal-land-enquiry", table: "LegalLandPossession", pk: "PossessionId", parent: "EnquiryId",
+    desc: "Who actually occupies the land — separate from recorded ownership.",
+    label: "OccupantName + ' · ' + PossessionType", orderBy: "StartDate, PossessionId",
+    check: async (pool, values, id) => enquiryOpen(pool, values, id),
+    fields: [
+      { name: "EnquiryId", label: "Enquiry", type: "ref", ref: "land-enquiry", required: true },
+      { name: "OccupantName", label: "Occupant", type: "text", required: true, max: 200 },
+      { name: "PossessionType", label: "Possession type", type: "select", required: true, options: ["Owner Occupied", "Tenant Occupied", "Lease Occupied", "Bargadar / Sharecropper",
+        "Government Occupation", "Unauthorized Occupation", "Disputed Possession", "Unknown"] },
+      { name: "StartDate", label: "Possession from", type: "date" },
+      { name: "EndDate", label: "Possession to (blank = still)", type: "date" },
+      { name: "Purpose", label: "Occupation purpose", type: "text", max: 200 },
+      { name: "DagKhatianRef", label: "Dag / Khatian reference", type: "text", max: 200 },
+      { name: "AreaOccupied", label: "Area occupied", type: "decimal" },
+      { name: "AreaUnitId", label: "Area unit", type: "ref", ref: "area-unit", requiredWith: "AreaOccupied" },
+      { name: "Source", label: "Source (inspection, statement…)", type: "text", max: 200 },
+      { name: "VerificationStatus", label: "Verification status", type: "select", required: true, options: ["Pending", "Verified", "Disputed", "Unable to Verify"], default: "Pending" },
+      { name: "DocFileId", label: "Supporting document", type: "file" },
+      { name: "Remarks", label: "Remarks", type: "textarea", max: 2000 },
+      ACTIVE,
+    ],
+  },
+  // The legal review before Land Conversion; every review is kept and the latest one counts (conversion gate).
+  "enquiry-search-review": {
+    title: "Legal Review & Risk", group: "Land Management", pageKey: "legal-land-enquiry", table: "LegalLandSearchReview", pk: "ReviewId", parent: "EnquiryId",
+    desc: "The legal officer's assessment of the search and recommendation.",
+    label: "Recommendation + ' · ' + RiskLevel", orderBy: "ReviewDate DESC, ReviewId DESC",
+    check: async (pool, values, id) => enquiryOpen(pool, values, id),
+    fields: [
+      { name: "EnquiryId", label: "Enquiry", type: "ref", ref: "land-enquiry", required: true },
+      ...["OverallSearchStatus|Overall search", "OwnershipChainStatus|Ownership chain", "RecordMatchingStatus|Record matching", "RegistryDeedStatus|Registry deed review",
+        "PossessionStatus|Possession review", "DiscrepancyStatus|Discrepancies"].map((x) => {
+        const [name, l] = x.split("|");
+        return { name, label: l, type: "select", options: ["Not Started", "In Progress", "Satisfactory", "Concerns Found", "Not Applicable"] };
+      }),
+      { name: "RiskLevel", label: "Legal risk level", type: "select", required: true, options: ["Low", "Medium", "High", "Critical", "Pending Assessment"], default: "Pending Assessment" },
+      { name: "Recommendation", label: "Final recommendation", type: "select", required: true,
+        options: ["Recommended to Proceed", "Proceed with Conditions", "Hold for Further Investigation", "Not Recommended", "Pending Legal Review"], default: "Pending Legal Review" },
+      { name: "Remarks", label: "Legal officer remarks / reason", type: "textarea", required: true, max: 4000 },
+      { name: "Conditions", label: "Conditions (when proceeding with conditions)", type: "textarea", max: 2000 },
+      { name: "EvidenceFileId", label: "Supporting evidence", type: "file" },
+      { name: "ReviewedBy", label: "Reviewer", type: "ref", ref: "user", hidden: true, self: true },
+      { name: "ReviewDate", label: "Review date", type: "date", system: true, default: "today" },
       ACTIVE,
     ],
   },
@@ -490,11 +675,23 @@ const MASTERS = {
     check: async (pool, values, id) => (await enquiryOpen(pool, values, id)) || dagClash(pool, values.MouzaId, [["LR", values.LrDagNo]], { enquiryId: values.EnquiryId }), afterWrite: syncEnquiryPlots, afterDelete: syncEnquiryPlots,
     fields: [
       { name: "EnquiryId", label: "Enquiry", type: "ref", ref: "land-enquiry", required: true },
+      { name: "ParcelId", label: "Parcel", type: "ref", ref: "enquiry-parcel", filterBy: "EnquiryId" },
       { name: "MouzaId", label: "Mouza", type: "ref", ref: "mouza" },
       { name: "LrKhatianNo", label: "LR Khatian number", type: "text", required: true, max: 30 },
       { name: "LrDagNo", label: "LR Dag number", type: "text", required: true, max: 30 },
+      { name: "JLNo", label: "J.L. number", type: "text", max: 30 },
       { name: "MatchingRsRecordId", label: "Matching RS record (optional)", type: "ref", ref: "enquiry-rs-record", filterBy: "EnquiryId" },
+      { name: "PrevRsDagNo", label: "Previous RS Dag (as shown on the LR record)", type: "text", max: 60 },
+      { name: "PrevRsKhatianNo", label: "Previous RS Khatian", type: "text", max: 60 },
       { name: "RecordedHolder", label: "Recorded holder", type: "text", max: 200 },
+      { name: "GuardianName", label: "Father / husband name", type: "text", max: 200 },
+      { name: "LandClass", label: "Land classification", type: "text", max: 100 },
+      { name: "RecordYear", label: "Record year / publication", type: "int", min: 1800, maxValue: 2100 },
+      { name: "RecordOffice", label: "Record office", type: "text", max: 200 },
+      { name: "SourceMethod", label: "Source", type: "select", options: SOURCE_METHODS },
+      { name: "SourceRef", label: "Source reference", type: "text", max: 200 },
+      { name: "RecordStatus", label: "Record status", type: "select", required: true, options: RECORD_STATUSES, default: "Found" },
+      { name: "DocFileId", label: "Record copy", type: "file" },
       { name: "Area", label: "Area", type: "decimal" },
       { name: "AreaUnitId", label: "Area unit", type: "ref", ref: "area-unit", requiredWith: "Area" },
       { name: "Share", label: "Share", type: "text", max: 30 },
@@ -599,14 +796,220 @@ const MASTERS = {
     ],
   },
   // ── Phase 2: ownership history ──
+  // ── Legal V3 phases B–D ──────────────────────────────────────────────────────────────────────────────
+  // Parcels: one row per parcel / portion; the same row belongs to the enquiry and, after conversion, its land.
+  "enquiry-parcel": {
+    title: "Land Parcel", group: "Land Management", pageKey: "legal-land-enquiry", table: "LegalLandParcel", pk: "ParcelId", parent: "EnquiryId",
+    desc: "Each parcel or portion this enquiry covers — Mouza, J.L., CS / RS / LR Dag and Khatian, areas, offered owner and share.",
+    label: "r.ParcelCode + ISNULL(' · RS ' + r.RsDagNo, '') + ISNULL(' · LR ' + r.LrDagNo, '')", orderBy: "ParcelCode",
+    unique: [["ParcelCode"], "This parcel ID already exists"],
+    check: async (pool, values, id) => (await enquiryOpen(pool, values, id)) || parcelClash(pool, values, id),
+    fields: [
+      { name: "EnquiryId", label: "Enquiry", type: "ref", ref: "land-enquiry", required: true },
+      { name: "ParcelCode", label: "Parcel ID", type: "text", max: 40, auto: "PCL" },
+      { name: "MouzaId", label: "Mouza", type: "ref", ref: "mouza", required: true },
+      { name: "JLNo", label: "J.L. number", type: "text", max: 30 },
+      { name: "CsDagNo", label: "CS Dag", type: "text", max: 100 },
+      { name: "RsDagNo", label: "RS Dag", type: "text", max: 100 },
+      { name: "LrDagNo", label: "LR Dag", type: "text", max: 100 },
+      { name: "CsKhatianNo", label: "CS Khatian", type: "text", max: 100 },
+      { name: "RsKhatianNo", label: "RS Khatian", type: "text", max: 100 },
+      { name: "LrKhatianNo", label: "LR Khatian", type: "text", max: 100 },
+      { name: "Area", label: "Record area", type: "decimal" },
+      { name: "AreaUnitId", label: "Area unit (all areas of this parcel)", type: "ref", ref: "area-unit", requiredWith: "Area" },
+      { name: "OfferedArea", label: "Offered area", type: "decimal" },
+      { name: "DeedArea", label: "Deed area", type: "decimal" },
+      { name: "SurveyedArea", label: "Surveyed area", type: "decimal" },
+      { name: "OwnershipArea", label: "Current ownership area", type: "decimal" },
+      { name: "LandTypeId", label: "Land type", type: "ref", ref: "land-type" },
+      { name: "OfferedOwner", label: "Offered by (owner / co-owners)", type: "text", max: 300 },
+      { name: "OfferedSharePct", label: "Offered share (%)", type: "decimal", maxValue: 100 },
+      { name: "OfferedShareFraction", label: "Offered share as fraction (e.g. 1/3)", type: "text", max: 20, pattern: "^\\d+/\\d+$", patternMsg: "Write a fraction like 1/3" },
+      { name: "Source", label: "Source", type: "text", max: 200 },
+      { name: "ParcelStatus", label: "Parcel status", type: "select", required: true, options: ["Under Investigation", "Verified", "Disputed", "Excluded", "Acquired"], default: "Under Investigation" },
+      { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+      ACTIVE,
+    ],
+  },
+  "land-parcel": landChild("Land Parcel", "LegalLandParcel", "ParcelId",
+    "Each parcel or portion of this land — Dag / Khatian references, areas, share and status (carried over from its enquiry).", {
+      label: "r.ParcelCode + ISNULL(' · RS ' + r.RsDagNo, '') + ISNULL(' · LR ' + r.LrDagNo, '')", orderBy: "ParcelCode",
+      unique: [["ParcelCode"], "This parcel ID already exists"],
+      check: async (pool, values, id) => parcelClash(pool, values, id),
+      fields: [
+        LAND_ID,
+        { name: "ParcelCode", label: "Parcel ID", type: "text", max: 40, auto: "PCL" },
+        { name: "MouzaId", label: "Mouza", type: "ref", ref: "mouza", required: true },
+        { name: "JLNo", label: "J.L. number", type: "text", max: 30 },
+        { name: "CsDagNo", label: "CS Dag", type: "text", max: 100 },
+        { name: "RsDagNo", label: "RS Dag", type: "text", max: 100 },
+        { name: "LrDagNo", label: "LR Dag", type: "text", max: 100 },
+        { name: "CsKhatianNo", label: "CS Khatian", type: "text", max: 100 },
+        { name: "RsKhatianNo", label: "RS Khatian", type: "text", max: 100 },
+        { name: "LrKhatianNo", label: "LR Khatian", type: "text", max: 100 },
+        { name: "Area", label: "Record area", type: "decimal" },
+        { name: "AreaUnitId", label: "Area unit (all areas of this parcel)", type: "ref", ref: "area-unit", requiredWith: "Area" },
+        { name: "OfferedArea", label: "Offered area", type: "decimal" },
+        { name: "DeedArea", label: "Deed area", type: "decimal" },
+        { name: "SurveyedArea", label: "Surveyed area", type: "decimal" },
+        { name: "OwnershipArea", label: "Current ownership area", type: "decimal" },
+        { name: "LandTypeId", label: "Land type", type: "ref", ref: "land-type" },
+        { name: "OfferedOwner", label: "Offered by (owner / co-owners)", type: "text", max: 300 },
+        { name: "OfferedSharePct", label: "Offered share (%)", type: "decimal", maxValue: 100 },
+        { name: "OfferedShareFraction", label: "Offered share as fraction (e.g. 1/3)", type: "text", max: 20, pattern: "^\\d+/\\d+$", patternMsg: "Write a fraction like 1/3" },
+        { name: "Source", label: "Source", type: "text", max: 200 },
+        { name: "ParcelStatus", label: "Parcel status", type: "select", required: true, options: ["Under Investigation", "Verified", "Disputed", "Excluded", "Acquired"], default: "Under Investigation" },
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
+  // Every transferor / transferee of an ownership event (several sellers / buyers, partial shares).
+  "ownership-event-party": landChild("Ownership Event Party", "LegalOwnershipEventParty", "PartyId",
+    "Who gave and who received in one ownership event, with the share (as % and as an exact fraction).", {
+      label: "r.PartyRole + ': ' + r.PersonName", orderBy: "EventId, PartyRole DESC, PartyId",
+      check: async (pool, values) => eventLocked(pool, values.EventId),
+      fields: [
+        LAND_ID,
+        { name: "EventId", label: "Ownership event", type: "ref", ref: "ownership-event", filterBy: "LandId", required: true },
+        { name: "PartyRole", label: "Role", type: "select", required: true, options: ["Transferor", "Transferee", "Consenting party", "Witness"], default: "Transferee" },
+        { name: "PersonName", label: "Name", type: "text", required: true, max: 200, suggest: "owner", party: "Owner", partyId: "PersonId" },
+        { name: "GuardianName", label: "Father / husband", type: "text", max: 200 },
+        { name: "PersonId", label: "Owner list", type: "ref", ref: "person", hidden: true },
+        { name: "OwnerKind", label: "Owner kind", type: "select", required: true, options: OWNER_KINDS, default: "Individual" },
+        { name: "RelationshipTypeId", label: "Relationship", type: "ref", ref: "relationship-type" },
+        { name: "SharePct", label: "Share in this event (%)", type: "decimal", maxValue: 100 },
+        { name: "ShareFraction", label: "Share as fraction (e.g. 1/3)", type: "text", max: 20, pattern: "^\\d+/\\d+$", patternMsg: "Write a fraction like 1/3" },
+        { name: "Area", label: "Area", type: "decimal" },
+        { name: "AreaUnitId", label: "Area unit", type: "ref", ref: "area-unit", requiredWith: "Area" },
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 500 },
+        ACTIVE,
+      ],
+    }),
+  "ownership-dispute": landChild("Ownership Dispute", "LegalOwnershipDispute", "DisputeId",
+    "Competing claims to ownership or shares. A disputed branch never becomes verified on its own.", {
+      label: "r.DisputeType + ': ' + r.Claimant", orderBy: "FilingDate, DisputeId",
+      fields: [
+        LAND_ID,
+        { name: "ParcelId", label: "Parcel", type: "ref", ref: "land-parcel", filterBy: "LandId" },
+        { name: "InheritanceId", label: "Inheritance case", type: "ref", ref: "inheritance", filterBy: "LandId" },
+        { name: "Claimant", label: "Claimant", type: "text", required: true, max: 200 },
+        { name: "OpposingParty", label: "Opposing party", type: "text", max: 200 },
+        { name: "DisputeType", label: "Dispute type", type: "select", required: true, options: ["Heirship / succession", "Share", "Title", "Will", "Partition", "Possession", "Boundary", "Other"] },
+        { name: "DisputedSharePct", label: "Disputed share (%)", type: "decimal", maxValue: 100 },
+        { name: "DisputedArea", label: "Disputed area", type: "decimal" },
+        { name: "AreaUnitId", label: "Area unit", type: "ref", ref: "area-unit", requiredWith: "DisputedArea" },
+        { name: "CaseId", label: "Court case (if filed)", type: "ref", ref: "legal-case", filterBy: "LandId" },
+        { name: "CourtCaseNo", label: "Court case number", type: "text", max: 100 },
+        { name: "Court", label: "Court", type: "text", max: 200 },
+        { name: "FilingDate", label: "Filing date", type: "date" },
+        { name: "NextHearingDate", label: "Next hearing", type: "date" },
+        { name: "DisputeStatus", label: "Status", type: "select", required: true, options: ["Open", "Under Investigation", "Court Pending", "Temporarily Resolved", "Resolved", "Closed"], default: "Open" },
+        { name: "LegalOfficerId", label: "Legal officer", type: "ref", ref: "user" },
+        { name: "EvidenceFileId", label: "Evidence", type: "file" },
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 2000 },
+        ACTIVE,
+      ],
+    }),
+  // Family relationships — who is related to whom; separate from who owns what.
+  "family-member": landChild("Family Member", "LegalFamilyMember", "MemberId",
+    "The deceased owner's family: spouses, children, predeceased children and their descendants, minors, missing or disputed members.", {
+      label: "r.FullName + ISNULL(' (' + r.RelationToDeceased + ')', '')", orderBy: "InheritanceId, MemberId",
+      fields: [
+        LAND_ID,
+        { name: "InheritanceId", label: "Inheritance case", type: "ref", ref: "inheritance", filterBy: "LandId" },
+        { name: "FullName", label: "Name", type: "text", required: true, max: 200 },
+        { name: "Gender", label: "Gender", type: "select", options: ["Male", "Female", "Other"] },
+        { name: "IsDeceasedOwner", label: "This is the deceased owner", type: "bit", default: false },
+        { name: "RelationToDeceased", label: "Relation to the deceased owner", type: "select", options: FAMILY_RELATIONS },
+        { name: "RelatedToMemberId", label: "Child / spouse of (family member)", type: "ref", ref: "family-member", filterBy: "LandId" },
+        { name: "RelationToRelated", label: "Relation to that member", type: "select", options: ["Son of", "Daughter of", "Wife of", "Husband of", "Father of", "Mother of", "Brother of", "Sister of", "Other"] },
+        { name: "IsAlive", label: "Alive", type: "bit", default: true },
+        { name: "DateOfDeath", label: "Date of death", type: "date" },
+        { name: "DateOfBirth", label: "Date of birth", type: "date" },
+        { name: "IsMinor", label: "Minor", type: "bit", default: false },
+        { name: "IsMissing", label: "Missing / whereabouts unknown", type: "bit", default: false },
+        { name: "RelationshipStatus", label: "Relationship evidence", type: "select", required: true, options: ["Verified", "Claimed", "Disputed", "Unknown"], default: "Claimed" },
+        { name: "EvidenceFileId", label: "Relationship evidence", type: "file" },
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
+  "inheritance-will": landChild("Will", "LegalInheritanceWill", "WillId",
+    "A will relevant to an inheritance — validity is decided by the legal team (rules differ by personal law).", {
+      label: "'Will of ' + r.Testator", orderBy: "WillDate",
+      fields: [
+        LAND_ID,
+        { name: "InheritanceId", label: "Inheritance case", type: "ref", ref: "inheritance", filterBy: "LandId", required: true },
+        { name: "Testator", label: "Testator", type: "text", required: true, max: 200 },
+        { name: "WillDate", label: "Will date", type: "date" },
+        { name: "Beneficiaries", label: "Beneficiaries", type: "textarea", max: 1000 },
+        { name: "PropertyCovered", label: "Property covered", type: "textarea", max: 1000 },
+        { name: "Executor", label: "Executor", type: "text", max: 200 },
+        { name: "Witnesses", label: "Witnesses", type: "text", max: 500 },
+        { name: "ProbateRef", label: "Probate / court order", type: "text", max: 200 },
+        { name: "ValidityStatus", label: "Legal validity", type: "select", required: true, options: ["Under Review", "Valid", "Disputed", "Invalid", "Probate Pending"], default: "Under Review" },
+        { name: "DocFileId", label: "Will copy", type: "file" },
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
+  "land-possession": landChild("Possession History", "LegalLandPossession", "PossessionId",
+    "Who actually occupies the land — separate from recorded and verified ownership.", {
+      label: "r.OccupantName + ' · ' + r.PossessionType", orderBy: "StartDate, PossessionId",
+      fields: [
+        LAND_ID,
+        { name: "OccupantName", label: "Person in possession", type: "text", required: true, max: 200 },
+        { name: "PossessionType", label: "Possession type", type: "select", required: true, options: ["Owner Occupied", "Tenant Occupied", "Lease Occupied", "Bargadar / Sharecropper", "Government Occupation", "Unauthorized Occupation", "Disputed Possession", "Unknown"] },
+        { name: "StartDate", label: "Possession from", type: "date" },
+        { name: "EndDate", label: "Possession to (blank = still)", type: "date" },
+        { name: "Purpose", label: "Purpose", type: "text", max: 200 },
+        { name: "DagKhatianRef", label: "Dag / Khatian reference", type: "text", max: 200 },
+        { name: "AreaOccupied", label: "Area occupied", type: "decimal" },
+        { name: "AreaUnitId", label: "Area unit", type: "ref", ref: "area-unit", requiredWith: "AreaOccupied" },
+        { name: "Source", label: "Survey / inspection reference", type: "text", max: 200 },
+        { name: "VerificationStatus", label: "Verification / dispute status", type: "select", required: true, options: ["Pending", "Verified", "Disputed", "Unable to Verify"], default: "Pending" },
+        { name: "DocFileId", label: "Evidence", type: "file" },
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 2000 },
+        ACTIVE,
+      ],
+    }),
+  "land-alt-history": landChild("Alternative Land History", "LegalLandAltHistory", "AltId",
+    "Khas / vested land, patta, grant, settlement, lease, tenancy, encroachment, court order and other claims — claims, evidence or events, never automatic ownership.", {
+      label: "r.Category + ISNULL(' · ' + r.ReferenceNo, '')", orderBy: "RelevantDate, AltId",
+      fields: [
+        LAND_ID,
+        { name: "Category", label: "Category", type: "select", required: true, options: ["Government land / settlement", "Private land / other acquisition", "Tenancy / occupancy", "Disputed / possession claim", "Other"] },
+        { name: "SubcategoryId", label: "Subcategory", type: "ref", ref: "alt-land-subcategory" },
+        { name: "ReferenceNo", label: "Reference number", type: "text", max: 100 },
+        { name: "HolderClaimant", label: "Holder / claimant", type: "text", max: 200 },
+        { name: "IssuingAuthority", label: "Issuing authority", type: "text", max: 200 },
+        { name: "RelevantDate", label: "Relevant date", type: "date" },
+        { name: "ValidFrom", label: "Valid from", type: "date" },
+        { name: "ValidTo", label: "Valid to / expiry", type: "date" },
+        { name: "Area", label: "Area", type: "decimal" },
+        { name: "AreaUnitId", label: "Area unit", type: "ref", ref: "area-unit", requiredWith: "Area" },
+        { name: "DagKhatianRef", label: "Dag / Khatian reference", type: "text", max: 200 },
+        { name: "VerificationStatus", label: "Verification status", type: "select", required: true, options: ["Pending", "Verified", "Disputed", "Rejected", "Unable to Verify"], default: "Pending" },
+        { name: "DocFileId", label: "Supporting document", type: "file" },
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 2000 },
+        ACTIVE,
+      ],
+    }),
   "ownership-event": landChild("Ownership Transfer", "LegalOwnershipEvent", "EventId",
     "Each transfer in the chain — sale, inheritance, gift, partition, court order — from previous owner to new owner.", {
       label: "CONVERT(NVARCHAR(10), r.EventDate, 105) + ' ' + ISNULL((SELECT x.Name FROM dbo.LegalLookupValue x WHERE x.LookupId = r.TransferTypeId), '') + ': ' + ISNULL(r.PreviousOwnerName, '?') + N' → ' + r.NewOwnerName",
       orderBy: "EventDate, EventId", review: REVIEW,
+      // A verified event is part of the approved chain: change it through an amendment, never directly.
+      guard: async (pool, id) => eventLocked(pool, id),
       fields: [
         LAND_ID,
-        { name: "TransferTypeId", label: "Transfer type", type: "ref", ref: "transfer-type", required: true },
-        { name: "EventDate", label: "Transfer date", type: "date", required: true },
+        { name: "TransferTypeId", label: "Event type", type: "ref", ref: "transfer-type", required: true },
+        { name: "ParcelId", label: "Parcel", type: "ref", ref: "land-parcel", filterBy: "LandId" },
+        { name: "EventDate", label: "Event date", type: "date", required: true },
+        { name: "EffectiveDate", label: "Effective date", type: "date" },
+        { name: "DocumentDate", label: "Document date", type: "date" },
+        // Set by Verify / Dispute / Reject on the land page (another user than the one who entered it).
+        { name: "ApprovalStatus", label: "Approval status", type: "select", system: true, options: ["Draft", "Pending Verification", "Verified", "Disputed", "Rejected"], default: "Pending Verification" },
         // Earlier owners are history, typed in by name; linking a Party master entry is optional and fills the name.
         // Owners are picked from (or added to) the Owner list; the matched owner's id is kept in PreviousOwnerId / NewOwnerId.
         { name: "PreviousOwnerName", label: "From — previous owner", type: "text", max: 200, suggest: "owner", party: "Owner", partyId: "PreviousOwnerId" },
@@ -642,8 +1045,11 @@ const MASTERS = {
         { name: "OwnerGuardian", label: "Father / husband name", type: "text", max: 200 },
         { name: "PersonId", label: "Owner (Owner list)", type: "ref", ref: "person", hidden: true },
         { name: "OwnershipTypeId", label: "Ownership type", type: "ref", ref: "ownership-type", required: true },
+        { name: "OwnerKind", label: "Owner kind", type: "select", options: OWNER_KINDS },
+        { name: "ParcelId", label: "Parcel", type: "ref", ref: "land-parcel", filterBy: "LandId" },
         { name: "RelationshipTypeId", label: "Relationship", type: "ref", ref: "relationship-type" },
         { name: "SharePct", label: "Ownership share (%)", type: "decimal", required: true, maxValue: 100 },
+        { name: "ShareFraction", label: "Share as fraction (e.g. 1/3)", type: "text", max: 20, pattern: "^\\d+/\\d+$", patternMsg: "Write a fraction like 1/3" },
         { name: "ValidFrom", label: "Ownership start date", type: "date", required: true },
         { name: "ValidTo", label: "Ownership end date (blank = current)", type: "date", after: "ValidFrom" },
         { name: "EventId", label: "Created by transfer", type: "ref", ref: "ownership-event", filterBy: "LandId" },
@@ -689,6 +1095,8 @@ const MASTERS = {
   inheritance: landChild("Inheritance", "LegalInheritance", "InheritanceId",
     "A deceased owner's share passing to legal heirs, with the death and heirship evidence.", {
       label: "'Estate of ' + r.DeceasedName",
+      // An approved case is frozen (its event is in the verified chain): reopen through the workflow.
+      guard: async (pool, id) => inheritanceLocked(pool, id),
       orderBy: "InheritanceId", review: REVIEW,
       fields: [
         LAND_ID,
@@ -696,6 +1104,24 @@ const MASTERS = {
         { name: "DeceasedGuardian", label: "Deceased's father / husband", type: "text", max: 200 },
         { name: "DeceasedPersonId", label: "Deceased owner from Owner list (optional)", type: "ref", ref: "person", fill: { DeceasedName: "FullName", DeceasedGuardian: "GuardianName" } },
         { name: "DateOfDeath", label: "Date of death", type: "date" },
+        { name: "DeceasedGender", label: "Deceased's gender", type: "select", options: ["Male", "Female", "Other"] },
+        { name: "ParcelId", label: "Parcel", type: "ref", ref: "land-parcel", filterBy: "LandId" },
+        { name: "PrevEventId", label: "Ownership event that gave the deceased the land", type: "ref", ref: "ownership-event", filterBy: "LandId" },
+        { name: "AvailableSharePct", label: "Deceased's available share in the parcel (%)", type: "decimal", maxValue: 100 },
+        { name: "AvailableShareFraction", label: "Available share as fraction (e.g. 1/2)", type: "text", max: 20, pattern: "^\\d+/\\d+$", patternMsg: "Write a fraction like 1/2" },
+        { name: "SuccessionType", label: "Succession type", type: "select", options: ["Intestate – No Will", "Testamentary – Will Available", "Partial Testamentary Succession", "Court-Ordered Succession", "Other / Requires Review"] },
+        { name: "PropertyType", label: "Property type", type: "select", options: ["Agricultural", "Non-Agricultural", "Residential", "Commercial", "Other"] },
+        { name: "NatureOfOwnership", label: "Nature of ownership", type: "select", options: ["Self-Acquired / Separate Property", "Inherited Property", "Joint Ownership", "Mitakshara Coparcenary Property", "Undivided Family Property", "Government Grant / Patta", "Other / Requires Review"] },
+        { name: "WillAvailable", label: "Will available", type: "bit", default: false },
+        { name: "CourtOrderAvailable", label: "Court order available", type: "bit", default: false },
+        { name: "PreviousPartition", label: "Earlier partition", type: "bit", default: false },
+        // Never from religion alone: the legal officer confirms the framework (with property type, date of death, will…).
+        { name: "PersonalLaw", label: "Relevant personal law", type: "select", options: ["Hindu", "Muslim", "Christian / Parsi (Indian Succession Act)", "Other", "Not determined"] },
+        { name: "ApplicableFramework", label: "Applicable succession framework", type: "select", options: INHERITANCE_FRAMEWORKS },
+        { name: "SchoolOfLaw", label: "School of Muslim law", type: "select", options: ["Sunni (Hanafi)", "Shia", "Other / not determined"] },
+        { name: "SpecialCircumstances", label: "Special legal circumstances", type: "textarea", max: 1000 },
+        { name: "LegalOfficerId", label: "Legal officer", type: "ref", ref: "user" },
+        { name: "ReviewStatus", label: "Review status", type: "select", system: true, options: ["Draft", "Verifier Review", "Legal Officer Review", "Approved", "Returned", "Rejected", "Disputed", "Further Investigation"], default: "Draft" },
         { name: "DeathCertFileId", label: "Death certificate", type: "file" },
         { name: "HeirCertFileId", label: "Legal heir certificate", type: "file" },
         { name: "SupportingType", label: "Other supporting record", type: "select", required: true, options: ["None", "Will", "Probate", "Succession Certificate", "Court Order"], default: "None" },
@@ -1581,16 +2007,21 @@ const MASTERS = {
   // marked "On every enquiry" get a search timeline on each new enquiry in that state (blank state = all of India).
   "registration-office-type": {
     title: "Registration Office Type", group: "Registration", pageKey: "legal-registration-office-type-master", table: "LegalRegistrationOfficeType", pk: "OfficeTypeId",
-    desc: "Kinds of registration office, state by state, with the Deed Registry Search time limit for each.",
+    desc: "Search sources for Land Records Search, state by state: survey records (CS / RS / LR), deed registry offices, land record offices (BL&LRO) and others, each with its period and time limit.",
     label: "TypeName + ISNULL(' (' + StateName + ')', '')", orderBy: "StateName, SortOrder, TypeName",
     unique: [["TypeName", "StateName"], "This office type already exists for this state"],
     fields: [
       { name: "TypeName", label: "Office type", type: "text", required: true, max: 60 },
       { name: "Code", label: "Code", type: "text", max: 20, upper: true },
+      // Survey records are record versions (CS / RS / LR); registry offices hold registered deeds; BL&LRO is a land record office.
+      { name: "SourceKind", label: "Source type", type: "select", required: true, options: ["Survey record", "Registry office", "Land record office", "Other"], default: "Registry office" },
       { name: "StateName", label: "State (blank = all India)", type: "text", max: 100 },
-      { name: "SlaDays", label: "Deed search time limit (days)", type: "int", required: true, min: 1, maxValue: 365, default: 7 },
-      { name: "FromYear", label: "Search from calendar year", type: "int", required: true, min: 1800, maxValue: 2100, default: 1956 },
+      { name: "DistrictId", label: "Only for district (optional)", type: "ref", ref: "district" },
+      { name: "SlaDays", label: "Search time limit (days)", type: "int", required: true, min: 1, maxValue: 365, default: 7 },
+      { name: "FromYear", label: "Search from year", type: "int", required: true, min: 1800, maxValue: 2100, default: 1956 },
+      { name: "ToYear", label: "Search to year (blank = current year)", type: "int", min: 1800, maxValue: 2100 },
       { name: "OnEnquiry", label: "Timeline on every new enquiry", type: "bit", default: true },
+      { name: "IsMandatory", label: "Mandatory before Land Conversion", type: "bit", default: true },
       { name: "Description", label: "Full name / notes", type: "textarea", max: 500 },
       { name: "SortOrder", label: "Display order", type: "int", min: 0, default: 0 },
       ACTIVE,
@@ -1726,7 +2157,7 @@ const MASTERS = {
     label: "Stage + ' - ' + (SELECT name FROM dbo.users WHERE id = r.ApproverId)", orderBy: "Stage, ApproverId", adminOnly: true,
     unique: [["Stage", "ApproverId"], "This user already has this approval role"],
     fields: [
-      { name: "Stage", label: "Approval role", type: "select", required: true, options: ["Verifier", "Approver", "Legal Reviewer", "Amendment Approver", "Legal Admin", "Search Executive"] },
+      { name: "Stage", label: "Approval role", type: "select", required: true, options: ["Verifier", "Approver", "Land Approver", "Legal Reviewer", "Legal Officer", "Amendment Approver", "Legal Admin", "Search Executive", "Auditor"] },
       // Several users can be picked when adding (one row each); a row is edited one user at a time.
       { name: "ApproverId", label: "Users", type: "ref", ref: "user", required: true, multi: true },
       { name: "Remarks", label: "Remarks", type: "textarea", max: 500 },
@@ -1794,6 +2225,7 @@ const MASTERS = {
       { name: "ActivityNo", label: "No.", type: "int", required: true, min: 1 },
       { name: "ActivityCode", label: "Code", type: "text", required: true, max: 20, upper: true },
       { name: "ActivityName", label: "Activity", type: "text", required: true, max: 150 },
+      { name: "Category", label: "Category", type: "select", options: ["Record Search", "Record Verification", "Document Collection", "Ownership Investigation", "Field Investigation", "Legal Compliance", "Court / Dispute Investigation"] },
       { name: "Department", label: "Department", type: "text", max: 80 },
       { name: "DefaultDays", label: "Expected duration (days)", type: "int", min: 0 },
       { name: "Stage", label: "Stage", type: "select", required: true, options: ["Verification", "Post-registration"], default: "Verification" },
@@ -1830,6 +2262,9 @@ const MASTERS = {
 
   // ── Land record, ownership, legal & financial lists ────────────────────────────────────────────
   "copy-type": lookup("copy-type", "Document Copy Type", "Land records", "Certified, online, office copy, photocopy…"),
+  "alt-land-subcategory": lookup("alt-land-subcategory", "Alternative History Subcategory", "Land records", "Patta, lease, tenancy, claim kinds for Land Records Search"),
+  // Final Legal Review checklist (configurable; each review records the version it used).
+  "final-review-check": lookup("final-review-check", "Final Review Check", "Workflow", "The points the Legal Reviewer checks in the Final Legal Review"),
   "enquiry-source": lookup("enquiry-source", "Enquiry Source", "Land records", "Where a land enquiry came from"),
   "ownership-type": lookup("ownership-type", "Ownership Type", "Ownership", "Individual, joint, inherited, company…"),
   "relationship-type": lookup("relationship-type", "Relationship Type", "Ownership", "Father, son, wife, legal heir…"),
@@ -1890,6 +2325,17 @@ const MASTERS = {
       { name: "RiskLevel", label: "Risk level", type: "select", required: true, options: ["Low", "Medium", "High", "Critical"] },
       { name: "IsBlocking", label: "Blocks processing (restriction / case / attachment rules)", type: "bit", default: false },
       { name: "LawRef", label: "Law / section", type: "text", max: 300 },
+      { name: "LegalFramework", label: "Legal framework", type: "text", max: 150 },
+      { name: "LegalProvision", label: "Legal provision", type: "text", max: 300 },
+      { name: "PropertyType", label: "Applicable property type", type: "text", max: 100 },
+      { name: "Jurisdiction", label: "Applicable location / jurisdiction", type: "text", max: 150 },
+      { name: "CaseType", label: "Applicable case type", type: "text", max: 150 },
+      { name: "EffectiveDate", label: "Effective date", type: "date" },
+      { name: "ExpiryDate", label: "Expiry date", type: "date", after: "EffectiveDate" },
+      { name: "RuleVersion", label: "Rule version", type: "text", required: true, max: 20, default: "1" },
+      { name: "RuleStatus", label: "Status", type: "select", required: true, options: ["Draft", "Under Review", "Approved", "Active", "Superseded", "Disabled"], default: "Active" },
+      { name: "ApprovedBy", label: "Approved by", type: "ref", ref: "user" },
+      { name: "ApprovalDate", label: "Approval date", type: "date" },
       { name: "LawyerValidated", label: "Validated by a lawyer", type: "bit", default: false },
       { name: "Notes", label: "Notes", type: "textarea", max: 1000 },
       ACTIVE,
@@ -2026,4 +2472,4 @@ const EXTERNAL_REFS = {
   company: { sql: "SELECT id AS value, name AS label FROM dbo.enterprise WHERE business_type = 'C' AND (discontinue IS NULL OR discontinue = 0) ORDER BY name", exists: "SELECT 1 FROM dbo.enterprise WHERE id = @v AND business_type = 'C'" },
 };
 
-module.exports = { MASTERS, EXTERNAL_REFS, DUE_DILIGENCE_CHECKS, VERIFICATION_CHECKS, FINAL_CHECKS, dagClash };
+module.exports = { MASTERS, EXTERNAL_REFS, DUE_DILIGENCE_CHECKS, VERIFICATION_CHECKS, FINAL_CHECKS, dagClash, DUPLICATE };

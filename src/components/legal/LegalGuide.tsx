@@ -11,7 +11,7 @@ import { BodyPortal } from "@/components/ui/body-portal";
  * same change. The activity list, durations, dependencies, reminder days and the report list are read live from
  * Setup / the server, so they never go out of date.
  */
-const GUIDE_UPDATED = "26 Nov 2026 · Legal V2.1 (Assign tab, My tasks covers all Legal work, due-date colours)";
+const GUIDE_UPDATED = "27 Nov 2026 · V3 complete: 24 new reports, versioned checklist & legal rules, amendment types, My tasks for inheritance / disputes / events / documents / amendments;  V3 parcels, ownership events, family & inheritance engine;  V3 phase A corrections (rejected activities block review, duplicate confirm, approval terms, deed statuses, activity categories);  Land Records Search phases 1–3 (records, mapping, discrepancies, alternative history, possession, legal review, summary); 26 Nov · Other… adds to masters; Ownership History tree view; Legal V2.1 (Assign tab, My tasks, due-date colours)";
 
 type Step = { title: string; where?: string; points: string[] };
 const STEPS: Step[] = [
@@ -23,14 +23,28 @@ const STEPS: Step[] = [
     "Verification Activities, Activity Dependencies, Activity Reminder Days and Legal Rules (see the live lists below).",
   ] },
   { title: "Land Enquiry", where: "Pipeline → 1", points: [
+    "A Dag already on another open enquiry or land is not refused: the match is shown and a user with approve right can confirm it is a different / related parcel (audited). Hold / Reject keep their reason; set a next action date on the enquiry.",
+    "The enquiry form takes the RS / LR Dag (plot) and Khatian numbers (several comma-separated); RS / LR records added later keep them in step.",
     "Record the offer: project, mouza, Dag / Khatian, area, owner contact, price, source. A duplicate Dag / Khatian is warned.",
     "Status: New → Under Review → Interested / On Hold / Rejected → Converted to Land Record. Verifiers are notified.",
   ] },
-  { title: "Deed search", where: "Pipeline → 2", points: [
+  { title: "Land records search", where: "Pipeline → 2", points: [
+    "Sources are kept apart: survey records (CS / RS / LR, record versions), registry offices (deeds: ADSR, DSR, RA), land record offices (BL&LRO) and other searches. Period, district, time limit and mandatory / optional are set per source in Setup → Registration Office Types.",
+    "Survey tabs hold the actual record entries (Khatian, Dag, holder, area, classification, source, status, copy); the year grid only logs the search coverage.",
+    "Year results: Found, Not Found, Not Applicable (reason required), Under Review, Certified Copy Requested, Awaiting Office Response (these block completion), Unable to Access, Record Not Digitised (complete only with an exception by an approver). Each can carry method, date, reference and evidence.",
+    "Record mapping links CS → RS → LR entries (one-to-many / many-to-one) with match status, basis and evidence; holder / area / classification differences show as alerts to investigate — a matching Dag alone never proves the same land.",
+    "Only mandatory sources block Land Conversion.",
+    "Investigation sections (top row): Record mapping · Discrepancies (type, severity, status, assignee, resolution; raise them straight from a mapping alert) · Alternative history (patta, lease, settlement, tenancy, claims — Other… adds a subcategory) · Possession (who occupies, separate from ownership) · Legal review · Summary.",
+    "Legal review: risk level and recommendation with remarks; every review kept, the latest counts. Hold or Not Recommended stops Land Conversion; open discrepancies or search exceptions need a review recommending to proceed.",
+    "Summary: everything in one page with observations and the overall status — Print / PDF and Excel (CSV). At Land Conversion the whole search is frozen as a snapshot (with a fingerprint) and the enquiry's lists become read-only.",
+    "None of this certifies title: a found record, a deed party or an occupant is never treated as the legal owner — the legal team decides.",
+    "Besides the registry offices, every enquiry searches the land records year by year: CS Record (from 1920), RS Record (from 1956) and LR Record (from 1985).",
+    "+ Add search adds another search to one enquiry; Other… takes a new name, which is saved in Setup → Registration Office Types and offered next time.",
     "Each registry office gets a timeline with a due date; every year 1956 → today is marked Found / Not Found / Not Applicable.",
     "An office is completed once every year is searched. Due-soon and overdue reminders.",
   ] },
   { title: "Legal verification", where: "Pipeline → 3", points: [
+    "A rejected mandatory activity has not passed: the verification stays open until it is reopened and verified, approved N/A, or the whole verification is rejected. Activities have a category and structured findings (Clear, Discrepancy Found, Document Missing, Records Not Available, Further Investigation Required, Not Applicable — remarks required); government expected and next action dates are kept apart from the internal target. Activity 11 is only the LA / ULC requirement check — applications and clearances are in the LA & ULC stage.",
     "Start a workspace for an enquiry: every active activity is created with a target date (internal, not a government timeline).",
     "Assign: the workspace's Assign tab lists every activity with Employee, Verifier and Target date — set them all at once (or \"Apply to all open\"), then Save. Reassigning needs a handover note; everyone assigned is notified.",
     "Employee: assign employee and verifier (different people), set the work status (In Progress, Applied, Report Pending, On Hold with reason and next action), add the activity's entries, link documents in the register, record the finding and government dates.",
@@ -44,15 +58,25 @@ const STEPS: Step[] = [
     "Each decision is a numbered, fingerprinted version that cannot change; Approve locks the workspace and tells the Approvers.",
   ] },
   { title: "Land record and field verification", where: "Lands → Land Profile", points: [
+    "Land intelligence panel: Parcels & area (several parcels per enquiry / land, same rows after conversion; areas compared across record, CS / RS / LR, offered, deed, surveyed and ownership).",
+    "Ownership events: every transferor and transferee with share (% and exact fraction) and owner kind; another user verifies, disputes or rejects; a verified event changes only through an amendment. Event tree shows unverified / disputed events marked.",
+    "Family & inheritance: the family tree (who is related to whom) is separate from ownership. Inheritance cases carry succession type, property type, nature of ownership, will / court order, framework and school; the Legal Officer confirms the framework (never from religion alone).",
+    "Provisional share calculation (exact fractions, versioned, rule version shown): Hindu male s.8/s.10, Hindu female s.15(1)(a)/s.16, Muslim Sunni with a son on non-agricultural land. Anything else — agricultural land under Muslim law, coparcenary, wills, disputed or missing heirs — says Requires Legal Review. A second Legal Officer approves; never forced to 100 %.",
+    "Case workflow: Draft → Verifier Review → Legal Officer Review → Approved (needs a confirmed framework, an approved calculation or recorded heirs, and no open dispute) — approval adds a verified inheritance event to the ownership history.",
+    "Disputes register and land possession / alternative history sit in the same panel; open disputes and unverified events show as risks at Land Approval.",
     "Converting the enquiry creates the land; fill every section (owners, history, inheritance, records, cases, mortgage, transaction, payments, valuation, tax, documents).",
+    "In any form, a master dropdown (transfer type, ownership type, relationship, payment mode…) has Other…: type the value and it is added to that master on save.",
+    "Every land section has a Structure view (entries drawn as a diagram, oldest first, with completeness and files); Ownership History has a Tree view: each owner hangs under the owner they got the land from (Previous owner); current owners are outlined in green.",
     "Send for verification: the Verifier marks each field ✓ / ✗ / N/A, sends back or saves a version.",
   ] },
   { title: "Land Approval", where: "Approvals", points: [
+    "Roles in Approval Control: Verifier, Approver / Land Approver, Legal Reviewer, Legal Officer (frameworks, inheritance approval), Amendment Approver, Legal Admin, Search Executive, Auditor (read-only by page rights).",
+    "Final Legal Review says the legal investigation is acceptable; Land Approval is the company's decision to acquire — offered / negotiated / approved price, conditions, the outstanding risks shown, and a written risk acceptance when a high / critical risk is open.",
     "The Approver approves (→ Deed Process) or sends back.",
     "Refused until the Final Legal Review is approved, unless an authorised user records an exception (rule final_review_gate).",
   ] },
   { title: "Deed Process", where: "Pipeline → 5", points: [
-    "Deed stage (Drafting → Under Review → Clearance Pending → Ready for Approval), drafter, target date, deed copy.",
+    "Deed stage (Drafting → Under Review → Clearance Pending → Ready for Approval, or Cancelled / Not Proceeded with a reason); Submitted for Registration and Registered follow the L2 approval and the registration. Drafter, target date, deed copy.",
     "Submit for final approval → L1 → L2.",
   ] },
   { title: "LA & ULC", where: "Pipeline → 6", points: ["Each clearance on its own: application, queries, report, certificate, expiry. Submitting is not a clearance."] },
@@ -140,7 +164,7 @@ export function LegalGuideButton() {
               <button onClick={() => setOpen(false)} aria-label="Close" className="border border-foreground/40 p-1.5 hover:border-foreground"><X size={16} /></button>
             </div>
             <p className="mb-3 border border-border bg-muted/30 px-3 py-2 text-xs">
-              Flow: Enquiry → Deed search → Legal verification → Final Legal Review → Land record → Land Approval → Deed Process → LA &amp; ULC → Deed Registration → Post-registration.
+              Flow: Enquiry → Land records search → Legal verification → Final Legal Review → Land record → Land Approval → Deed Process → LA &amp; ULC → Deed Registration → Post-registration.
             </p>
             <ol className="space-y-3">
               {STEPS.map((s, i) => (

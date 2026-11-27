@@ -24,7 +24,7 @@ export default function LegalVerificationReportsPage() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [vid, setVid] = useState("");
-  const [flt, setFlt] = useState({ enquiry: "", mouza: "", dag: "", employee: "", status: "", verify: "" });
+  const [flt, setFlt] = useState({ enquiry: "", mouza: "", district: "", dag: "", employee: "", source: "", status: "", verify: "", risk: "" });
   const [applied, setApplied] = useState(flt);
   const meta = list.data?.find((r) => r.key === key);
   const ws = useQuery({ queryKey: ["legal-verification-list", "all-for-report", project], queryFn: () => getVerifications(`project=${project}`), enabled: !!meta?.needsVerification });
@@ -40,7 +40,7 @@ export default function LegalVerificationReportsPage() {
           filename={key} disabled={!data.rows.length || !rights.canExport} /> : undefined}>
         <div className="mb-4 flex flex-wrap items-end gap-2 border border-border bg-card p-3">
           <label className="min-w-[16rem] flex-1"><span className={lbl}>Report</span>
-            <select className={`${input} w-full`} value={key} onChange={(e) => { setKey(e.target.value); const none = { enquiry: "", mouza: "", dag: "", employee: "", status: "", verify: "" }; setFlt(none); setApplied(none); }}>
+            <select className={`${input} w-full`} value={key} onChange={(e) => { setKey(e.target.value); const none = { enquiry: "", mouza: "", district: "", dag: "", employee: "", source: "", status: "", verify: "", risk: "" }; setFlt(none); setApplied(none); }}>
               {(list.data ?? []).map((r, i) => <option key={r.key} value={r.key}>{i + 1}. {r.title}</option>)}
             </select></label>
           {meta?.needsVerification && (
@@ -54,8 +54,10 @@ export default function LegalVerificationReportsPage() {
           {(from || to) && <button className="h-9 text-xs underline" onClick={() => { setFrom(""); setTo(""); }}>Clear dates</button>}
         </div>
         <div className="mb-4 flex flex-wrap items-end gap-2 border border-border bg-card p-3">
-          {([["enquiry", "Enquiry / verification no."], ["mouza", "Mouza"], ["dag", "Dag"], ["employee", "Employee"], ["status", "Status / result"], ["verify", "Verification status"]] as const).map(([k, l]) => {
+          {([["enquiry", "Enquiry / verification no."], ["mouza", "Mouza"], ["district", "District"], ["dag", "Dag"], ["employee", "Employee"], ["source", "Source / type"], ["status", "Status / result"], ["verify", "Verification status"], ["risk", "Risk level"]] as const).map(([k, l]) => {
             const opts = data?.options?.[k] ?? [];
+            // Only the filters this report has values for are shown.
+            if (!opts.length && !flt[k]) return null;
             return (
               <label key={k} className="min-w-[9rem] flex-1"><span className={lbl}>{l}</span>
                 <select className={`${input} w-full`} value={flt[k]} disabled={!opts.length && !flt[k]} onChange={(e) => { const next = { ...flt, [k]: e.target.value }; setFlt(next); setApplied(next); }}>
@@ -65,7 +67,7 @@ export default function LegalVerificationReportsPage() {
                 </select></label>
             );
           })}
-          {Object.values(applied).some(Boolean) && <button className="h-9 text-xs underline" onClick={() => { const e = { enquiry: "", mouza: "", dag: "", employee: "", status: "", verify: "" }; setFlt(e); setApplied(e); }}>Clear filters</button>}
+          {Object.values(applied).some(Boolean) && <button className="h-9 text-xs underline" onClick={() => { const e = { enquiry: "", mouza: "", district: "", dag: "", employee: "", source: "", status: "", verify: "", risk: "" }; setFlt(e); setApplied(e); }}>Clear filters</button>}
         </div>
         {rep.error ? <p className="p-6 text-destructive">{(rep.error as Error).message}</p> : meta?.needsVerification && !vid ? <p className="border border-border p-6 text-sm text-muted-foreground">Choose a verification.</p>
           : rep.isLoading || !data ? <p className="p-6 text-muted-foreground">Loading…</p> : (

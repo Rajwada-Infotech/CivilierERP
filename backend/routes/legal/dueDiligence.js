@@ -122,6 +122,16 @@ async function autoFlags(pool, landId) {
     const sgg = await inheritanceSuggestion(pool, x.InheritanceId).catch(() => null);
     if (sgg?.result && differs(sgg.result.lines)) flags.push({ key: "share_suggestion", level: "Medium", text: `${x.DeceasedName}: recorded heir shares differ from the suggested shares — review` });
   }
+  // Legal V3: ownership disputes, events not yet verified, inheritance cases needing legal review.
+  const v3 = (await safe(pool, (q) => q.input("Id", sql.Int, landId).query(`SELECT
+      (SELECT COUNT(*) FROM dbo.LegalOwnershipDispute WHERE LandId = @Id AND IsActive = 1 AND DisputeStatus NOT IN (N'Resolved', N'Closed')) AS disputes,
+      (SELECT COUNT(*) FROM dbo.LegalOwnershipEvent WHERE LandId = @Id AND IsActive = 1 AND ApprovalStatus IN (N'Draft', N'Pending Verification', N'Disputed')) AS openEvents,
+      (SELECT COUNT(*) FROM dbo.LegalInheritance WHERE LandId = @Id AND IsActive = 1 AND ApplicableFramework = N'Muslim Personal Law (Shariat)' AND PropertyType = N'Agricultural' AND ReviewStatus <> N'Approved') AS agri,
+      (SELECT COUNT(*) FROM dbo.LegalInheritance WHERE LandId = @Id AND IsActive = 1 AND ReviewStatus NOT IN (N'Approved', N'Rejected')) AS openCases`), [{}]))[0] || {};
+  if (v3.disputes) flags.push({ key: "ownership_dispute", level: "High", text: `${v3.disputes} ownership dispute(s) open` });
+  if (v3.agri) flags.push({ key: "agri_inheritance_review", level: "High", text: "Agricultural land inherited under Muslim law — legal review required before any share is relied on" });
+  if (v3.openEvents) flags.push({ key: "ownership_event_unverified", level: "Medium", text: `${v3.openEvents} ownership event(s) not verified` });
+  if (v3.openCases) flags.push({ key: "inheritance_case_open", level: "Medium", text: `${v3.openCases} inheritance case(s) not yet approved` });
   if (expired) flags.push({ key: "doc_expired", level: "Medium", text: `${expired} document(s) past their validity — renew` });
   areas.filter((a) => a.Status === "Incomplete" || a.Status === "Requires Legal Review").forEach((a) => flags.push({ key: "area_incomplete", level: "Medium", text: `${AREAS[a.Area] ?? a.Area}: ${a.Status.toLowerCase()}` }));
   return applyRules(flags, await ruleConfig(pool));
@@ -129,7 +139,12 @@ async function autoFlags(pool, landId) {
 
 /** Setup → Legal Rules (migration 652): a rule can be switched off or graded differently; before it, the built-in grading. */
 async function ruleConfig(pool) {
-  const rows = await safe(pool, (q) => q.query("SELECT RuleKey, RiskLevel, IsBlocking, IsActive FROM dbo.LegalRuleConfig"), []);
+  // A rule applies only while Active / Approved and inside its effective period (spec 2.2D); an inactive one falls back to
+  // the built-in grading (it is simply not listed).
+  const rows = await safe(pool, (q) => q.query(`SELECT RuleKey, RiskLevel, IsBlocking, IsActive FROM dbo.LegalRuleConfig
+    WHERE ISNULL(RuleStatus, N'Active') IN (N'Active', N'Approved') AND (EffectiveDate IS NULL OR EffectiveDate <= CAST(GETDATE() AS DATE))
+      AND (ExpiryDate IS NULL OR ExpiryDate >= CAST(GETDATE() AS DATE))`),
+    null) ?? await safe(pool, (q) => q.query("SELECT RuleKey, RiskLevel, IsBlocking, IsActive FROM dbo.LegalRuleConfig"), []);
   return Object.fromEntries(rows.map((r) => [r.RuleKey, r]));
 }
 const applyRules = (flags, cfg) => flags
@@ -440,3 +455,4 @@ router.post("/:landId/fetches", requirePageRight(LAND_PAGE, "edit"), async (req,
 module.exports = router;
 module.exports.diligenceGate = diligenceGate;
 module.exports.processingBlockers = processingBlockers;
+module.exports.autoFlags = autoFlags;

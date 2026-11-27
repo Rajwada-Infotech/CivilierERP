@@ -245,7 +245,7 @@ export const approveDeedProcess = async (id: number, action: "Approve" | "Reject
 export const deedRegistrationAction = async (id: number, action: "apply" | "submit", fileId?: number) =>
   handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/deed-registration`, post({ action, fileId })));
 export const getDeedProcessLands = async (qs = "") => handle<{ lands: DeedProcessLand[]; deedStages?: string[]; canEditTimeline: boolean; canApprove?: boolean; canRequest?: boolean } & { total?: number; page?: number; pageSize?: number }>(await fetchWithAuth(`${BASE}/deed-process/list${qs ? `?${qs}` : ""}`));
-export const updateDeedProcess = async (id: number, body: { targetDate?: string; completed?: boolean; deedFileId?: number | null; deedStage?: string | null; drafterId?: number | null }) =>
+export const updateDeedProcess = async (id: number, body: { targetDate?: string; completed?: boolean; deedFileId?: number | null; deedStage?: string | null; drafterId?: number | null; reason?: string }) =>
   handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/deed-process`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));
 
 export const getLandPendingQueue = async () =>

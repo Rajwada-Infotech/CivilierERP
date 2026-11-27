@@ -614,6 +614,23 @@ const creatableRef = (ref) => {
   const m = MASTERS[ref];
   return !!m && !!m.scope && (m.table === "LegalLookupValue" || m.table === "LegalPerson");
 };
+/**
+ * A master's check said no. A possible duplicate land reference (Mouza + Dag) is not refused outright: the client
+ * shows the match and resends with __confirmDuplicate; only a user with approve right on that page may confirm, and
+ * the confirmation is audited. Returns true when the response has been sent (refused).
+ */
+async function duplicateRefused(pool, req, res, cfg, refused) {
+  const { DUPLICATE } = require("./masterConfig");
+  const dup = String(refused).startsWith(DUPLICATE);
+  const msg = dup ? String(refused).slice(DUPLICATE.length) : refused;
+  if (!dup) { res.status(409).json({ error: msg }); return true; }
+  if (req.body?.__confirmDuplicate !== true) { res.status(409).json({ error: msg, duplicate: true }); return true; }
+  const { hasAnyPageAction } = require("../../middleware/requirePageRight");
+  if (!(await hasAnyPageAction(req, cfg.pageKey, ["approve"]))) { res.status(403).json({ error: `${msg} Only a user with approve right can confirm a duplicate reference.` }); return true; }
+  await require("./legalAudit").writeAudit(pool, req, { action: "Duplicate land reference confirmed", entityType: cfg.title, entityId: req.params.id ? Number(req.params.id) : null, remarks: msg }).catch(() => {});
+  return false;
+}
+
 async function resolveNewRefs(pool, cfg, body, userId, added = []) {
   for (const f of cfg.fields) {
     const v = body[f.name];
@@ -628,6 +645,8 @@ async function resolveNewRefs(pool, cfg, body, userId, added = []) {
       .query(`INSERT INTO dbo.${m.table} (${m.scope.column}, ${col}${isPerson ? ", PartyType" : ""}, IsActive, CreatedBy, CreatedAt)
               OUTPUT INSERTED.${m.pk} AS id VALUES (@Scope, @Name${isPerson ? ", N'Individual'" : ""}, 1, @UserId, SYSUTCDATETIME())`)).recordset[0].id;
     added.push({ table: m.table, pk: m.pk, id: body[f.name] });
+    // Spec 2.2E: who added a value to a master through "Other…".
+    await require("./legalAudit").writeAudit(pool, { user: { userId } }, { action: "Master value added through Other…", entityType: m.title, entityId: body[f.name], newValue: { name } }).catch(() => {});
   }
 }
 
@@ -784,7 +803,7 @@ router.post("/:master", withRight("create"), async (req, res) => {
     // A master's own business rule (the same area cannot be sold twice…); `id` is null on add.
     if (cfg.check) {
       const refused = await cfg.check(pool, values, req.params.id ? Number(req.params.id) : null);
-      if (refused) return res.status(409).json({ error: refused });
+      if (refused && (await duplicateRefused(pool, req, res, cfg, refused))) return;
     }
     if (Object.values(values).includes(KEEP)) return res.status(400).json({ error: "Enter the full Aadhaar number" });
     const review = await reviewCols(req, cfg, values, null);
@@ -875,7 +894,7 @@ router.put("/:master/:id", withRight("edit"), async (req, res) => {
     // A master's own business rule (the same area cannot be sold twice…); `id` is null on add.
     if (cfg.check) {
       const refused = await cfg.check(pool, values, req.params.id ? Number(req.params.id) : null);
-      if (refused) return res.status(409).json({ error: refused });
+      if (refused && (await duplicateRefused(pool, req, res, cfg, refused))) return;
     }
     if (cfg.guard) {
       const refused = await cfg.guard(pool, id, values);

@@ -1,3 +1,4 @@
+import { OtherSelect } from "@/components/legal/OtherSelect";
 import { askLegal } from "@/components/legal/LegalAsk";
 import { DueBadge, dueRow, dueLevel, DUE_BG } from "@/components/legal/DueBadge";
 import { setUserWhatsApp } from "@/api/legalLandApi";
@@ -236,7 +237,7 @@ function toFieldDef(f: LegalFieldMeta, lookups: Record<string, LegalOption[]>, d
       ...base,
       type: "custom",
       render: (p) => (
-        <Combo id={`dl-${f.name}`} value={p.value} asRef onChange={p.onChange} error={p.error}
+        <OtherSelect value={p.value} onChange={p.onChange} error={p.error} className="h-[38px] w-full rounded-lg border border-border bg-muted px-3 text-sm"
           options={refOptions(f, lookups, p.formData).map((o) => ({ value: String(o.value), label: nameOf(o.label) }))} />
       ),
     };

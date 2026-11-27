@@ -98,8 +98,16 @@ export const submitReview = async (id: number, remarks?: string) => handle<{ mes
 /** Land Approval. Refused with needsException while the Final Legal Review is not approved (V2.1); an authorised user
  * may then approve with an exception reason, which is recorded. */
 export class LandGateError extends Error { needsException = true; }
-export const decideReview = async (id: number, action: "Approve" | "Return", remarks?: string, exceptionReason?: string) => {
-  const res = await fetchWithAuth(`${BASE}/land/${id}/review/decide`, json("POST", { action, remarks, exceptionReason }));
+export interface ApprovalTerms { offeredPrice?: number | null; negotiatedPrice?: number | null; approvedPrice?: number | null; conditions?: string; riskAcceptance?: string }
+export interface ApprovalContext {
+  land: { LandId: number; LandCode: string; EnquiryNo: string | null; ExpectedPrice: number | null; ProjectName: string | null };
+  risks: { key: string; level: "Low" | "Medium" | "High" | "Critical"; text: string }[];
+  finalReview: { ok: boolean; message?: string };
+  history: { Decision: string; OfferedPrice: number | null; NegotiatedPrice: number | null; ApprovedPrice: number | null; Conditions: string | null; RiskAcceptance: string | null; Remarks: string | null; DecidedAt: string; DecidedByName: string | null }[];
+}
+export const getApprovalContext = async (id: number) => handle<ApprovalContext>(await fetchWithAuth(`${BASE}/land/${id}/approval-context`));
+export const decideReview = async (id: number, action: "Approve" | "Return", remarks?: string, exceptionReason?: string, terms: ApprovalTerms = {}) => {
+  const res = await fetchWithAuth(`${BASE}/land/${id}/review/decide`, json("POST", { action, remarks, exceptionReason, ...terms }));
   const body = await res.json().catch(() => ({}));
   if (!res.ok) { if ((body as { needsException?: boolean }).needsException) throw new LandGateError((body as { error: string }).error); throw new Error((body as { error?: string }).error || "Request failed"); }
   return body as { message: string };

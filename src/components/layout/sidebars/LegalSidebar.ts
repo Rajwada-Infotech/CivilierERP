@@ -20,7 +20,7 @@ export const legalNavItems: NavItem[] = [
     label: "Pipeline", icon: Note1,
     children: [
       { label: "1 · Enquiries", path: "/legal/land/enquiries", pageKey: "legal-land-enquiry" },
-      { label: "2 · Deed search", path: "/legal/land/deed-search", pageKey: "legal-land-enquiry" },
+      { label: "2 · Land records search", path: "/legal/land/deed-search", pageKey: "legal-land-enquiry" },
       { label: "3 · Legal verification", path: "/legal/land/verification", pageKey: "legal-land-enquiry" },
       { label: "4 · Land conversion", path: "/legal/land/properties?filter=verification", pageKey: "legal-land-master" },
       { label: "5 · Deed Process", path: "/legal/land/deed-process", pageKey: "legal-land-master" },

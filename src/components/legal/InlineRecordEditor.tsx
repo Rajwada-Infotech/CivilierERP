@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { OtherSelect } from "@/components/legal/OtherSelect";
 import { addLegalRow, getLegalLookup, getLegalMeta, getLegalRows, updateLegalRow, uploadLegalFile, type LegalFieldMeta } from "@/api/legalMastersApi";
 
 /** Land section → the masters its entries come from (backend landFlow.js ENTRY_SECTIONS). */
@@ -15,6 +16,8 @@ const shown = (f: LegalFieldMeta) => !f.system && !f.hidden && !f.auto;
 
 function RefSelect({ f, value, onChange }: { f: LegalFieldMeta; value: string; onChange: (v: string) => void }) {
   const { data } = useQuery({ queryKey: ["legal-lookup", f.ref], queryFn: () => getLegalLookup(f.ref!), staleTime: 300_000, enabled: !!f.ref });
+  if (f.creatable) return <OtherSelect value={value} onChange={onChange} className={input}
+    options={(data ?? []).filter((o) => o.active !== false || String(o.value) === value).map((o) => ({ value: String(o.value), label: o.label }))} />;
   return (
     <select value={value} onChange={(e) => onChange(e.target.value)} className={input}>
       <option value="">Select…</option>

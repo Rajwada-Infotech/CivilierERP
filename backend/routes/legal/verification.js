@@ -38,14 +38,15 @@ const PAGE = "legal-land-enquiry";
 const WORK_STATUSES = ["Not Started", "In Progress", "Applied", "Report Pending", "On Hold", "Submitted for Review", "Closed"];
 const EMPLOYEE_STATUSES = ["Not Started", "In Progress", "Applied", "Report Pending", "On Hold"]; // the rest come from actions
 const VERIFY_STATUSES = ["Not Reviewed", "Under Review", "Verified", "Returned", "Rejected", "N/A"];
-const FINDINGS = ["Found", "Not Found in Sources Searched", "Incomplete", "Records Not Available", "Matched", "Mismatched", "Discrepancy Found",
-  "Additional Documents Required", "Unable to Verify", "Case Found"];
+const FINDINGS = ["Clear", "Found", "Not Found in Sources Searched", "Incomplete", "Records Not Available", "Matched", "Mismatched", "Discrepancy Found",
+  "Document Missing", "Additional Documents Required", "Further Investigation Required", "Unable to Verify", "Case Found", "Not Applicable"];
+const CATEGORIES = ["Record Search", "Record Verification", "Document Collection", "Ownership Investigation", "Field Investigation", "Legal Compliance", "Court / Dispute Investigation"];
 const PRIORITIES = ["Low", "Normal", "High", "Urgent"];
 const CLEARED = ["Verified", "N/A"]; // a prerequisite counts as done
 const ASSESSED = ["Verified", "N/A", "Rejected"]; // the verifier has decided
-const BAD_FINDINGS = ["Mismatched", "Discrepancy Found", "Additional Documents Required", "Unable to Verify", "Case Found", "Incomplete", "Records Not Available"];
+const BAD_FINDINGS = ["Mismatched", "Discrepancy Found", "Document Missing", "Additional Documents Required", "Further Investigation Required", "Unable to Verify", "Case Found", "Incomplete", "Records Not Available"];
 const GOV_DATES = { govSubmissionDate: "GovSubmissionDate", ackDate: "AckDate", queryDate: "QueryDate", queryResponseDate: "QueryResponseDate",
-  hearingDate: "HearingDate", reportReceiptDate: "ReportReceiptDate", orderDate: "OrderDate" };
+  hearingDate: "HearingDate", reportReceiptDate: "ReportReceiptDate", orderDate: "OrderDate", govtExpectedDate: "GovtExpectedDate", nextActionDate: "NextActionDate" };
 
 /**
  * Edit right on an activity: the enquiry page's edit right, or a Search Executive (Approval Control) — who may then
@@ -77,6 +78,7 @@ const ACTIVITY_SELECT = `
          CONVERT(char(10), a.GovSubmissionDate, 23) AS GovSubmissionDate, CONVERT(char(10), a.AckDate, 23) AS AckDate, CONVERT(char(10), a.QueryDate, 23) AS QueryDate,
          CONVERT(char(10), a.QueryResponseDate, 23) AS QueryResponseDate, CONVERT(char(10), a.HearingDate, 23) AS HearingDate,
          CONVERT(char(10), a.ReportReceiptDate, 23) AS ReportReceiptDate, CONVERT(char(10), a.OrderDate, 23) AS OrderDate,
+         CONVERT(char(10), a.GovtExpectedDate, 23) AS GovtExpectedDate, CONVERT(char(10), a.NextActionDate, 23) AS NextActionDate, t.Category,
          a.Findings, a.Remarks, a.HoldReason, a.NextAction, a.ReviewedBy, rv.name AS ReviewedByName, a.ReviewedAt, a.VerifyRemarks,
          a.SubmittedBy, su.name AS SubmittedByName, a.SubmittedAt,
          a.NaReason, a.NaRequestedBy, nu.name AS NaRequestedByName, a.NaRequestedAt, na.name AS NaApprovedByName, a.NaApprovedAt,
@@ -119,12 +121,16 @@ const WORKSPACE_SELECT = `
   LEFT JOIN dbo.LegalDistrict d ON d.DistrictId = e.DistrictId
   LEFT JOIN dbo.LegalAreaUnit u ON u.AreaUnitId = e.AreaUnitId`;
 
-/** Recompute a workspace's status: Ready for Review once every mandatory activity is assessed by a verifier. */
+/**
+ * Recompute a workspace's status: Ready for Review once every mandatory activity is Verified or approved N/A.
+ * A Rejected mandatory activity has NOT passed verification — it keeps the workspace open until it is reopened and
+ * verified, approved N/A, or the Legal Reviewer rejects the whole verification.
+ */
 async function refreshWorkspace(conn, verificationId) {
   const r = (await conn.request().input("V", sql.Int, verificationId).query(`
     SELECT v.Status,
       (SELECT COUNT(*) FROM dbo.LegalVerificationActivity a WHERE a.VerificationId = v.VerificationId AND a.IsMandatory = 1
-         AND a.VerifyStatus NOT IN (N'Verified', N'N/A', N'Rejected')) AS OpenMandatory
+         AND a.VerifyStatus NOT IN (N'Verified', N'N/A')) AS OpenMandatory
     FROM dbo.LegalVerification v WHERE v.VerificationId = @V`)).recordset[0];
   if (!r || ["Closed", "On Hold", "Verified", "Rejected"].includes(r.Status)) return r?.Status;
   const next = r.OpenMandatory === 0 ? "Ready for Review" : r.Status === "Returned" ? "Returned" : "In Progress";
@@ -208,7 +214,7 @@ async function afterChange(pool, req, a, v) {
 }
 
 router.get("/meta", requirePageRight(PAGE, "view"), (_req, res) =>
-  res.json({ statuses: EMPLOYEE_STATUSES, workStatuses: WORK_STATUSES, verifyStatuses: VERIFY_STATUSES, findings: FINDINGS, priorities: PRIORITIES }));
+  res.json({ statuses: EMPLOYEE_STATUSES, workStatuses: WORK_STATUSES, verifyStatuses: VERIFY_STATUSES, findings: FINDINGS, priorities: PRIORITIES, categories: CATEGORIES }));
 
 router.get("/list", requirePageRight(PAGE, "view"), pageable("items"), async (_req, res) => {
   try {
@@ -314,6 +320,27 @@ router.get("/my-tasks", requirePageRight(PAGE, "view"), async (req, res) => {
     for (const r of await safe(`SELECT m.MutationId, m.LandId, m.Kind, m.ApplicationNo, m.ApplicationStatus, CONVERT(char(10), m.DueDate, 23) AS DueDate, l.LandCode, l.ProjectId FROM dbo.LegalMutation m
         JOIN dbo.LegalLand l ON l.LandId = m.LandId AND l.IsActive = 1 WHERE m.IsActive = 1 AND m.AssignedUserId = @U AND m.ApplicationStatus NOT IN (N'Approved', N'Rejected') AND m.CompletionDate IS NULL`))
       other.push({ kind: r.Kind, key: `m${r.MutationId}`, title: `${r.Kind} · ${r.LandCode}`, detail: r.ApplicationNo ? `Application ${r.ApplicationNo}` : "No application no. yet", status: r.ApplicationStatus, dueDate: r.DueDate, path: `/legal/land/post-registration`, ProjectId: r.ProjectId });
+    // Legal V3 (spec 16.2): inheritance cases waiting for my review, disputes I handle, ownership events to verify,
+    // documents to verify, amendments to decide.
+    const officer = isAdmin(req) || (await canAct(req, "Legal Officer", null)) || (await canAct(req, "Legal Reviewer", null));
+    const amender = isAdmin(req) || (await canAct(req, "Amendment Approver", null));
+    for (const r of await safe(`SELECT i.InheritanceId, i.LandId, i.DeceasedName, i.ReviewStatus, l.LandCode, l.ProjectId FROM dbo.LegalInheritance i JOIN dbo.LegalLand l ON l.LandId = i.LandId AND l.IsActive = 1
+        WHERE i.IsActive = 1 AND (i.ReviewStatus = N'Verifier Review' AND ${verifier ? "1 = 1" : "1 = 0"} AND ISNULL(i.UpdatedBy, i.CreatedBy) <> @U
+          OR i.ReviewStatus = N'Legal Officer Review' AND (i.LegalOfficerId = @U OR (i.LegalOfficerId IS NULL AND ${officer ? "1 = 1" : "1 = 0"})))`))
+      other.push({ kind: "Inheritance case", key: `i${r.InheritanceId}`, title: `Estate of ${r.DeceasedName} · ${r.LandCode}`, detail: "Land intelligence → Family & inheritance", status: r.ReviewStatus, dueDate: null, path: `/legal/land/properties/${r.LandId}`, ProjectId: r.ProjectId });
+    for (const r of await safe(`SELECT d.DisputeId, d.LandId, d.Claimant, d.DisputeType, d.DisputeStatus, CONVERT(char(10), d.NextHearingDate, 23) AS DueDate, l.LandCode, l.ProjectId FROM dbo.LegalOwnershipDispute d
+        JOIN dbo.LegalLand l ON l.LandId = d.LandId AND l.IsActive = 1 WHERE d.IsActive = 1 AND d.LegalOfficerId = @U AND d.DisputeStatus NOT IN (N'Resolved', N'Closed')`))
+      other.push({ kind: "Ownership dispute", key: `x${r.DisputeId}`, title: `${r.DisputeType}: ${r.Claimant} · ${r.LandCode}`, detail: "Land intelligence → Disputes", status: r.DisputeStatus, dueDate: r.DueDate, path: `/legal/land/properties/${r.LandId}`, ProjectId: r.ProjectId });
+    if (verifier) for (const r of await safe(`SELECT TOP 50 e.EventId, e.LandId, l.LandCode, l.ProjectId, t.Name AS EventType, CONVERT(char(10), e.EventDate, 23) AS EventDate FROM dbo.LegalOwnershipEvent e
+        JOIN dbo.LegalLand l ON l.LandId = e.LandId AND l.IsActive = 1 LEFT JOIN dbo.LegalLookupValue t ON t.LookupId = e.TransferTypeId
+        WHERE e.IsActive = 1 AND e.ApprovalStatus = N'Pending Verification' AND ISNULL(e.CreatedBy, 0) <> @U`))
+      other.push({ kind: "Ownership event to verify", key: `e${r.EventId}`, title: `${r.EventType ?? "Event"} ${r.EventDate} · ${r.LandCode}`, detail: "Land intelligence → Ownership events", status: "Pending Verification", dueDate: null, path: `/legal/land/properties/${r.LandId}`, ProjectId: r.ProjectId });
+    if (verifier) for (const r of await safe(`SELECT TOP 50 x.DocId, v.VerificationId, v.VerificationNo, v.ProjectId, x.DocType + ISNULL(' ' + x.DocNo, '') AS Title, x.VerifyStatus FROM dbo.LegalVerificationDocument x
+        JOIN dbo.LegalVerification v ON v.VerificationId = x.VerificationId WHERE x.IsActive = 1 AND x.VerifyStatus = N'Not Reviewed' AND ISNULL(x.UploadedBy, 0) <> @U`))
+      other.push({ kind: "Document verification", key: `doc${r.DocId}`, title: `${r.Title} · ${r.VerificationNo}`, detail: "Document register", status: r.VerifyStatus, dueDate: null, path: `/legal/land/verification/${r.VerificationId}`, ProjectId: r.ProjectId });
+    if (amender) for (const r of await safe(`SELECT a.AmendmentId, a.LandId, a.AmendmentNo, a.AmendType, a.Status, l.LandCode, l.ProjectId FROM dbo.LegalLandAmendment a
+        JOIN dbo.LegalLand l ON l.LandId = a.LandId AND l.IsActive = 1 WHERE a.Status = N'Pending' AND ISNULL(a.RequestedBy, 0) <> @U`))
+      other.push({ kind: "Amendment to decide", key: `a${r.AmendmentId}`, title: `Amendment ${r.AmendmentNo} · ${r.AmendType} · ${r.LandCode}`, detail: "Land Profile → Amendments", status: r.Status, dueDate: null, path: `/legal/land/properties/${r.LandId}`, ProjectId: r.ProjectId });
     res.json({ activities: rows.filter((r) => inScope(req, r.ProjectId)), other: other.filter((r) => inScope(req, r.ProjectId)) });
   } catch (err) {
     console.error("[legal-verification] my-tasks:", err.message);
@@ -462,6 +489,8 @@ router.put("/activity/:activityId", editOrSearch, async (req, res) => {
     if (!PRIORITIES.includes(next.priority)) return res.status(400).json({ error: "Unknown priority" });
     if (next.status === "On Hold" && (!next.holdReason || !next.nextAction)) return res.status(400).json({ error: "On Hold needs a reason and the next action" });
     if (next.finding === "Mismatched" && !next.remarks) return res.status(400).json({ error: "An unresolved mismatch needs remarks" });
+    if (next.finding && next.finding !== "Clear" && next.finding !== a.Finding && !next.remarks && !next.findings)
+      return res.status(400).json({ error: `Write the remarks / findings for "${next.finding}"` });
     if (next.startDate && next.dueDate && next.dueDate < next.startDate) return res.status(400).json({ error: "Target date is before the start date" });
     if (next.verifierUserId && next.verifierUserId === next.assignedUserId) return res.status(400).json({ error: "The verifier must be someone other than the assigned employee" });
     const reassigned = next.assignedUserId !== a.AssignedUserId;
@@ -868,6 +897,17 @@ const REVIEW_CHECKS = [
   ["survey", "Survey discrepancies assessed"], ["exceptions", "Dependency overrides and legal exceptions reviewed"],
   ["risks", "Significant legal remarks and risks recorded"],
 ];
+/**
+ * The checklist in force (spec 7.3): Setup → Final Review Check (Code + Name, in display order); before that list exists,
+ * the built-in 12 points. The version is a fingerprint of the active points, stored on every review.
+ */
+async function reviewChecks(pool) {
+  let rows = [];
+  try { rows = (await pool.request().query("SELECT Code, Name FROM dbo.LegalLookupValue WHERE Category = N'final-review-check' AND IsActive = 1 ORDER BY SortOrder, Name")).recordset; } catch { /* list not set up */ }
+  const checks = rows.length ? rows.map((x) => [x.Code || `c${x.Name.length}${x.Name.slice(0, 8)}`, x.Name]) : REVIEW_CHECKS;
+  const version = `${checks.length}-${crypto.createHash("sha256").update(JSON.stringify(checks)).digest("hex").slice(0, 8)}`;
+  return { checks, version };
+}
 const canReview = async (req) => isAdmin(req) || (await canAct(req, "Legal Reviewer", null));
 
 /** Everything that was reviewed, frozen: activities with both statuses, findings, entries and linked documents. */
@@ -902,11 +942,12 @@ router.get("/:id/reviews", requirePageRight(PAGE, "view"), async (req, res) => {
     if (!w) return res.status(404).json({ error: "Verification not found" });
     if (!inScope(req, w.ProjectId)) return res.status(403).json({ error: "You don't have access to this project." });
     const rows = (await pool.request().input("V", sql.Int, id).query(`
-      SELECT r.ReviewId, r.VersionNo, r.Decision, r.Remarks, r.Risks, r.ChecklistJson, r.SnapshotHash, u.name AS ReviewedBy, r.ReviewedAt
+      SELECT r.ReviewId, r.VersionNo, r.Decision, r.Remarks, r.Risks, r.ChecklistJson, r.ChecklistVersion, r.SnapshotHash, u.name AS ReviewedBy, r.ReviewedAt
       FROM dbo.LegalVerificationReview r LEFT JOIN dbo.users u ON u.id = r.ReviewedBy WHERE r.VerificationId = @V ORDER BY r.VersionNo DESC`)).recordset;
     const unverifiedDocs = (await pool.request().input("V", sql.Int, id).query(
       "SELECT COUNT(*) AS n FROM dbo.LegalVerificationDocument WHERE VerificationId = @V AND IsActive = 1 AND VerifyStatus <> N'Verified'")).recordset[0].n;
-    res.json({ reviews: rows.map((r) => ({ ...r, checklist: JSON.parse(r.ChecklistJson || "{}"), ChecklistJson: undefined })), checks: REVIEW_CHECKS, decisions: REVIEW_DECISIONS,
+    const { checks, version } = await reviewChecks(pool);
+    res.json({ reviews: rows.map((r) => ({ ...r, checklist: JSON.parse(r.ChecklistJson || "{}"), ChecklistJson: undefined })), checks, checklistVersion: version, decisions: REVIEW_DECISIONS,
       exceptions: await exceptionsOf(pool, id), unverifiedDocs, canReview: await canReview(req) });
   } catch (err) {
     console.error("[legal-verification] reviews:", err.message);
@@ -932,7 +973,8 @@ router.post("/:id/review", requirePageRight(PAGE, "view"), async (req, res) => {
     if (["Verified", "Closed", "Rejected"].includes(w.Status)) return res.status(409).json({ error: `Already ${w.Status === "Verified" ? "approved" : w.Status.toLowerCase()}` });
     if (decision !== "Verified" && !remarks) return res.status(400).json({ error: decision === "Rejected" ? "Give the reasons for rejecting" : "Say what must be corrected or added (remarks)" });
     const checklist = {};
-    for (const [k] of REVIEW_CHECKS) {
+    const { checks: REVIEW_LIST, version: checklistVersion } = await reviewChecks(pool);
+    for (const [k] of REVIEW_LIST) {
       const c = b.checklist?.[k] || {};
       const st = ["ok", "issue", "na"].includes(c.status) ? c.status : null;
       checklist[k] = { status: st, note: String(c.note || "").slice(0, 300) || null };
@@ -942,9 +984,9 @@ router.post("/:id/review", requirePageRight(PAGE, "view"), async (req, res) => {
       const rejected = (await pool.request().input("V", sql.Int, id).query(`SELECT ISNULL(t.DisplayNo, CAST(a.ActivityNo AS NVARCHAR(5))) + N'. ' + a.ActivityName AS n
         FROM dbo.LegalVerificationActivity a JOIN dbo.LegalActivityTemplate t ON t.TemplateId = a.TemplateId WHERE a.VerificationId = @V AND a.IsMandatory = 1 AND a.VerifyStatus = N'Rejected'`)).recordset;
       if (rejected.length) return res.status(409).json({ error: `Rejected by the verifier: ${rejected.map((r) => r.n).join(", ")} — reject or return the review` });
-      const unset = REVIEW_CHECKS.filter(([k]) => !checklist[k].status).map(([, l]) => l);
+      const unset = REVIEW_LIST.filter(([k]) => !checklist[k].status).map(([, l]) => l);
       if (unset.length) return res.status(400).json({ error: `Mark every checklist item: ${unset.join("; ")}` });
-      const issues = REVIEW_CHECKS.filter(([k]) => checklist[k].status === "issue").map(([, l]) => l);
+      const issues = REVIEW_LIST.filter(([k]) => checklist[k].status === "issue").map(([, l]) => l);
       if (issues.length) return res.status(400).json({ error: `Checklist has issues (${issues.join("; ")}) — return or reject instead of approving` });
       if ((w.Discrepancies > 0 || (await exceptionsOf(pool, id)).length) && !risks)
         return res.status(400).json({ error: "There are discrepancies or recorded exceptions — record the legal risks before approving" });
@@ -960,7 +1002,8 @@ router.post("/:id/review", requirePageRight(PAGE, "view"), async (req, res) => {
       versionNo = (await new sql.Request(tx).input("V", sql.Int, id).query("SELECT ISNULL(MAX(VersionNo), 0) + 1 AS n FROM dbo.LegalVerificationReview WITH (UPDLOCK, HOLDLOCK) WHERE VerificationId = @V")).recordset[0].n;
       await new sql.Request(tx).input("V", sql.Int, id).input("N", sql.Int, versionNo).input("D", sql.NVarChar(40), decision).input("R", sql.NVarChar(2000), remarks)
         .input("Rk", sql.NVarChar(sql.MAX), risks).input("C", sql.NVarChar(sql.MAX), JSON.stringify(checklist)).input("S", sql.NVarChar(sql.MAX), snap).input("H", sql.Char(64), hash).input("U", sql.Int, me)
-        .query("INSERT INTO dbo.LegalVerificationReview (VerificationId, VersionNo, Decision, Remarks, Risks, ChecklistJson, SnapshotJson, SnapshotHash, ReviewedBy) VALUES (@V, @N, @D, @R, @Rk, @C, @S, @H, @U)");
+        .input("CV", sql.NVarChar(40), checklistVersion)
+        .query("INSERT INTO dbo.LegalVerificationReview (VerificationId, VersionNo, Decision, Remarks, Risks, ChecklistJson, ChecklistVersion, SnapshotJson, SnapshotHash, ReviewedBy) VALUES (@V, @N, @D, @R, @Rk, @C, @CV, @S, @H, @U)");
       await new sql.Request(tx).input("V", sql.Int, id).input("S", sql.NVarChar(30), status).input("U", sql.Int, me)
         .query("UPDATE dbo.LegalVerification SET Status = @S, UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE VerificationId = @V");
       await tx.commit();

@@ -22,7 +22,9 @@ export function VerificationReviewPanel({ w, onSaved }: { w: Workspace; onSaved:
   const [risks, setRisks] = useState("");
   const [busy, setBusy] = useState(false);
   const data = q.data;
-  const open = w.Total - w.Completed - w.NotApplicable - (w.Rejected ?? 0);
+  // Rejected activities are not passed: they stay open (verify, approve N/A, or reject the verification).
+  const open = w.Total - w.Completed - w.NotApplicable;
+  const rejected = w.Rejected ?? 0;
   const reviewable = data?.canReview && !["Verified", "Closed", "Rejected"].includes(w.Status);
   const submit = async () => {
     if (!decision) { toast.error("Choose a decision"); return; }
@@ -37,7 +39,7 @@ export function VerificationReviewPanel({ w, onSaved }: { w: Workspace; onSaved:
       <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
         <b className="text-sm">Final Legal Review</b>
         <span className="text-xs text-muted-foreground">
-          {open ? `${open} activit${open === 1 ? "y" : "ies"} not yet verified` : "Every activity assessed by a verifier"} · {w.Discrepancies} discrepanc{w.Discrepancies === 1 ? "y" : "ies"}
+          {open ? `${open} activit${open === 1 ? "y" : "ies"} not yet verified${rejected ? ` (${rejected} rejected — must be resolved)` : ""}` : "Every activity verified or N/A"} · {w.Discrepancies} discrepanc{w.Discrepancies === 1 ? "y" : "ies"}
           {data ? ` · ${data.exceptions.length} exception${data.exceptions.length === 1 ? "" : "s"} · ${data.unverifiedDocs} document${data.unverifiedDocs === 1 ? "" : "s"} not verified` : ""}
         </span>
         {["Verified", "Rejected"].includes(w.Status) && data?.canReview && (
@@ -88,7 +90,7 @@ export function VerificationReviewPanel({ w, onSaved }: { w: Workspace; onSaved:
               <input className="h-9 w-full border border-foreground/30 bg-background px-2 text-sm" value={remarks} maxLength={2000} onChange={(e) => setRemarks(e.target.value)} /></label>
             <button disabled={busy} onClick={submit} className="h-9 self-end bg-foreground px-4 text-xs font-semibold uppercase text-background disabled:opacity-40">{busy ? "Saving…" : "Save review"}</button>
           </div>
-          {w.Status !== "Ready for Review" && <p className="mt-2 text-xs text-muted-foreground">Approve is available once every mandatory activity is verified or approved as N/A. Land Approval waits for an approved Final Legal Review.</p>}
+          {w.Status !== "Ready for Review" && <p className="mt-2 text-xs text-muted-foreground">Approve is available once every mandatory activity is verified or approved as N/A — a rejected activity must be reopened and verified, or the verification rejected. Land Approval waits for an approved Final Legal Review.</p>}
         </div>
       )}
       {!data?.canReview && !["Verified", "Closed", "Rejected"].includes(w.Status) && <p className="border-b border-border p-3 text-xs text-muted-foreground">A Legal Reviewer does the Final Legal Review once every activity is assessed.</p>}
@@ -101,6 +103,7 @@ export function VerificationReviewPanel({ w, onSaved }: { w: Workspace; onSaved:
                 <li key={r.ReviewId} className="border-l-2 border-foreground/30 pl-2">
                   <b>Version {r.VersionNo}</b> · <b className={TONE[r.Decision] ?? "text-amber-700"}>{decisionLabel(r.Decision)}</b> · {r.ReviewedBy ?? "—"} · {fmtTime(r.ReviewedAt)}
                   {r.SnapshotHash && <span className="ml-1 font-mono text-muted-foreground" title={r.SnapshotHash}>#{r.SnapshotHash.slice(0, 10)}</span>}
+                  {r.ChecklistVersion && <span className="ml-1 text-muted-foreground">· checklist v{r.ChecklistVersion}</span>}
                   {r.Remarks && <span className="block">{r.Remarks}</span>}
                   {r.Risks && <span className="block text-amber-700">Risks: {r.Risks}</span>}
                   {issues.length > 0 && <span className="block text-destructive">Issues: {issues.map(([k, c]) => `${data.checks.find((x) => x[0] === k)?.[1] ?? k}${c.note ? ` (${c.note})` : ""}`).join("; ")}</span>}

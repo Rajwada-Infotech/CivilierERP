@@ -22,6 +22,7 @@ import { OwnershipStep } from "./steps/OwnershipStep";
 import { GovtSiteLinks } from "@/components/legal/GovtSiteLinks";
 import { NextVersionCard } from "@/components/legal/LandVersions";
 import { LandRecordView } from "@/components/legal/LandReviewFlow";
+import { LandIntelligence } from "@/components/legal/LandIntelligence";
 import { getLandAmendments } from "@/api/legalAmendmentApi";
 import { DueDiligencePanel } from "@/components/legal/DueDiligencePanel";
 import { PortalFetchButtons } from "@/components/legal/PortalFetch";
@@ -651,6 +652,8 @@ export default function LandProfilePage() {
                 </div>
               </div>
             )}
+            {/* Legal V3: parcels, ownership events, family & inheritance, disputes, possession. */}
+            <LandIntelligence landId={landId} editable={!registered || amendOpen} />
             <details className="border border-border bg-card">
               <summary className="cursor-pointer px-4 py-3 text-sm font-semibold">Versions</summary>
               <div className="border-t border-border p-4">{renderTab("versions")}</div>

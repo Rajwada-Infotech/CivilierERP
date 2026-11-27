@@ -34,9 +34,9 @@ export const STATUS_TONE: Record<string, string> = {
 export const VERIFY_TONE: Record<string, string> = {
   Verified: "text-emerald-700", "N/A": "text-muted-foreground", Rejected: "text-destructive", Returned: "text-destructive", "Under Review": "text-violet-700", "Not Reviewed": "text-muted-foreground",
 };
-const BAD = ["Mismatched", "Discrepancy Found", "Additional Documents Required", "Unable to Verify", "Case Found", "Incomplete", "Records Not Available"];
+const BAD = ["Mismatched", "Discrepancy Found", "Document Missing", "Additional Documents Required", "Further Investigation Required", "Unable to Verify", "Case Found", "Incomplete", "Records Not Available"];
 const GOV: [string, string][] = [["GovSubmissionDate", "Government submission"], ["AckDate", "Acknowledgement"], ["QueryDate", "Query"], ["QueryResponseDate", "Query response"],
-  ["HearingDate", "Hearing"], ["ReportReceiptDate", "Report received"], ["OrderDate", "Order"]];
+  ["HearingDate", "Hearing"], ["ReportReceiptDate", "Report received"], ["OrderDate", "Order"], ["GovtExpectedDate", "Government expected"], ["NextActionDate", "Next action"]];
 const govKey = (c: string) => c[0].toLowerCase() + c.slice(1);
 
 function useUsers() {
@@ -344,7 +344,8 @@ export default function LegalVerificationWorkspacePage() {
                       <span className="text-sm font-semibold">{a.ActivityName}{!a.IsMandatory && <span className="ml-1 text-[0.625rem] font-normal uppercase text-muted-foreground">optional</span>}
                         {a.blocked && <span className="ml-1 text-[0.625rem] font-normal uppercase text-amber-700">waiting</span>}
                         {a.NaRequestedAt && a.VerifyStatus !== "N/A" && a.Status !== "Closed" && <span className="ml-1 text-[0.625rem] font-normal uppercase text-amber-700">N/A requested</span>}
-                        {a.EntryCount > 0 && <span className="ml-1 text-[0.625rem] font-normal text-muted-foreground">· {a.EntryCount} entr{a.EntryCount === 1 ? "y" : "ies"}</span>}</span>
+                        {a.EntryCount > 0 && <span className="ml-1 text-[0.625rem] font-normal text-muted-foreground">· {a.EntryCount} entr{a.EntryCount === 1 ? "y" : "ies"}</span>}
+                        {a.Category && <span className="block text-[0.625rem] font-normal uppercase tracking-[0.06em] text-muted-foreground">{a.Category}</span>}</span>
                       <span className={`col-start-2 text-xs font-semibold md:col-start-auto ${STATUS_TONE[a.Status] ?? ""}`}>{a.Status}</span>
                       <span className={`col-start-2 text-xs font-semibold md:col-start-auto ${VERIFY_TONE[a.VerifyStatus] ?? ""}`}>{a.VerifyStatus}</span>
                       <span className={`col-start-2 text-xs md:col-start-auto ${a.Finding && BAD.includes(a.Finding) ? "font-semibold text-destructive" : ""}`}>{a.Finding ?? "—"}</span>

@@ -27,7 +27,7 @@ export default function LandDeedProcessPage() {
   const { data, isLoading, error } = list;
   const [editing, setEditing] = useState<{ id: number; date: string } | null>(null);
 
-  const save = async (l: DeedProcessLand, body: { targetDate?: string; completed?: boolean; deedFileId?: number | null; deedStage?: string | null; drafterId?: number | null }) => {
+  const save = async (l: DeedProcessLand, body: { targetDate?: string; completed?: boolean; deedFileId?: number | null; deedStage?: string | null; drafterId?: number | null; reason?: string }) => {
     try {
       toast.success((await updateDeedProcess(l.LandId, body)).message);
       setEditing(null);
@@ -134,7 +134,15 @@ export default function LandDeedProcessPage() {
                         {l.WorkflowStatus === "Deed Process" && (canEdit ? (
                           <span className="mb-1 flex flex-col gap-1">
                             <select aria-label="Deed stage" className="border border-border bg-background px-1 py-0.5 text-xs" value={l.DeedApprovalRequestedAt ? "Submitted" : l.DeedStage ?? "Not Started"}
-                              disabled={!!l.DeedApprovalRequestedAt} onChange={(e) => save(l, { deedStage: e.target.value, drafterId: l.DeedDrafterId ?? null })}>
+                              disabled={!!l.DeedApprovalRequestedAt} onChange={async (e) => {
+                                const stage = e.target.value;
+                                if (stage === "Cancelled / Not Proceeded") {
+                                  const reason = await askLegal({ title: "Deed not proceeding?", message: "The deed is closed as cancelled / not proceeded.", input: { label: "Reason", required: true }, confirmText: "Close the deed", tone: "danger" });
+                                  if (!reason) return;
+                                  return save(l, { deedStage: stage, drafterId: l.DeedDrafterId ?? null, reason });
+                                }
+                                save(l, { deedStage: stage, drafterId: l.DeedDrafterId ?? null });
+                              }}>
                               {l.DeedApprovalRequestedAt ? <option>Submitted</option> : (data?.deedStages ?? ["Not Started"]).map((st) => <option key={st}>{st}</option>)}
                             </select>
                             <select aria-label="Drafting by" className="border border-border bg-background px-1 py-0.5 text-xs" value={l.DeedDrafterId ?? ""}

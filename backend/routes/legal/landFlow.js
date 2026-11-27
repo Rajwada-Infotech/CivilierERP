@@ -1010,6 +1010,29 @@ async function recordFieldChecks(pool, landId, reviewId, versionNo, outcome, st)
   }
 }
 
+// GET /land/:id/approval-context — what the Approver weighs (spec 10): offered price from the enquiry, the
+// outstanding legal risks, the Final Legal Review gate and the previous approval decisions.
+router.get("/land/:id/approval-context", requirePageRight(PAGE, "view"), async (req, res) => {
+  const id = idParam(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid land" });
+  try {
+    const pool = getPool();
+    const land = (await pool.request().input("L", sql.Int, id).query(`SELECT l.LandId, l.LandCode, l.EnquiryId, e.EnquiryNo, e.ExpectedPrice, p.name AS ProjectName
+      FROM dbo.LegalLand l LEFT JOIN dbo.LegalLandEnquiry e ON e.EnquiryId = l.EnquiryId LEFT JOIN dbo.enterprise p ON p.id = l.ProjectId WHERE l.LandId = @L`)).recordset[0];
+    if (!land) return res.status(404).json({ error: "Land not found" });
+    const risks = await require("./dueDiligence").autoFlags(pool, id).catch(() => []);
+    const gate = await finalReviewGate(pool, id).catch(() => ({ blocked: false }));
+    const history = (await pool.request().input("L", sql.Int, id).query(`IF OBJECT_ID('dbo.LegalLandApproval', 'U') IS NOT NULL
+      SELECT a.Decision, a.OfferedPrice, a.NegotiatedPrice, a.ApprovedPrice, a.Conditions, a.RiskAcceptance, a.Remarks, a.DecidedAt, u.name AS DecidedByName
+      FROM dbo.LegalLandApproval a LEFT JOIN dbo.users u ON u.id = a.DecidedBy WHERE a.LandId = @L ORDER BY a.DecidedAt DESC
+      ELSE SELECT TOP 0 NULL AS Decision`)).recordset;
+    res.json({ land, risks, finalReview: gate.blocked ? { ok: false, message: gate.message } : { ok: true }, history });
+  } catch (err) {
+    console.error("[legal-flow] approval context:", err.message);
+    res.status(500).json({ error: "Could not load the approval details" });
+  }
+});
+
 // POST /land/:id/review/decide { action: "Approve" | "Return", remarks } — the Approver, for a fully verified land not yet in
 // Deed Process: Approve sends it to Deed Process (towards registration); Return sends it back to data entry with the reason.
 router.post("/land/:id/review/decide", requirePageRight(PAGE, "view"), async (req, res) => {
@@ -1020,7 +1043,7 @@ router.post("/land/:id/review/decide", requirePageRight(PAGE, "view"), async (re
   if (action === "Return" && !remarks) return res.status(400).json({ error: "Give the reason" });
   try {
     const pool = getPool();
-    if (!(await canAct(req, "Approver", PAGE))) return res.status(403).json({ error: "Only an Approver (Setup → Approval Control) can decide" });
+    if (!(await canAct(req, "Approver", PAGE)) && !(await canAct(req, "Land Approver", null))) return res.status(403).json({ error: "Only an Approver / Land Approver (Setup → Approval Control) can decide" });
     const st = await reviewState(pool, id);
     if (!st) return res.status(404).json({ error: "Land not found" });
     if (!st.awaitingApproval) return res.status(409).json({ error: st.status === "Draft" ? "Changed after it was verified — it must be verified again first" : "Not waiting for approval" });
@@ -1039,7 +1062,26 @@ router.post("/land/:id/review/decide", requirePageRight(PAGE, "view"), async (re
         gateException = { reason, detail: gate.message, verificationId: gate.verificationId };
       }
     }
+    // Commercial decision (spec 10.2): price, conditions, and — when High / Critical risks are still open — the
+    // approver's written risk acceptance. Stored for every decision.
+    const money = (v) => (v === undefined || v === null || v === "" ? null : Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : NaN);
+    const offered = money(req.body?.offeredPrice), negotiated = money(req.body?.negotiatedPrice), approved = money(req.body?.approvedPrice);
+    if ([offered, negotiated, approved].some(Number.isNaN)) return res.status(400).json({ error: "Prices must be numbers" });
+    const conditions = String(req.body?.conditions || "").trim().slice(0, 2000) || null;
+    const acceptance = String(req.body?.riskAcceptance || "").trim().slice(0, 2000) || null;
+    const risks = action === "Approve" ? await require("./dueDiligence").autoFlags(pool, id).catch(() => []) : [];
+    const serious = risks.filter((f) => f.level === "High" || f.level === "Critical");
+    if (action === "Approve" && serious.length && !acceptance)
+      return res.status(409).json({ error: `${serious.length} high / critical risk${serious.length > 1 ? "s are" : " is"} still open — write the risk acceptance to approve`, needsRiskAcceptance: true });
+    const saveApproval = (decision) => pool.request().input("L", sql.Int, id).input("E", sql.Int, st.land.EnquiryId ?? null).input("V", sql.Int, st.versionNo)
+      .input("D", sql.NVarChar(20), decision).input("O", sql.Decimal(18, 2), offered).input("N", sql.Decimal(18, 2), negotiated).input("A", sql.Decimal(18, 2), approved)
+      .input("C", sql.NVarChar(2000), conditions).input("R", sql.NVarChar(sql.MAX), risks.length ? JSON.stringify(risks) : null).input("X", sql.NVarChar(2000), acceptance)
+      .input("M", sql.NVarChar(1000), remarks || null).input("F", sql.NVarChar(100), gateException ? "Exception" : "Approved Final Legal Review").input("U", sql.Int, userOf(req))
+      .query(`IF OBJECT_ID('dbo.LegalLandApproval', 'U') IS NOT NULL INSERT INTO dbo.LegalLandApproval
+        (LandId, EnquiryId, VersionNo, Decision, FinalReviewRef, OfferedPrice, NegotiatedPrice, ApprovedPrice, Conditions, OutstandingRisks, RiskAcceptance, Remarks, DecidedBy)
+        VALUES (@L, @E, @V, @D, @F, @O, @N, @A, @C, @R, @X, @M, @U)`);
     if (action === "Approve") {
+      await saveApproval("Approved");
       if (gateException) await pool.request().input("L", sql.Int, id).input("V", sql.Int, gateException.verificationId ?? null).input("R", sql.NVarChar(1000), gateException.reason)
         .input("D", sql.NVarChar(1000), gateException.detail).input("U", sql.Int, userOf(req))
         .query("IF OBJECT_ID('dbo.LegalVerificationException', 'U') IS NOT NULL INSERT INTO dbo.LegalVerificationException (Kind, VerificationId, LandId, Reason, Detail, ApprovedBy, CreatedBy) VALUES (N'Land approval exception', @V, @L, @R, @D, @U, @U)");
@@ -1050,6 +1092,7 @@ router.post("/land/:id/review/decide", requirePageRight(PAGE, "view"), async (re
       await writeAudit(pool, req, { action: "Land verified — sent to Deed Process", entityType: "Land Property", entityId: id, landId: id, remarks: remarks || `Version ${st.versionNo - 1} approved` });
       return res.json({ message: `${st.land.LandCode}: approved — moved to Deed Process` });
     }
+    await saveApproval("Sent back");
     await pool.request().input("L", sql.Int, id).query("UPDATE dbo.LegalLand SET VerificationStatus = N'Draft' WHERE LandId = @L");
     await pool.request().input("L", sql.Int, id).input("V", sql.Int, st.versionNo).input("U", sql.Int, userOf(req)).input("M", sql.NVarChar(1000), remarks)
       .query("INSERT INTO dbo.LegalLandReview (LandId, VersionNo, Status, ChecksJson, DecidedBy, DecidedAt, Remarks) VALUES (@L, @V, N'Returned', N'{}', @U, SYSUTCDATETIME(), @M)");

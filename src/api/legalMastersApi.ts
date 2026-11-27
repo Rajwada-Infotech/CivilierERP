@@ -110,10 +110,25 @@ export const getLegalPage = async (master: string, o: LegalPageQuery): Promise<L
 /** Values matching what is typed in a Legal list's search box (any searched column). */
 export const suggestLegal = async (master: string, q: string, o: Omit<LegalPageQuery, "page"> = {}): Promise<{ value: string; field?: string }[]> =>
   handle(await fetchWithAuth(`${BASE}/${master}/suggest?${pageQs({ ...o, q })}`));
-export const addLegalRow = async (master: string, payload: LegalRow) =>
-  handle<{ id: number; message: string }>(await fetchWithAuth(`${BASE}/${master}`, json("POST", payload)));
-export const updateLegalRow = async (master: string, id: number, payload: LegalRow) =>
-  handle<{ message: string }>(await fetchWithAuth(`${BASE}/${master}/${id}`, json("PUT", payload)));
+/**
+ * Saves a row; a possible duplicate land reference (409 with duplicate) is shown to the user, who can open the
+ * other record or confirm it is a different / related parcel (approve right needed; audited) — then it is resent.
+ */
+async function saveRow<T>(url: string, method: string, payload: LegalRow): Promise<T> {
+  const res = await fetchWithAuth(url, json(method, payload));
+  if (res.status === 409) {
+    const data = await res.clone().json().catch(() => ({}));
+    if (data?.duplicate) {
+      const { askLegal } = await import("@/components/legal/LegalAsk");
+      const ok = await askLegal({ title: "Possible duplicate land reference", message: String(data.error), confirmText: "It is a different parcel — save", tone: "danger" });
+      if (!ok) throw new Error(String(data.error));
+      return handle<T>(await fetchWithAuth(url, json(method, { ...payload, __confirmDuplicate: true })));
+    }
+  }
+  return handle<T>(res);
+}
+export const addLegalRow = async (master: string, payload: LegalRow) => saveRow<{ id: number; message: string }>(`${BASE}/${master}`, "POST", payload);
+export const updateLegalRow = async (master: string, id: number, payload: LegalRow) => saveRow<{ message: string }>(`${BASE}/${master}/${id}`, "PUT", payload);
 export const deleteLegalRow = async (master: string, id: number) =>
   handle<{ message: string }>(await fetchWithAuth(`${BASE}/${master}/${id}`, { method: "DELETE" }));
 

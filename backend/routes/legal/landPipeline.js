@@ -1584,11 +1584,13 @@ router.post("/enquiries/:id/status", requirePageRight(ENQUIRY_PAGE, "edit"), asy
   try {
     const pool = getPool();
     const r = await pool.request().input("Id", sql.Int, id).input("Status", sql.NVarChar(40), status).input("UserId", sql.Int, req.user?.userId || null)
+      .input("Reason", sql.NVarChar(500), status === "Under Review" ? null : reason)
       .input("Note", sql.NVarChar(600), `[${new Date().toISOString().slice(0, 10)}] ${status}${reason ? `: ${reason}` : ""}`)
       .query(`
         UPDATE dbo.LegalLandEnquiry
         SET EnquiryStatus = @Status,
             InitialNotes = LEFT(ISNULL(InitialNotes + CHAR(10), N'') + @Note, 2000),
+            StatusReason = @Reason,
             UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME()
         OUTPUT DELETED.EnquiryStatus AS prev, INSERTED.EnquiryNo AS no
         WHERE EnquiryId = @Id AND EnquiryStatus <> N'Converted to Land Record'`);
@@ -1617,12 +1619,15 @@ router.post("/enquiries/:id/convert", requirePageRight(LAND_PAGE, "create"), req
     // Deed Registry Search comes first: every registration office's search must be complete.
     if ((await tx.request().query("SELECT OBJECT_ID('dbo.LegalEnquiryOfficeSearch','U') AS t")).recordset[0].t) {
       const open = (await tx.request().input("Id", sql.Int, id).query(
-        "SELECT STRING_AGG(OfficeType, ', ') AS t FROM dbo.LegalEnquiryOfficeSearch WHERE EnquiryId = @Id AND Status = N'Pending'")).recordset[0].t;
-      if (open) return refuse(409, `Finish the Deed Registry Search first — still open: ${open}.`);
+        "SELECT STRING_AGG(OfficeType, ', ') AS t FROM dbo.LegalEnquiryOfficeSearch WHERE EnquiryId = @Id AND Status = N'Pending' AND Mandatory = 1")).recordset[0].t;
+      if (open) return refuse(409, `Finish the Land Records Search first — mandatory searches still open: ${open}.`);
       // No timeline at all = no office type set up for the enquiry's state: the search cannot be skipped that way.
       const n = (await tx.request().input("Id", sql.Int, id).query("SELECT COUNT(*) AS n FROM dbo.LegalEnquiryOfficeSearch WHERE EnquiryId = @Id")).recordset[0].n;
       if (!n) return refuse(409, "No registration office type is set up for this enquiry's state (Setup → Registration Office Types), so its Deed Registry Search cannot be done yet.");
     }
+    // Land Records Search review: open discrepancies / exceptions need a legal review recommending to proceed.
+    const gate = await require("./landRecordsReview").gateError(tx, id);
+    if (gate) return refuse(409, gate);
 
     // Land ID = <address prefix>/<running no>/<financial year>, e.g. KOL/00001/2026-27. The prefix is the land's
     // district code (Setup → District), else the first letters of the district name; the number runs per prefix and year.
@@ -1656,11 +1661,11 @@ router.post("/enquiries/:id/convert", requirePageRight(LAND_PAGE, "create"), req
     // The enquiry's RS / LR records become the land's (migration 661).
     if ((await tx.request().query("SELECT OBJECT_ID('dbo.LegalEnquiryRsRecord','U') AS t")).recordset[0].t) {
       await tx.request().input("Id", sql.Int, id).input("LandId", sql.Int, land.id).input("MouzaId", sql.Int, e.MouzaId).input("UserId", sql.Int, req.user?.userId || null).query(`
-        INSERT INTO dbo.LegalLandRsRecord (LandId, MouzaId, RsKhatianNo, RsDagNo, RecordedHolder, Area, AreaUnitId, Share, Remarks, IsActive, CreatedBy)
-        SELECT @LandId, ISNULL(r.MouzaId, @MouzaId), r.RsKhatianNo, r.RsDagNo, r.RecordedHolder, r.Area, r.AreaUnitId, r.Share, r.Remarks, 1, @UserId
+        INSERT INTO dbo.LegalLandRsRecord (LandId, MouzaId, RsKhatianNo, RsDagNo, RecordedHolder, Area, AreaUnitId, Share, Remarks, IsActive, CreatedBy, ParcelId)
+        SELECT @LandId, ISNULL(r.MouzaId, @MouzaId), r.RsKhatianNo, r.RsDagNo, r.RecordedHolder, r.Area, r.AreaUnitId, r.Share, r.Remarks, 1, @UserId, r.ParcelId
         FROM dbo.LegalEnquiryRsRecord r WHERE r.EnquiryId = @Id AND r.IsActive = 1;
-        INSERT INTO dbo.LegalLandLrRecord (LandId, MouzaId, LrKhatianNo, LrDagNo, RecordedHolder, Area, AreaUnitId, Share, Remarks, IsActive, CreatedBy)
-        SELECT @LandId, ISNULL(r.MouzaId, @MouzaId), r.LrKhatianNo, r.LrDagNo, r.RecordedHolder, r.Area, r.AreaUnitId, r.Share, r.Remarks, 1, @UserId
+        INSERT INTO dbo.LegalLandLrRecord (LandId, MouzaId, LrKhatianNo, LrDagNo, RecordedHolder, Area, AreaUnitId, Share, Remarks, IsActive, CreatedBy, ParcelId)
+        SELECT @LandId, ISNULL(r.MouzaId, @MouzaId), r.LrKhatianNo, r.LrDagNo, r.RecordedHolder, r.Area, r.AreaUnitId, r.Share, r.Remarks, 1, @UserId, r.ParcelId
         FROM dbo.LegalEnquiryLrRecord r WHERE r.EnquiryId = @Id AND r.IsActive = 1;
         UPDATE dbo.LegalLand SET RsDagNo = LEFT((SELECT TOP 1 RsDagNo FROM dbo.LegalEnquiryRsRecord WHERE EnquiryId = @Id AND IsActive = 1 ORDER BY RsRecordId), 30),
           RsKhatianNo = LEFT((SELECT TOP 1 RsKhatianNo FROM dbo.LegalEnquiryRsRecord WHERE EnquiryId = @Id AND IsActive = 1 ORDER BY RsRecordId), 30),
@@ -1669,7 +1674,13 @@ router.post("/enquiries/:id/convert", requirePageRight(LAND_PAGE, "create"), req
         WHERE LandId = @LandId;`);
     }
     await tx.request().input("Id", sql.Int, id).input("LandId", sql.Int, land.id).input("UserId", sql.Int, req.user?.userId || null)
-      .query(`UPDATE dbo.LegalLandEnquiry SET EnquiryStatus = N'Converted to Land Record', LandId = @LandId, UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME() WHERE EnquiryId = @Id`);
+      .query(`UPDATE dbo.LegalLandEnquiry SET EnquiryStatus = N'Converted to Land Record', LandId = @LandId, UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME() WHERE EnquiryId = @Id;
+        -- One source of truth: the enquiry's parcels, possession and alternative history become the land's (same rows).
+        IF OBJECT_ID('dbo.LegalLandParcel', 'U') IS NOT NULL UPDATE dbo.LegalLandParcel SET LandId = @LandId, UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME() WHERE EnquiryId = @Id AND IsActive = 1;
+        IF COL_LENGTH('dbo.LegalLandPossession', 'LandId') IS NOT NULL UPDATE dbo.LegalLandPossession SET LandId = @LandId WHERE EnquiryId = @Id;
+        IF COL_LENGTH('dbo.LegalLandAltHistory', 'LandId') IS NOT NULL UPDATE dbo.LegalLandAltHistory SET LandId = @LandId WHERE EnquiryId = @Id;`);
+    // The Land Records Search is frozen as it stood at conversion (JSON + hash); the enquiry's records are read-only from now.
+    await require("./landRecordsReview").snapshot(tx, id, land.id, req.user?.userId);
     await writeAudit(tx, req, { action: "Land created", entityType: "Land Property", entityId: land.id, landId: land.id, newValue: { landCode: land.code, fromEnquiry: e.EnquiryNo } });
     await writeAudit(tx, req, { action: "Enquiry converted", entityType: "Land Enquiry", entityId: id, landId: land.id, oldValue: { status: e.EnquiryStatus }, newValue: { status: "Converted to Land Record", landCode: land.code } });
     await tx.commit();
@@ -1818,7 +1829,7 @@ router.get("/deed-process/list", requirePageRight(LAND_PAGE, "view"), pageable("
       LEFT JOIN dbo.LegalMouza m ON m.MouzaId = l.MouzaId
       WHERE l.IsActive = 1 AND l.WorkflowStatus IN (N'Deed Process', N'Deed Completed')
       ORDER BY CASE WHEN l.WorkflowStatus = N'Deed Process' THEN 0 ELSE 1 END, l.DeedTargetDate`);
-    res.json({ lands: r.recordset, deedStages: DEED_STAGES, canEditTimeline: await canAct(req, "Verifier", LAND_PAGE),
+    res.json({ lands: r.recordset, deedStages: DEED_STAGES, deedAutoStages: DEED_AUTO, canEditTimeline: await canAct(req, "Verifier", LAND_PAGE),
       canApprove: await canAct(req, "Approver", LAND_PAGE), canRequest: await hasAnyPageAction(req, LAND_PAGE, ["edit"]) });
   } catch (err) {
     console.error("[legal-land] deed-process list:", err.message);
@@ -1849,11 +1860,12 @@ router.put("/:id/deed-process", requirePageRight(LAND_PAGE, "view"), async (req,
       if (!(await hasAnyPageAction(req, LAND_PAGE, ["edit"]))) return res.status(403).json({ error: "You cannot update the deed stage" });
       if (!(await pool.request().query("SELECT COL_LENGTH('dbo.LegalLand', 'DeedStage') AS c")).recordset[0].c) return res.status(503).json({ error: "Deed stage is not set up yet (migration 717)" });
       const stage = req.body.deedStage == null || req.body.deedStage === "" ? null : String(req.body.deedStage);
-      if (stage && !DEED_STAGES.includes(stage)) return res.status(400).json({ error: "Unknown deed stage" });
+      if (stage && !DEED_STAGES.includes(stage)) return res.status(400).json({ error: DEED_AUTO.includes(stage) ? `${stage} is set by the approval / registration itself` : "Unknown deed stage" });
+      if (stage === "Cancelled / Not Proceeded" && !String(req.body?.reason || "").trim()) return res.status(400).json({ error: "Give the reason the deed is not proceeding" });
       const drafter = req.body.drafterId == null || req.body.drafterId === "" ? null : idParam(req.body.drafterId);
       await pool.request().input("Id", sql.Int, id).input("S", sql.NVarChar(30), stage).input("D", sql.Int, drafter).input("U", sql.Int, req.user?.userId || null)
         .query("UPDATE dbo.LegalLand SET DeedStage = @S, DeedDrafterId = @D, UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @Id");
-      await writeAudit(pool, req, { action: "Deed stage changed", entityType: "Land Property", entityId: id, landId: id, newValue: { stage, drafter } });
+      await writeAudit(pool, req, { action: "Deed stage changed", entityType: "Land Property", entityId: id, landId: id, newValue: { stage, drafter }, remarks: req.body?.reason ? String(req.body.reason).slice(0, 500) : undefined });
       if (drafter) await require("../../services/legalNotify").notify(pool, { users: [drafter], except: req.user?.userId, type: "legal_deed_drafting", title: `Deed drafting: ${l.LandCode}`, body: `Stage: ${stage ?? "Not Started"}. Open Legal → Deed Process.`, refId: id });
       return res.json({ message: `${l.LandCode}: deed stage saved` });
     }
@@ -1997,7 +2009,7 @@ router.post("/:id/deed-process/approve", requirePageRight(LAND_PAGE, "view"), as
       // L1 and L2 columns both record the one approval, so older reports keep reading "Approved".
       await q.query(`UPDATE dbo.LegalLand SET L1Status = N'Approved', L1ReviewerId = @U, L1ReviewedAt = SYSUTCDATETIME(), L1Remarks = @R,
                      L2Status = N'Approved', L2ApproverId = @U, L2ApprovedAt = SYSUTCDATETIME(), L2Remarks = @R${note},
-                     WorkflowStatus = N'Deed Registration', UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @Id`);
+                     WorkflowStatus = N'Deed Registration', DeedStage = N'Submitted for Registration', UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @Id`);
       message = `${l.LandCode}: approved — moved to Deed Registration`;
     } else {
       const st = action === "Hold" ? "On Hold" : "Rejected";
@@ -2153,7 +2165,7 @@ router.post("/:id/deed-registration", requirePageRight(LAND_PAGE, "view"), async
     if (!fileId) return res.status(400).json({ error: "Upload the registered deed copy" });
     if (!(await pool.request().input("F", sql.Int, fileId).query("SELECT 1 AS x FROM dbo.LegalMasterFile WHERE FileId = @F")).recordset[0]) return res.status(400).json({ error: "File not found" });
     await pool.request().input("Id", sql.Int, id).input("U", sql.Int, userId).input("F", sql.Int, fileId).query(`
-      UPDATE dbo.LegalLand SET RegDeedFileId = @F, RegCompletedBy = @U, RegCompletedAt = SYSUTCDATETIME(), WorkflowStatus = N'Registered',
+      UPDATE dbo.LegalLand SET RegDeedFileId = @F, RegCompletedBy = @U, RegCompletedAt = SYSUTCDATETIME(), WorkflowStatus = N'Registered', DeedStage = N'Registered',
              UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @Id`);
     await writeAudit(pool, req, { action: "Deed registered", entityType: "Land Property", entityId: id, landId: id, newValue: { fileId }, documentRef: `File ${fileId}` });
     { const who = (await pool.request().input("Id", sql.Int, id).query("SELECT CreatedBy, FinalVerifiedBy, DeedApprovalRequestedBy FROM dbo.LegalLand WHERE LandId = @Id")).recordset[0] || {};
@@ -2357,7 +2369,10 @@ router.put("/post-registration/task/:taskId", requirePageRight(LAND_PAGE, "edit"
 // ── LA (Land Acquisition) & ULC (Urban Land Ceiling) clearance ─────────────────────────────────────────────────
 // Tracked per land: Apply (date + application no.) → Obtain (date + certificate no.) or Reject. The certificate copy is
 // attached at Post-Registration once the clearance is obtained. Every change is written to the audit trail.
-const DEED_STAGES = ["Not Started", "Drafting", "Under Review", "Clearance Pending", "Ready for Approval"];
+// Set by hand while drafting; Approved / Submitted for Registration / Registered follow the L2 approval and the registration
+// (spec 11.2D: draft approval and registration are different events); Cancelled / Not Proceeded closes a deed that will not go ahead.
+const DEED_STAGES = ["Not Started", "Drafting", "Under Review", "Clearance Pending", "Ready for Approval", "Cancelled / Not Proceeded"];
+const DEED_AUTO = ["Approved", "Submitted for Registration", "Registered"];
 const CLEARANCE_KINDS = { LA: "LA (Land Acquisition) clearance", ULC: "ULC (Urban Land Ceiling) clearance" };
 // LA & ULC clearance path (migration 712). Done = Approved or Not Applicable; Expired needs a fresh application.
 const CLEARANCE_STATUS = ["Not Applied", "Not Applicable", "Application Submitted", "Under Review", "Query Raised", "Query Replied", "Additional Documents Submitted", "Report Received", "Approved", "Rejected", "Expired"];

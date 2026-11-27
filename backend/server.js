@@ -196,6 +196,7 @@ const ALL_ROUTES = [
   { path: "/api/legal/verification-reports", file: "./routes/legal/verificationReports" },
   { path: "/api/legal/verification", file: "./routes/legal/verification" },
   { path: "/api/legal/amendments", file: "./routes/legal/landAmendment" },
+  { path: "/api/legal/intel", file: "./routes/legal/landIntel" },
   { path: "/api/legal", file: "./routes/legal/legalOperations" },
   { path: "/api/grace-time-master", file: "./routes/graceTimeMaster" },
   { path: "/api/work-location-master", file: "./routes/workLocationMaster" },
