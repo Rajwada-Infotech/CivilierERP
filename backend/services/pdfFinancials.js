@@ -41,6 +41,8 @@ const PALETTE = {
 function drawFinancialBreakdown(doc, rows, opts) {
   // Font names — defaults to Helvetica; invoices pass DM Sans (see pdfFonts.js).
   const F = (opts && opts.fonts) || { regular: "Helvetica", bold: "Helvetica-Bold", italic: "Helvetica-Oblique" };
+  const rs = F.regular !== "Helvetica" ? "\u20B9" : "Rs.";
+  const rsSpace = F.regular !== "Helvetica" ? "\u20B9" : "Rs. ";
   const {
     left,
     width,
@@ -53,7 +55,7 @@ function drawFinancialBreakdown(doc, rows, opts) {
   const C = PALETTE;
 
   if (title) {
-    doc.font(F.bold).fontSize(9).fillColor(C.goldDeep)
+    doc.font(F.bold).fontSize(8.5).fillColor(C.goldDeep)
       .text(title.toUpperCase(), left, doc.y, { characterSpacing: 0.8 });
     doc.y += 14;
     doc.fillColor("#000000");
@@ -61,17 +63,17 @@ function drawFinancialBreakdown(doc, rows, opts) {
 
   // 7 columns: Particulars | HSN/SAC | Taxable Value | GST% | CGST | SGST | Amount
   const cw = [
-    width * 0.23, // Particulars
-    width * 0.11, // HSN/SAC
-    width * 0.17, // Taxable Value
-    width * 0.09, // GST rate
-    width * 0.13, // CGST
-    width * 0.13, // SGST
+    width * 0.27, // Particulars
+    width * 0.10, // HSN/SAC
+    width * 0.16, // Taxable Value
+    width * 0.08, // GST rate
+    width * 0.125, // CGST
+    width * 0.125, // SGST
     width * 0.14, // Amount (Total)
   ];
   const totalW = cw.reduce((a, b) => a + b, 0);
   const aligns = ["left", "center", "right", "center", "right", "right", "right"];
-  const headers = ["Particulars", "HSN/SAC", "Taxable Value", "GST %", "CGST (Rs.)", "SGST (Rs.)", "Amount (Rs.)"];
+  const headers = ["Particulars", "HSN/SAC", `Taxable (${rs})`, "GST %", `CGST (${rs})`, `SGST (${rs})`, `Amount (${rs})`];
 
   const tableTop = doc.y;
   const headerH = 26;
@@ -82,14 +84,14 @@ function drawFinancialBreakdown(doc, rows, opts) {
   let x = left;
   doc.font(F.bold).fontSize(7).fillColor(C.white);
   headers.forEach((h, i) => {
-    doc.text(h.toUpperCase(), x + 6, tableTop + 8, { width: cw[i] - 12, align: aligns[i], characterSpacing: 0.2 });
+    doc.text(h.toUpperCase(), x + 6, tableTop + 8.5, { width: cw[i] - 12, align: aligns[i], characterSpacing: 0.2 });
     x += cw[i];
   });
   doc.fillColor("#000000");
 
-  // Data rows
+  // Data rows (dynamic height so long Particulars wrap cleanly without clipping)
   let y = tableTop + headerH;
-  const rowH = 22;
+  const baseRowH = 24;
   let sumTaxable = 0, sumCgst = 0, sumSgst = 0, sumTotal = 0;
 
   rows.forEach((r, ri) => {
@@ -100,11 +102,16 @@ function drawFinancialBreakdown(doc, rows, opts) {
     const rowTotal = r.total != null ? Number(r.total) : round2(taxable + gstAmount);
     sumTaxable += taxable; sumCgst += cgst; sumSgst += sgst; sumTotal += rowTotal;
 
+    const labelStr = String(r.label || "-");
+    doc.font(F.bold).fontSize(8.5);
+    const labelH = doc.heightOfString(labelStr, { width: cw[0] - 12 });
+    const rowH = Math.max(baseRowH, Math.ceil(labelH) + 12);
+
     if (ri % 2 === 1) doc.rect(left, y, totalW, rowH).fill(C.rowTint);
 
     const rateLabel = r.ratePct != null && Number(r.ratePct) > 0 ? `${Number(r.ratePct)}%` : "-";
     const cells = [
-      r.label,
+      labelStr,
       r.hsn || "-",
       money(taxable),
       rateLabel,
@@ -115,32 +122,35 @@ function drawFinancialBreakdown(doc, rows, opts) {
     x = left;
     cells.forEach((cell, i) => {
       doc.font(i === 0 ? F.bold : F.regular).fontSize(8.5).fillColor(C.ink)
-        .text(String(cell), x + 6, y + 6, { width: cw[i] - 12, align: aligns[i], lineBreak: false });
+        .text(String(cell), x + 6, y + 7, { width: cw[i] - 12, align: aligns[i], lineBreak: i === 0 });
       x += cw[i];
     });
     doc.fillColor("#000000");
+    if (ri < rows.length - 1) {
+      doc.moveTo(left, y + rowH).lineTo(left + totalW, y + rowH).strokeColor(C.line).lineWidth(0.45).stroke();
+    }
     y += rowH;
   });
 
-  // Totals row (only meaningful with >1 particular, but harmless with one).
+  // Totals row (only meaningful with >1 particular).
   if (rows.length > 1) {
-    doc.rect(left, y, totalW, rowH).fill(C.totalTint);
+    doc.rect(left, y, totalW, baseRowH).fill(C.totalTint);
     const totalCells = ["Total", "", money(sumTaxable), "", money(sumCgst), money(sumSgst), money(sumTotal)];
     x = left;
     totalCells.forEach((cell, i) => {
       doc.font(F.bold).fontSize(8.5).fillColor(C.navy)
-        .text(String(cell), x + 6, y + 6, { width: cw[i] - 12, align: aligns[i], lineBreak: false });
+        .text(String(cell), x + 6, y + 7, { width: cw[i] - 12, align: aligns[i], lineBreak: false });
       x += cw[i];
     });
     doc.fillColor("#000000");
-    y += rowH;
+    y += baseRowH;
   }
 
   // Grid: outer border, header underline, column dividers.
   doc.rect(left, tableTop, totalW, y - tableTop).strokeColor(C.line).lineWidth(0.75).stroke();
   doc.moveTo(left, tableTop + headerH).lineTo(left + totalW, tableTop + headerH).strokeColor(C.line).lineWidth(0.75).stroke();
   if (rows.length > 1) {
-    doc.moveTo(left, y - rowH).lineTo(left + totalW, y - rowH).strokeColor(C.line).lineWidth(0.75).stroke();
+    doc.moveTo(left, y - baseRowH).lineTo(left + totalW, y - baseRowH).strokeColor(C.line).lineWidth(0.75).stroke();
   }
   x = left;
   cw.forEach((w, i) => {
@@ -153,10 +163,10 @@ function drawFinancialBreakdown(doc, rows, opts) {
     const gtH = 34;
     doc.rect(left, y, totalW, gtH).fill(C.navy);
     doc.rect(left, y, 4, gtH).fill(C.gold);
-    doc.font(F.bold).fontSize(10.5).fillColor(C.gold)
-      .text(grandTotalLabel.toUpperCase(), left + 16, y + 11, { width: totalW * 0.5, characterSpacing: 0.6 });
-    doc.font(F.bold).fontSize(15).fillColor(C.white)
-      .text(`Rs. ${money(grandTotal != null ? grandTotal : sumTotal)}`, left, y + 8, { width: totalW - 16, align: "right" });
+    doc.font(F.bold).fontSize(10).fillColor("#f6c76b")
+      .text(grandTotalLabel.toUpperCase(), left + 16, y + 11.5, { width: totalW * 0.5, characterSpacing: 0.6 });
+    doc.font(F.bold).fontSize(14.5).fillColor(C.white)
+      .text(`${rsSpace}${money(grandTotal != null ? grandTotal : sumTotal)}`, left, y + 8, { width: totalW - 16, align: "right" });
     doc.fillColor("#000000");
     y += gtH;
   }
@@ -164,10 +174,10 @@ function drawFinancialBreakdown(doc, rows, opts) {
   doc.y = y + 10;
 
   if (note) {
-    doc.font(F.italic).fontSize(7).fillColor(C.muted)
+    doc.font(F.italic).fontSize(7.5).fillColor(C.muted)
       .text(note, left, doc.y, { width: width });
     doc.fillColor("#000000");
-    doc.y += 12;
+    doc.y = doc.y + 8;
   }
 }
 

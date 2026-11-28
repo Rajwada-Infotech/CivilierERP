@@ -133,19 +133,19 @@ function SentBackPanelInner({ chip }: { chip: boolean }) {
   const resubmitted = rows.length - sentBack;
   const latest = rows[0];
   const entries = (
-        <ul className="max-h-64 overflow-y-auto thin-scroll">
+        <ul className="max-h-72 overflow-y-auto thin-scroll divide-y divide-border/70">
           {rows.map((r) => {
             const st = SENT_BACK_STATE[r.State as keyof typeof SENT_BACK_STATE];
+            const isSentBack = r.State === "SentBack";
             return (
-              <li key={`${r.Kind}-${r.RecordId}-${r.State}`} className="px-3 py-1.5 border-b border-border/70 last:border-0 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs hover:bg-muted/40">
-                <span className={cn("w-[5.5rem] shrink-0 font-semibold", r.State === "SentBack" ? "text-destructive" : "text-muted-foreground")} title={st.note}>{st.label}</span>
-                <span className="w-[17rem] max-w-full min-w-0 truncate shrink-0" title={`${r.RecordNo || `#${r.RecordId}`}${r.BookingNo && r.BookingNo !== r.RecordNo ? ` \u00b7 ${r.BookingNo}` : ""}`}>
-                  {r.area}{r.Item ? ` \u00b7 ${r.Item}` : ""} <span className="text-muted-foreground tabular-nums">{r.BookingNo || r.RecordNo || `#${r.RecordId}`}</span>
+              <li key={`${r.Kind}-${r.RecordId}-${r.State}`} className="px-3.5 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs hover:bg-muted/40 transition-colors">
+                <span className={cn("w-[5.75rem] shrink-0 font-semibold", isSentBack ? "text-rose-400 [[data-theme]_&]:text-rose-700" : "text-amber-300 [[data-theme]_&]:text-amber-700")} title={st.note}>{st.label}</span>
+                <span className="w-[16rem] max-w-full min-w-0 truncate shrink-0 font-medium text-foreground" title={`${r.RecordNo || `#${r.RecordId}`}${r.BookingNo && r.BookingNo !== r.RecordNo ? ` \u00b7 ${r.BookingNo}` : ""}`}>
+                  {r.area}{r.Item ? ` \u00b7 ${r.Item}` : ""} <span className="text-muted-foreground font-normal tabular-nums">{r.BookingNo || r.RecordNo || `#${r.RecordId}`}</span>
                 </span>
-                <span className="flex-1 min-w-[10rem] truncate" title={r.Reason || undefined}>{r.Reason ? `\u201c${r.Reason}\u201d` : <span className="text-muted-foreground">No reason given</span>}</span>
-                <span className="shrink-0 text-muted-foreground">{r.ByName || "\u2014"} \u00b7 {sinceLabel(r.At)}</span>
-                {/* Already on that page: reload it, since pages read their record from the address when they open. */}
-                <Link to={r.link} reloadDocument={r.path === pathname} className="shrink-0 inline-flex items-center gap-1 font-medium text-primary hover:underline">Open <ArrowRight size={11} /></Link>
+                <span className="flex-1 min-w-[10rem] truncate text-foreground/90" title={r.Reason || undefined}>{r.Reason ? `\u201c${r.Reason}\u201d` : <span className="text-muted-foreground">No reason given</span>}</span>
+                <span className="shrink-0 text-muted-foreground tabular-nums">{r.ByName || "\u2014"} \u00b7 {sinceLabel(r.At)}</span>
+                <Link to={r.link} reloadDocument={r.path === pathname && !String(r.link || "").includes("?")} onClick={() => setOpen(false)} className="shrink-0 inline-flex items-center gap-1 font-semibold text-primary hover:underline">Open <ArrowRight size={11} /></Link>
               </li>
             );
           })}
@@ -155,7 +155,11 @@ function SentBackPanelInner({ chip }: { chip: boolean }) {
     return (
       <div className="relative">
         <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
-          className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-xs font-medium bg-rose-500/20 text-rose-100 hover:bg-rose-500/30">
+          className={cn(
+            "inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs font-semibold border transition-colors",
+            "bg-rose-500/15 text-rose-200 border-rose-500/35 hover:bg-rose-500/25",
+            "[[data-theme]_&]:bg-rose-50 [[data-theme]_&]:text-rose-700 [[data-theme]_&]:border-rose-300 [[data-theme]_&]:hover:bg-rose-100",
+          )}>
           <CornerUpLeft size={13} />
           {[sentBack ? `${sentBack} sent back` : null, resubmitted ? `${resubmitted} resubmitted` : null].filter(Boolean).join(" \u00b7 ")}
           <ChevronDown size={13} className={cn("transition-transform", open && "rotate-180")} />
@@ -163,7 +167,16 @@ function SentBackPanelInner({ chip }: { chip: boolean }) {
         {open && (
           <>
             <button type="button" aria-label="Close" className="fixed inset-0 z-30 cursor-default" onClick={() => setOpen(false)} />
-            <div className="absolute right-0 top-full mt-2 z-40 w-[48rem] max-w-[90vw] rounded-lg border border-border bg-card text-foreground shadow-xl overflow-hidden">{entries}</div>
+            <div className="absolute right-0 top-full mt-2 z-40 w-[48rem] max-w-[92vw] rounded-xl border border-border bg-card text-foreground shadow-xl overflow-hidden">
+              <div className="px-3.5 py-2.5 border-b border-border bg-muted/30 flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                  <CornerUpLeft size={13} className="text-rose-400 [[data-theme]_&]:text-rose-700" />
+                  Returned &amp; resubmitted items ({rows.length})
+                </span>
+                <button type="button" onClick={() => setOpen(false)} className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">Close <X size={12} /></button>
+              </div>
+              {entries}
+            </div>
           </>
         )}
       </div>

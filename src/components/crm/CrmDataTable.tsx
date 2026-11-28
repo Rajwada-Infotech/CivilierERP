@@ -67,8 +67,8 @@ export function CrmRowMenu({ items }: { items: RowMenuItem[] }) {
       {pos && createPortal(
         <>
           <div className="fixed inset-0 z-[60]" onClick={(e) => { e.stopPropagation(); setPos(null); }} />
-          <div role="menu" style={{ top: pos.top, bottom: pos.bottom, right: pos.right, border: "1px solid hsl(var(--foreground))" }}
-            className="fixed z-[61] min-w-[200px] bg-card py-1">
+          <div role="menu" style={{ top: pos.top, bottom: pos.bottom, right: pos.right }}
+            className="fixed z-[61] min-w-[210px] rounded-lg border border-border bg-card shadow-lg py-1">
             {visible.map((it, i) => it.heading ? (
               <div key={`h${i}`} className="px-3 pt-2 pb-1 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground border-t border-foreground/15 mt-1">{it.heading}</div>
             ) : (
@@ -439,7 +439,7 @@ export function GridProgress({ done, total, empty = "None asked", title }: { don
       <span className="w-14 h-1.5 rounded-full bg-muted overflow-hidden">
         <span className={cn("block h-full rounded-full", full ? "bg-emerald-600" : "bg-primary")} style={{ width: `${Math.min(100, Math.round((done / total) * 100))}%` }} />
       </span>
-      <span className={cn("tabular-nums text-xs", full ? "text-emerald-700 dark:text-emerald-300 font-semibold" : "")}>{done}/{total}</span>
+      <span className={cn("tabular-nums text-xs", full ? "text-emerald-400 [[data-theme]_&]:text-emerald-700 font-semibold" : "")}>{done}/{total}</span>
     </span>
   );
 }
@@ -1062,7 +1062,7 @@ export function GridToggleChip({ label, on, count, onChange }: { label: string; 
   return (
     <button type="button" aria-pressed={on} onClick={() => onChange(!on)}
       className={cn("inline-flex items-center gap-1.5 h-9 px-3 rounded-full border text-xs font-medium transition-colors",
-        on ? "border-rose-500/40 text-rose-700 dark:text-rose-300 bg-rose-500/10" : "border-border bg-card text-muted-foreground hover:text-foreground")}>
+        on ? "border-rose-500/40 text-rose-300 [[data-theme]_&]:text-rose-700 bg-rose-500/10" : "border-border bg-card text-muted-foreground hover:text-foreground")}>
       {on && <Check size={12} />}{label}
       {count != null && <span className="tabular-nums font-semibold">{count.toLocaleString("en-IN")}</span>}
     </button>
