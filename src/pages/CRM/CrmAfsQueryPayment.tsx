@@ -963,27 +963,27 @@ const CrmAfsQueryPayment: React.FC<{
         ) : selectedId != null && detail ? (
           InlineDetail()
         ) : registered ? (
-          <div className="border border-border bg-emerald-500/5 px-5 py-5 flex items-start gap-4">
-            <div className="w-10 h-10 shrink-0 bg-card border-2 border-border flex items-center justify-center">
-              <CheckCircle2 size={18} className="text-foreground" />
+          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-5 py-5 flex items-start gap-4">
+            <div className="w-10 h-10 rounded-xl shrink-0 bg-card border border-emerald-500/30 flex items-center justify-center">
+              <CheckCircle2 size={18} className="text-emerald-400 [[data-theme]_&]:text-emerald-700" />
             </div>
             <div>
               <p className="text-sm font-semibold text-foreground">Agreement for Sale is Registered</p>
-              <p className="text-xs text-foreground mt-1 max-w-lg">
+              <p className="text-xs text-muted-foreground mt-1 max-w-lg">
                 Registered at the Sub-Registrar's Office — stamp duty and registration fees were settled directly, no in-system fee tracker was created. Registration details are on the Agreement tab.
               </p>
             </div>
           </div>
         ) : !executed ? (
-          <div className="border border-dashed border-border p-8 text-center space-y-2">
+          <div className="rounded-xl border border-dashed border-border p-8 text-center space-y-2">
             <ReceiptIndianRupee size={24} className="mx-auto text-muted-foreground" />
             <p className="text-sm font-medium text-foreground">Not available yet</p>
             <p className="text-xs text-muted-foreground max-w-sm mx-auto">
-              AFS registration fees can be started once the Agreement for Sale is <strong>Executed</strong>. Complete the Agreement tab first.
+              AFS registration fees unlock once the Agreement for Sale is <strong>Executed</strong>. Complete Approvals, Customer Review, Signing Date &amp; Execution above first.
             </p>
           </div>
         ) : canCreate ? (
-          <div className="border border-border bg-card overflow-hidden">
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="px-5 py-4 border-b border-border bg-card">
               <p className="text-sm font-semibold">Start Registration Fee Process</p>
               <p className="text-xs text-muted-foreground mt-0.5">Enter the stamp duty and registration fee amounts (both optional now — can be filled before sending to the customer).</p>

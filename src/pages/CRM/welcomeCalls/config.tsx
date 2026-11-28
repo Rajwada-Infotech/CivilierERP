@@ -3,6 +3,7 @@
 import { CrmStatus } from "@/constants/crmStatuses";
 import React from "react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { GRID_SHEET_KEYS } from "@/components/crm/CrmDataTable";
 import { FileCheck, FileImage, File as FileIcon, FileSpreadsheet } from "lucide-react";
 
 export const API = "/api/crm/welcome-calls";
@@ -22,6 +23,108 @@ export const outcomeTone = (o: string): "done" | "waiting" | "stopped" =>
 export const OUTCOME_LABEL: Record<string, string> = {
   Welcomed: "Welcomed", NotReachable: "Not reachable", RequestedCallback: "Callback asked", VoiceMail: "Voicemail", Busy: "Busy", SwitchedOff: "Switched off",
 };
+export const VC_ITEM_SHORT_LABEL: Record<string, string> = {
+  project_name: "Project name",
+  unit_no: "Unit / Plot details",
+  booking_date: "Booking date",
+  total_value: "Total booking value",
+  plan_structure: "Payment plan & schedule",
+  outstanding_balance: "Outstanding balance",
+  applicant_name: "Applicant name",
+  mobile_number: "Mobile number",
+  email: "Email address",
+  address: "Communication address",
+  documents_uploaded: "Documents uploaded",
+  documents_verified: "Documents verified",
+  co_applicant_details: "Co-applicant details",
+  parking_selection: "Parking allotment",
+  extra_charges: "Extra charges",
+};
+
+export const BOARD_TABS = ["queue", "checklist", "recheck", "verified"] as const;
+export type BoardTab = typeof BOARD_TABS[number];
+export const WELCOME_VIEWS = ["queue", "checklist", "recheck", "verified", "history"] as const;
+export type WelcomeView = typeof WELCOME_VIEWS[number];
+
+export interface BoardRow {
+  BookingId: number;
+  BookingNo: string;
+  ApplicationId: number;
+  ApplicationNo: string | null;
+  BookingDate: string | null;
+  GrandTotal: number | null;
+  TotalValue: number | null;
+  FinancingType: string | null;
+  AssignedTo: number | null;
+  AssignedToName: string | null;
+  ApplicantName: string;
+  Mobile: string | null;
+  Email: string | null;
+  UnitNo: string | null;
+  ProjectName: string | null;
+  BlockName: string | null;
+  IsPlotSale: boolean;
+  LastCallId: number | null;
+  LastOutcome: string | null;
+  LastCallDate: string | null;
+  NextCallDate: string | null;
+  LastCalledBy: number | null;
+  LastCalledByName: string | null;
+  AttemptCount: number;
+  ConsecutiveNonReached: number;
+  HasWelcomedCall: boolean;
+  PaymentPlanConfirmed: boolean | null;
+  PaymentPlanDisputeReason: string | null;
+  PreferredAgreementDate: string | null;
+  ChecklistTotal: number;
+  CheckedCount: number;
+  OpenRecheckCount: number;
+  OldestFlaggedAt: string | null;
+  IsLocked: boolean;
+  SubmittedAt: string | null;
+  SubmittedByName: string | null;
+  FlaggedItemKey: string | null;
+  FlaggedReason: string | null;
+  RequestedByName: string | null;
+  DocsTotal: number | null;
+  DocsVerified: number | null;
+  BankPrefNames: string | null;
+  AgreementId: number | null;
+  AgreementNo: string | null;
+  AgreementStatus: string | null;
+}
+
+export interface BoardFilters {
+  tab: BoardTab;
+  page: number;
+  pageSize: number;
+  search: string;
+  cpb: WelcomeCpbFilters;
+  assignedTo?: string;
+  calledBy?: string;
+  outcome?: string;
+  focus?: string;
+  sortKey?: string;
+  sortDir?: "asc" | "desc";
+}
+
+export interface BoardCounts {
+  tabs: Record<WelcomeView, number>;
+  focus: {
+    queue: { neverCalled: number; overdue: number; dueToday: number; unreachable3: number; scheduled: number };
+    checklist: { incomplete: number; readyToSubmit: number; hasRecheck: number; missingFinancing: number; planDisputed: number };
+    recheck: { aging: number; multi: number };
+  };
+}
+
+export interface HistoryCounts {
+  total: number;
+  welcomed: number;
+  callback: number;
+  notReached: number;
+  planDisputed: number;
+  submitted: number;
+}
 
 export const EMPTY_FORM = {
   CalledBy: "", CallDate: "", DurationSeconds: "",
@@ -60,15 +163,85 @@ export async function fetchQueue(cpb: WelcomeCpbFilters): Promise<any[]> {
 }
 
 export const PAGE_SIZE = 20;
-// Call History is a genuine, ever-growing audit log — the one view here
-// that actually needs pagination.
-export async function fetchCallsList(cpb: WelcomeCpbFilters, search: string, page: number): Promise<{ rows: any[]; total: number }> {
+export async function fetchCallsList(
+  cpb: WelcomeCpbFilters,
+  search: string,
+  page: number,
+  opts?: {
+    pageSize?: number;
+    sortKey?: string;
+    sortDir?: "asc" | "desc";
+    outcome?: string;
+    calledBy?: string;
+    assignedTo?: string;
+    focus?: string;
+    dateFrom?: string;
+    dateTo?: string;
+  },
+): Promise<{ rows: any[]; total: number }> {
   const q = cpbParams(cpb);
   q.set("page", String(page));
-  q.set("pageSize", String(PAGE_SIZE));
+  q.set("pageSize", String(opts?.pageSize ?? PAGE_SIZE));
   if (search) q.set("search", search);
+  if (opts?.sortKey) { q.set("sortKey", opts.sortKey); q.set("sortDir", opts.sortDir || "desc"); }
+  if (opts?.outcome && opts.outcome !== "All") q.set("outcome", opts.outcome);
+  if (opts?.calledBy) q.set("calledBy", opts.calledBy);
+  if (opts?.assignedTo) q.set("assignedTo", opts.assignedTo);
+  if (opts?.focus) q.set("focus", opts.focus);
+  if (opts?.dateFrom) q.set("dateFrom", opts.dateFrom);
+  if (opts?.dateTo) q.set("dateTo", opts.dateTo);
   const data = await getList(`${API}?${q}`, "the call history");
   return { rows: data.rows || [], total: data.total || 0 };
+}
+
+export function boardQueryParams(f: Omit<BoardFilters, "page" | "pageSize">): URLSearchParams {
+  const q = cpbParams(f.cpb);
+  q.set("tab", f.tab);
+  if (f.search) q.set("search", f.search);
+  if (f.assignedTo) q.set("assignedTo", f.assignedTo);
+  if (f.calledBy) q.set("calledBy", f.calledBy);
+  if (f.outcome && f.outcome !== "All") q.set("outcome", f.outcome);
+  if (f.focus) q.set("focus", f.focus);
+  if (f.sortKey) { q.set("sortKey", f.sortKey); q.set("sortDir", f.sortDir || "asc"); }
+  return q;
+}
+
+export async function fetchBoard(f: BoardFilters): Promise<{ rows: BoardRow[]; total: number }> {
+  const q = boardQueryParams(f);
+  q.set("page", String(f.page));
+  q.set("pageSize", String(f.pageSize));
+  const data = await getList(`${API}/board?${q}`, "the welcome call list");
+  return { rows: data.rows || [], total: data.total || 0 };
+}
+
+export async function fetchBoardCounts(f: {
+  cpb: WelcomeCpbFilters;
+  search: string;
+  assignedTo?: string;
+}): Promise<BoardCounts> {
+  const q = cpbParams(f.cpb);
+  if (f.search) q.set("search", f.search);
+  if (f.assignedTo) q.set("assignedTo", f.assignedTo);
+  return getList(`${API}/board/counts?${q}`, "welcome call counts");
+}
+
+export async function fetchHistoryCounts(f: {
+  cpb: WelcomeCpbFilters;
+  search: string;
+  assignedTo?: string;
+  calledBy?: string;
+  outcome?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}): Promise<HistoryCounts> {
+  const q = cpbParams(f.cpb);
+  if (f.search) q.set("search", f.search);
+  if (f.assignedTo) q.set("assignedTo", f.assignedTo);
+  if (f.calledBy) q.set("calledBy", f.calledBy);
+  if (f.outcome && f.outcome !== "All") q.set("outcome", f.outcome);
+  if (f.dateFrom) q.set("dateFrom", f.dateFrom);
+  if (f.dateTo) q.set("dateTo", f.dateTo);
+  return getList(`${API}/history-counts?${q}`, "call history counts");
 }
 export async function fetchUsers(): Promise<{ value: string; label: string }[]> {
   try {
@@ -95,7 +268,17 @@ export async function fetchBookingById(bookingId: number): Promise<any | null> {
     if (!r.ok) return null;
     const { booking: d } = await r.json();
     if (!d) return null;
-    return { BookingId: d.Id, BookingNo: d.BookingNo, ApplicantName: d.ApplicantName, Mobile: d.Mobile, ProjectName: d.ProjectName, UnitNo: d.UnitNo };
+    return {
+      BookingId: d.Id,
+      BookingNo: d.BookingNo,
+      ApplicationId: d.ApplicationId,
+      ApplicantName: d.ApplicantName,
+      Mobile: d.Mobile,
+      ProjectName: d.ProjectName,
+      BlockName: d.BlockName,
+      UnitNo: d.UnitNo,
+      BookingDate: d.BookingDate,
+    };
   } catch { return null; }
 }
 export async function fetchCallContext(bookingId: number): Promise<any | null> {
@@ -181,5 +364,13 @@ export function fmtBytes(n: number | null | undefined) {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-// ── Sheet styles ──
-export { RULE, RULE_SOFT, LBL, KEY_INK, KEY_LINE, KEY_RED } from "../customers/config";
+// ── Enterprise Grid sheet keys (matches CrmBookingDetail / CrmPaymentMilestones) ──
+export const { KEY_INK, KEY_LINE, KEY_RED, LBL, RULE, RULE_SOFT, INP, TEXTAREA } = GRID_SHEET_KEYS;
+
+// Theme-safe semantic tone helpers: default `:root` is dark theme (no `[data-theme]` attribute),
+// whereas every light theme (`light`, `sage`, `glass`, `bw`) sets `[data-theme]`. Using this selector
+// guarantees crisp WCAG contrast on dark AND all light themes without requiring a `.dark` class.
+export const TONE_EMERALD_TEXT = "text-emerald-400 [[data-theme]_&]:text-emerald-700";
+export const TONE_EMERALD_PILL = "bg-emerald-500/15 border-emerald-500/30 text-emerald-300 [[data-theme]_&]:bg-emerald-500/10 [[data-theme]_&]:border-emerald-500/25 [[data-theme]_&]:text-emerald-700";
+export const TONE_AMBER_TEXT = "text-amber-300 [[data-theme]_&]:text-amber-700";
+export const TONE_ROSE_PILL = "border-rose-500/40 bg-rose-500/15 text-rose-300 [[data-theme]_&]:bg-rose-500/10 [[data-theme]_&]:border-rose-500/35 [[data-theme]_&]:text-rose-700";

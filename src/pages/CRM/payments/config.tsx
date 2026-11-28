@@ -54,7 +54,7 @@ export const MONEY_STAGE: Record<string, { label: string; tone: "done" | "waitin
   Adjusted: { label: "Paid", tone: "done", hint: "Adjusted to this milestone" },
   Verified: { label: "Covered on account", tone: "done", hint: "Approved by Finance and held On Account. It is adjusted to the milestones once the full booking amount is received" },
   InVerification: { label: "Pending with Finance", tone: "waiting", hint: "Payment entered and waiting for Finance approval" },
-  Recorded: { label: "Not sent to Finance", tone: "waiting", hint: "Entered on the application or a Money Receipt. It is sent to Finance when the Director approves the booking" },
+  Recorded: { label: "Awaiting booking approval", tone: "waiting", hint: "Token or pre-approval Money Receipt recorded on the booking. Automatically sent to Finance once Booking Approval passes." },
 };
 
 /** Whole days past its due date (a milestone due today is 0, not late). */
@@ -68,16 +68,16 @@ export const daysLate = (m: any) => {
 /** Past its due date with no money for it, verified or entered. */
 export const isOverdue = (m: any) => m.MoneyStage == null && m.Status === "Pending" && daysLate(m) > 0;
 
-/** The funding ribbon's fills: one set of colours and words for the bars and their legend. */
+/** The funding ribbon's fills: one set of 5-theme colours and words for the bars and their legend. */
 export const RIBBON = {
-  settled: { label: "Adjusted", cls: "bg-emerald-600 dark:bg-emerald-500" },
-  held: { label: "On account", cls: "bg-teal-400 dark:bg-teal-400" },
-  finance: { label: "Pending with Finance", cls: "bg-amber-300 dark:bg-amber-400/70" },
-  recorded: { label: "Not sent to Finance", cls: "bg-sky-400" },
-  overdue: { label: "Overdue", cls: "bg-rose-200 dark:bg-rose-500/30" },
+  settled: { label: "Adjusted", cls: "bg-emerald-500 [[data-theme]_&]:bg-emerald-600" },
+  held: { label: "On account", cls: "bg-teal-400 [[data-theme]_&]:bg-teal-500" },
+  finance: { label: "Pending with Finance", cls: "bg-amber-400 [[data-theme]_&]:bg-amber-400" },
+  recorded: { label: "Awaiting booking approval", cls: "bg-sky-400" },
+  overdue: { label: "Overdue", cls: "bg-rose-500/40 [[data-theme]_&]:bg-rose-200" },
   late: { label: "Overdue", cls: "bg-rose-500" },
-  open: { label: "Upcoming", cls: "bg-slate-200 dark:bg-slate-600/60" },
-  waived: { label: "Waived", cls: "bg-slate-300/60 dark:bg-slate-500/30" },
+  open: { label: "Upcoming", cls: "bg-muted [[data-theme]_&]:bg-slate-200" },
+  waived: { label: "Waived", cls: "bg-muted/60 [[data-theme]_&]:bg-slate-300/60" },
 } as const;
 
 /** What a milestone's amount is made of. The server worked out the money against it (crmOnAccountCoverage.js). */
@@ -92,7 +92,7 @@ export const milestoneFill = (m: any) => {
 
 /** Where a payment's money is now, on the money trail: the server decides the stage (getBookingMoneyTrail). */
 export const TRAIL_STAGE: Record<string, { label: string; tone: "done" | "waiting" | "stopped" | "moving"; hint: string }> = {
-  recorded: { label: "Not sent to Finance", tone: "waiting", hint: MONEY_STAGE.Recorded.hint },
+  recorded: { label: "Awaiting booking approval", tone: "waiting", hint: MONEY_STAGE.Recorded.hint },
   finance: { label: "Pending with Finance", tone: "waiting", hint: MONEY_STAGE.InVerification.hint },
   held: { label: "On account", tone: "moving", hint: MONEY_STAGE.Verified.hint },
   settled: { label: "Adjusted", tone: "done", hint: MONEY_STAGE.Adjusted.hint },

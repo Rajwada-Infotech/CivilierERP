@@ -2,6 +2,7 @@
 // leads pool, and the sheet styles.
 import React from "react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { GRID_SHEET_KEYS } from "@/components/crm/CrmDataTable";
 import { isValidPhone, PHONE_HINT } from "@/lib/phone";
 
 export const API = "/api/crm/customers";
@@ -47,8 +48,30 @@ export function checkCustomer(f: Partial<CustomerForm>): string | null {
   return null;
 }
 
-export const PAGE_SIZE = 20;
-export interface CustomerListFilters { search: string; companyId: string; projectId: string; blockId: string }
+export const PAGE_SIZE = 25;
+export type CustomerView = "all" | "withApps" | "missingKyc" | "invoice" | "noApps";
+export interface CustomerListFilters {
+  search: string;
+  companyId: string;
+  projectId: string;
+  blockId: string;
+  view?: CustomerView;
+  invoiceMode?: string;
+  focus?: string;
+  sortKey?: string;
+  sortDir?: "asc" | "desc";
+}
+export interface CustomerCounts {
+  all: number;
+  withApps: number;
+  noApps: number;
+  missingKyc: number;
+  invoice: number;
+  nonInvoice: number;
+  missingPan: number;
+  missingEmail: number;
+  missingAddress: number;
+}
 
 export async function fetchCustomersList(filters: CustomerListFilters, page: number, pageSize: number = PAGE_SIZE): Promise<{ rows: any[]; total: number }> {
   const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
@@ -56,10 +79,26 @@ export async function fetchCustomersList(filters: CustomerListFilters, page: num
   if (filters.companyId) params.set("companyId", filters.companyId);
   if (filters.projectId) params.set("projectId", filters.projectId);
   if (filters.blockId) params.set("blockId", filters.blockId);
+  if (filters.view && filters.view !== "all") params.set("view", filters.view);
+  if (filters.invoiceMode && filters.invoiceMode !== "All") params.set("invoiceMode", filters.invoiceMode);
+  if (filters.focus) params.set("focus", filters.focus);
+  if (filters.sortKey) { params.set("sortKey", filters.sortKey); params.set("sortDir", filters.sortDir || "desc"); }
   const res = await fetchWithAuth(`${API}?${params}`);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data?.error || `Could not load the customers (${res.status}).`);
   return { rows: data.rows || [], total: data.total || 0 };
+}
+
+export async function fetchCustomerCounts(filters: Pick<CustomerListFilters, "search" | "companyId" | "projectId" | "blockId">): Promise<CustomerCounts> {
+  const params = new URLSearchParams();
+  if (filters.search) params.set("search", filters.search);
+  if (filters.companyId) params.set("companyId", filters.companyId);
+  if (filters.projectId) params.set("projectId", filters.projectId);
+  if (filters.blockId) params.set("blockId", filters.blockId);
+  const res = await fetchWithAuth(`${API}/counts?${params}`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `Could not load customer counts (${res.status}).`);
+  return data;
 }
 
 export interface PoolLead {
@@ -99,6 +138,47 @@ export const Block: React.FC<{ title: string; note?: React.ReactNode; className?
     <div className="px-4 py-2.5 flex flex-wrap items-baseline justify-between gap-2" style={{ borderBottom: RULE }}>
       <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">{title}</span>
       {note && <span className="text-[0.6875rem] text-muted-foreground">{note}</span>}
+    </div>
+    <div className="p-4 space-y-3">{children}</div>
+  </section>
+);
+
+// ── Enterprise Grid / Card styles for /crm/customers UI/UX ──
+// Kept separate from legacy sheet tokens above so existing consumers of customers/config are untouched.
+export const {
+  KEY_INK: CUST_KEY_INK,
+  KEY_LINE: CUST_KEY_LINE,
+  KEY_RED: CUST_KEY_RED,
+  LBL: CUST_LBL,
+  INP: CUST_INP,
+  TEXTAREA: CUST_TEXTAREA,
+} = GRID_SHEET_KEYS;
+
+export const TONE_EMERALD_PILL = "bg-emerald-500/15 border-emerald-500/30 text-emerald-300 [[data-theme]_&]:bg-emerald-500/10 [[data-theme]_&]:border-emerald-500/25 [[data-theme]_&]:text-emerald-700";
+export const TONE_AMBER_PILL = "bg-amber-500/15 border-amber-500/30 text-amber-300 [[data-theme]_&]:bg-amber-500/10 [[data-theme]_&]:border-amber-500/30 [[data-theme]_&]:text-amber-700";
+export const TONE_ROSE_PILL = "border-rose-500/40 bg-rose-500/15 text-rose-300 [[data-theme]_&]:bg-rose-500/10 [[data-theme]_&]:border-rose-500/35 [[data-theme]_&]:text-rose-700";
+
+export const CUST_CARD_SHELL = "rounded-xl border border-border bg-card overflow-hidden shadow-[0_1px_2px_0_hsl(var(--foreground)/0.04)]";
+export const CUST_CARD_HEAD = "flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 border-b border-border bg-muted/30";
+
+export const CustField: React.FC<{ label: string; required?: boolean; className?: string; children: React.ReactNode }> = ({ label, required, className, children }) => (
+  <label className={`block space-y-1 min-w-0 ${className ?? ""}`}>
+    <span className="block text-xs font-medium text-muted-foreground">
+      {label}
+      {required && <span className="text-destructive"> *</span>}
+    </span>
+    {children}
+  </label>
+);
+
+export const CustBlock: React.FC<{ title: string; icon?: React.ReactNode; note?: React.ReactNode; className?: string; children: React.ReactNode }> = ({ title, icon, note, className, children }) => (
+  <section className={`${CUST_CARD_SHELL} ${className ?? ""}`}>
+    <div className={CUST_CARD_HEAD}>
+      <span className="text-sm font-semibold text-foreground inline-flex items-center gap-1.5">
+        {icon}
+        {title}
+      </span>
+      {note && <span className="text-xs text-muted-foreground">{note}</span>}
     </div>
     <div className="p-4 space-y-3">{children}</div>
   </section>

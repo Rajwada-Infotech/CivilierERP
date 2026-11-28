@@ -1,11 +1,32 @@
-// Auto Project Setup and its parts: the APIs and loaders, block naming, and the sheet pieces every section draws with.
+// Auto Project Setup and its parts: the APIs and loaders, block naming, and 5-theme enterprise UI primitives.
 import React from "react";
+import { AlertTriangle, Check, Info } from "lucide-react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { SheetMark, type MarkTone } from "@/components/sheet/Sheet";
-import { RULE, RULE_SOFT, LBL } from "../customers/config";
+import { GRID_CARD, GRID_KEY, GRID_KEY_BRAND, GRID_KEY_DANGER, GRID_SHEET_KEYS, GridToneMark } from "@/components/crm/CrmDataTable";
 import type { LayoutType } from "@/api/unitBhkConfigApi";
 
-export { RULE, RULE_SOFT, LBL, KEY_INK, KEY_LINE, KEY_RED, INP } from "../customers/config";
+export type MarkTone = "done" | "waiting" | "moving" | "stopped" | "draft";
+
+export const TONE_EMERALD_TEXT = "text-emerald-400 [[data-theme]_&]:text-emerald-700";
+export const TONE_AMBER_TEXT = "text-amber-300 [[data-theme]_&]:text-amber-700";
+export const TONE_ROSE_TEXT = "text-rose-400 [[data-theme]_&]:text-rose-700";
+export const TONE_SKY_TEXT = "text-sky-400 [[data-theme]_&]:text-sky-700";
+
+export const TONE_EMERALD_PILL = "bg-emerald-500/15 border-emerald-500/30 text-emerald-300 [[data-theme]_&]:bg-emerald-500/10 [[data-theme]_&]:border-emerald-500/25 [[data-theme]_&]:text-emerald-700";
+export const TONE_AMBER_PILL = "bg-amber-500/15 border-amber-500/30 text-amber-300 [[data-theme]_&]:bg-amber-500/10 [[data-theme]_&]:border-amber-500/30 [[data-theme]_&]:text-amber-700";
+export const TONE_ROSE_PILL = "bg-rose-500/15 border-rose-500/35 text-rose-300 [[data-theme]_&]:bg-rose-500/10 [[data-theme]_&]:border-rose-500/30 [[data-theme]_&]:text-rose-700";
+export const TONE_SKY_PILL = "bg-sky-500/15 border-sky-500/30 text-sky-300 [[data-theme]_&]:bg-sky-500/10 [[data-theme]_&]:border-sky-500/25 [[data-theme]_&]:text-sky-700";
+
+export const SEG_WRAP = "inline-flex items-center rounded-lg border border-border bg-muted/40 p-1 gap-1";
+export const segBtn = (on: boolean) =>
+  `h-7 px-3 rounded-md text-xs font-medium transition-all inline-flex items-center justify-center gap-1.5 whitespace-nowrap ${
+    on ? "bg-card text-foreground shadow-sm border border-border/80 font-semibold" : "text-muted-foreground hover:text-foreground"
+  }`;
+
+export const KEY_INK = GRID_KEY_BRAND;
+export const KEY_LINE = GRID_KEY;
+export const KEY_RED = GRID_KEY_DANGER;
+export const { LBL, RULE, RULE_SOFT, INP } = GRID_SHEET_KEYS;
 
 export const API = "/api/crm/project-auto-setup";
 const DROPDOWN_API = "/api/business/dropdown";
@@ -106,30 +127,42 @@ export function lockOf(u: any): { text: string; tone: MarkTone } | null {
 
 export const plural = (n: number, word: string) => `${n.toLocaleString("en-IN")} ${word}${n === 1 ? "" : "s"}`;
 
-// ── Sheet pieces ──
-/** A square tag: blocks, floors and units at rest. `on` = the one opened. */
+// ── 5-theme enterprise pieces ──
+/** A rounded tag: blocks, floors and units at rest. `on` = the one opened. */
 export const chip = (on = false) =>
-  `inline-flex items-center gap-1.5 h-7 px-2.5 text-xs border transition-colors ${on ? "bg-foreground text-card border-foreground" : "bg-card border-foreground/30 hover:border-foreground"}`;
+  `inline-flex items-center gap-1.5 h-7 px-2.5 rounded-lg text-xs font-medium border transition-colors ${
+    on
+      ? "bg-primary text-primary-foreground border-primary shadow-sm"
+      : "bg-card border-border text-foreground hover:border-primary/45 hover:bg-muted/40"
+  }`;
 /** A panel inside a section (one block's floors, one block's plots). */
-export const PANEL = "bg-card border border-foreground/25";
+export const PANEL = "rounded-xl bg-card border border-border";
 export const NUM = "font-heading tabular-nums";
 /** A small action written as a link. */
-export const TEXT_LINK = "text-xs underline underline-offset-2 decoration-foreground/40 hover:decoration-foreground disabled:opacity-40 disabled:no-underline";
+export const TEXT_LINK = "text-xs font-medium text-primary hover:underline underline-offset-2 disabled:opacity-40 disabled:no-underline";
 
-/** One step of the setup: a numbered, ruled section with its note and its keys. */
+/** One step of the setup: a rounded enterprise card with numbered badge, subtitle and right-aligned actions. */
 export const Section: React.FC<{ tag?: string; title: string; note?: React.ReactNode; done?: boolean; right?: React.ReactNode; children: React.ReactNode }> =
   ({ tag, title, note, done, right, children }) => (
-    <section className="bg-card" style={{ border: RULE }}>
-      <header className="px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2" style={{ borderBottom: RULE }}>
+    <section className={`${GRID_CARD} rounded-xl overflow-hidden`}>
+      <header className="px-4 py-3 border-b border-border bg-muted/20 flex flex-wrap items-center gap-x-3 gap-y-2">
         {tag && (
-          <span className="inline-flex items-center justify-center w-6 h-6 rounded-full border-[1.5px] border-foreground font-heading text-[0.6875rem] font-semibold shrink-0">{tag}</span>
+          <span
+            className={`inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-bold shrink-0 border ${
+              done
+                ? "bg-emerald-500/15 border-emerald-500/35 text-emerald-300 [[data-theme]_&]:bg-emerald-500/10 [[data-theme]_&]:text-emerald-700"
+                : "bg-primary/10 border-primary/30 text-primary"
+            }`}
+          >
+            {done ? <Check size={13} /> : tag}
+          </span>
         )}
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <h2 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">{title}</h2>
-            {done && <SheetMark text="Done" tone="done" />}
+          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+            <h2 className="text-sm font-bold text-foreground leading-tight">{title}</h2>
+            {done && <GridToneMark text="Done" tone="done" />}
           </div>
-          {note && <p className="mt-1 text-xs text-muted-foreground">{note}</p>}
+          {note && <p className="mt-0.5 text-xs text-muted-foreground">{note}</p>}
         </div>
         {right && <div className="flex flex-wrap items-center gap-2 ml-auto">{right}</div>}
       </header>
@@ -137,30 +170,50 @@ export const Section: React.FC<{ tag?: string; title: string; note?: React.React
     </section>
   );
 
-/** A line the reader should act on: plain (note), edged (to fix), or red (a failure). */
-export const Notice: React.FC<{ tone?: "note" | "fix" | "error"; children: React.ReactNode }> = ({ tone = "note", children }) => (
-  <div
-    className={`px-4 py-2.5 text-xs leading-relaxed ${tone === "error" ? "text-destructive" : "text-foreground"} ${tone === "note" ? "bg-primary/5" : "bg-card"}`}
-    style={{
-      border: tone === "error" ? "1px solid hsl(var(--destructive))" : tone === "fix" ? RULE : RULE_SOFT,
-      boxShadow: tone === "fix" ? "inset 3px 0 0 hsl(var(--foreground))" : undefined,
-    }}
-  >
-    {children}
-  </div>
-);
+/** A rounded callout: plain (note), action-needed (fix), or failure (error). */
+export const Notice: React.FC<{ tone?: "note" | "fix" | "error"; children: React.ReactNode }> = ({ tone = "note", children }) => {
+  const cls =
+    tone === "error"
+      ? `border-rose-500/35 bg-rose-500/10 ${TONE_ROSE_TEXT}`
+      : tone === "fix"
+        ? "border-amber-500/35 bg-amber-500/10 text-foreground"
+        : "border-primary/25 bg-primary/5 text-foreground";
+  const Icon = tone === "note" ? Info : AlertTriangle;
+  const iconCls = tone === "error" ? TONE_ROSE_TEXT : tone === "fix" ? TONE_AMBER_TEXT : "text-primary";
+  return (
+    <div className={`rounded-xl border px-4 py-3 text-xs leading-relaxed flex items-start gap-2.5 ${cls}`} role="status">
+      <Icon size={15} className={`shrink-0 mt-0.5 ${iconCls}`} />
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  );
+};
 
-/** The setup's steps in a ruled strip: what each holds, which are done, and which comes next. */
+/** The setup's steps in a rounded progress bar: what each holds, which are done, and which comes next. */
 export const SetupProgress: React.FC<{ steps: { label: string; detail: string; done: boolean; active: boolean }[] }> = ({ steps }) => (
-  <ol className={`grid grid-cols-1 bg-card ${steps.length === 2 ? "sm:grid-cols-2" : "sm:grid-cols-3"}`} style={{ border: RULE }}>
+  <ol className={`grid grid-cols-1 rounded-xl border border-border bg-card overflow-hidden divide-y sm:divide-y-0 sm:divide-x divide-border ${steps.length === 2 ? "sm:grid-cols-2" : "sm:grid-cols-3"}`}>
     {steps.map((s, i) => (
-      <li key={s.label} className={`px-4 py-3 min-w-0 ${i ? "border-t sm:border-t-0 sm:border-l border-foreground/15" : ""}`}
-        style={{ boxShadow: s.active && !s.done ? "inset 0 -3px 0 hsl(var(--foreground))" : undefined }}>
+      <li
+        key={s.label}
+        className={`px-4 py-3 min-w-0 transition-colors ${s.active && !s.done ? "bg-primary/[0.04]" : ""}`}
+      >
         <div className="flex items-center justify-between gap-2">
-          <span className={LBL}>{i + 1} · {s.label}</span>
-          {s.done ? <SheetMark text="Done" tone="done" /> : s.active ? <SheetMark text="Next" tone="waiting" /> : null}
+          <span className="inline-flex items-center gap-2 text-xs font-semibold text-muted-foreground">
+            <span
+              className={`w-5 h-5 rounded-full text-[0.6875rem] font-bold inline-flex items-center justify-center ${
+                s.done
+                  ? "bg-emerald-500 text-white"
+                  : s.active
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted text-muted-foreground"
+              }`}
+            >
+              {s.done ? <Check size={11} /> : i + 1}
+            </span>
+            <span className={s.done || s.active ? "text-foreground" : "text-muted-foreground"}>{s.label}</span>
+          </span>
+          {s.done ? <GridToneMark text="Done" tone="done" /> : s.active ? <GridToneMark text="Next" tone="waiting" /> : null}
         </div>
-        <p className="mt-1.5 text-sm text-foreground truncate">{s.detail}</p>
+        <p className="mt-1.5 text-sm font-medium text-foreground truncate">{s.detail}</p>
       </li>
     ))}
   </ol>

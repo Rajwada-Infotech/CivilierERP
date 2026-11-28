@@ -7,9 +7,9 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { Link } from "react-router-dom";
 import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { SheetMark } from "@/components/sheet/Sheet";
+import { GRID_CARD, GridToneMark } from "@/components/crm/CrmDataTable";
 import { unitTypeOptions, type LayoutType } from "@/api/unitBhkConfigApi";
-import { API, INP, KEY_INK, KEY_LINE, LBL, NUM, RULE, RULE_SOFT, TEXT_LINK, firstPickableType, lockOf, plural, type KindRow, type UnitEdit } from "./config";
+import { API, INP, KEY_INK, KEY_LINE, LBL, NUM, TEXT_LINK, TONE_AMBER_TEXT, TONE_ROSE_TEXT, firstPickableType, lockOf, plural, type KindRow, type UnitEdit } from "./config";
 
 export interface UnitCtx {
   floorUnits: Record<number, any[]>;
@@ -191,7 +191,7 @@ export const FloorUnitList: React.FC<{ floorId: number; ctx: UnitCtx }> = ({ flo
             const isOpen = openUnitId === u.Id;
             if (ctx.editingUnitId === u.Id && e) {
               return (
-                <div key={u.Id} className="col-span-2 sm:col-span-3 lg:col-span-4 bg-card p-3 space-y-3" style={{ border: RULE }}>
+                <div key={u.Id} className="col-span-2 sm:col-span-3 lg:col-span-4 rounded-xl border border-primary/40 bg-card p-3.5 space-y-3 shadow-sm">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <label className="space-y-1">
                       <span className={`block ${LBL}`}>Unit name</span>
@@ -223,7 +223,7 @@ export const FloorUnitList: React.FC<{ floorId: number; ctx: UnitCtx }> = ({ flo
                   {/* Only a unit with no floor (the Unassigned row) gets a floor here; the others keep the one the setup gave them. */}
                   {u.FloorNo == null && (
                     <label className="block space-y-1 max-w-[10rem]">
-                      <span className={`block ${LBL}`}>Floor no. <span className="text-destructive">*</span></span>
+                      <span className={`block ${LBL}`}>Floor no. <span className={TONE_ROSE_TEXT}>*</span></span>
                       <input value={e.FloorNo} type="number" placeholder="e.g. 1" onChange={(ev) => ctx.change({ FloorNo: ev.target.value })} className={`${SMALL_INP} ${NUM}`} />
                     </label>
                   )}
@@ -236,7 +236,7 @@ export const FloorUnitList: React.FC<{ floorId: number; ctx: UnitCtx }> = ({ flo
                       </label>
                     ))}
                   </div>
-                  <div className="flex justify-end gap-2 pt-3" style={{ borderTop: RULE_SOFT }}>
+                  <div className="flex justify-end gap-2 pt-3 border-t border-border/70">
                     <button onClick={ctx.cancel} className={`${KEY_LINE} h-8 px-3`}>Cancel</button>
                     <button onClick={() => ctx.save(floorId, u)} disabled={ctx.savingUnitId === u.Id} className={`${KEY_INK} h-8 px-3`}>
                       {ctx.savingUnitId === u.Id ? "Saving…" : "Save unit"}
@@ -248,18 +248,18 @@ export const FloorUnitList: React.FC<{ floorId: number; ctx: UnitCtx }> = ({ flo
             const kindName = ctx.commercialKinds.some((k) => k.Code === u.UnitKind) ? (u.KindName || u.UnitKind) : (u.UnitType || "No type set");
             return (
               <div key={u.Id} onClick={() => setOpenUnitId(isOpen ? null : u.Id)}
-                className={`p-2.5 text-xs cursor-pointer transition-colors border ${isOpen ? "border-foreground bg-primary/5" : "border-foreground/25 bg-card hover:border-foreground"}`}>
+                className={`p-2.5 rounded-xl text-xs cursor-pointer transition-all border ${isOpen ? "border-primary bg-primary/[0.06] ring-1 ring-primary/25" : "border-border bg-card hover:border-primary/45"}`}>
                 <div className={`${NUM} font-semibold text-foreground truncate`}>{u.UnitName}</div>
                 <div className="mt-0.5 text-muted-foreground truncate">
                   {kindName}
                   {u.AreaSqFt ? <> · <span className={NUM}>{Number(u.AreaSqFt).toLocaleString("en-IN")}</span> sq ft</> : null}
                   {u.RatePerSqFt ? <> · <span className={NUM}>₹{Number(u.RatePerSqFt).toLocaleString("en-IN")}</span>/sq ft</> : null}
                 </div>
-                <div className="mt-1.5">{lock ? <SheetMark text={lock.text} tone={lock.tone} /> : <SheetMark text="Available" tone="done" />}</div>
+                <div className="mt-1.5">{lock ? <GridToneMark text={lock.text} tone={lock.tone} /> : <GridToneMark text="Available" tone="done" />}</div>
                 {isOpen && (ctx.canEdit || ctx.canDelete) && (
-                  <div onClick={(ev) => ev.stopPropagation()} className="mt-2 pt-2 flex gap-3" style={{ borderTop: RULE_SOFT }}>
+                  <div onClick={(ev) => ev.stopPropagation()} className="mt-2 pt-2 flex gap-3 border-t border-border/70">
                     {ctx.canEdit && <button onClick={() => ctx.startEdit(u)} disabled={!!lock} className={TEXT_LINK}>Edit</button>}
-                    {ctx.canDelete && <button onClick={() => ctx.remove(floorId, u)} disabled={!!lock} className={`${TEXT_LINK} text-destructive`}>Delete</button>}
+                    {ctx.canDelete && <button onClick={() => ctx.remove(floorId, u)} disabled={!!lock} className={`${TEXT_LINK} !text-rose-400 [[data-theme]_&]:!text-rose-700`}>Delete</button>}
                   </div>
                 )}
               </div>
@@ -267,7 +267,7 @@ export const FloorUnitList: React.FC<{ floorId: number; ctx: UnitCtx }> = ({ flo
           })}
         </div>
       )}
-      <Link to="/crm/setup/unit-master" className={`${TEXT_LINK} inline-block text-muted-foreground`}>Edit details in Unit Master</Link>
+      <Link to="/crm/setup/unit-master" className={`${TEXT_LINK} inline-block`}>Edit details in Unit Master →</Link>
     </div>
   );
 };
@@ -278,18 +278,18 @@ export const BlockFloorTree: React.FC<{ blockFloors: any[]; expandedFloorId: num
     if (!blockFloors.length) return <p className="text-xs text-muted-foreground py-1">No floors yet.</p>;
     const Chevron = ({ open }: { open: boolean }) => (open ? <ChevronDown size={12} className="shrink-0" /> : <ChevronRight size={12} className="shrink-0" />);
     return (
-      <div>
+      <div className="divide-y divide-border/70">
         {blockFloors.map((f) => {
           const open = expandedFloorId === f.Id;
           const n = f.GeneratedUnitCount ?? f.UnitCount ?? 0;
           return (
-            <div key={f.Id} className="py-1.5" style={{ borderBottom: RULE_SOFT }}>
+            <div key={f.Id} className="py-2">
               {f.FloorNo === -1 ? (
                 // Units with no floor at all: open them to give each one a floor.
                 <button onClick={() => onToggleFloor(f)} className="w-full flex flex-wrap items-center gap-x-2.5 gap-y-1 text-left text-xs">
                   <Chevron open={open} />
                   <span className="font-medium text-foreground">Unassigned</span>
-                  <SheetMark text={`${plural(n, "unit")} with no floor`} tone="stopped" />
+                  <GridToneMark text={`${plural(n, "unit")} with no floor`} tone="stopped" />
                   <span className="text-muted-foreground">Edit each to give it a floor</span>
                 </button>
               ) : f.IsGenerated ? (
@@ -302,7 +302,7 @@ export const BlockFloorTree: React.FC<{ blockFloors: any[]; expandedFloorId: num
                 <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs pl-[20px]">
                   <span className="font-medium">Floor {f.FloorLabel}</span>
                   {f.HasUnits && f.UnitCount > 0
-                    ? <SheetMark text={`${plural(f.UnitCount, "unit")} planned — not generated`} tone="waiting" />
+                    ? <GridToneMark text={`${plural(f.UnitCount, "unit")} planned — not generated`} tone="waiting" />
                     : <span className="text-muted-foreground">No units planned</span>}
                 </div>
               )}
@@ -327,27 +327,27 @@ export const TowerOverview: React.FC<{
     { label: "Blocks", value: blocks.length },
     { label: "Floors", value: floors.length },
     { label: "Units generated", value: totalUnits },
-    { label: "Floors pending", value: pendingFloors, red: pendingFloors > 0 },
+    { label: "Floors pending", value: pendingFloors, alert: pendingFloors > 0 },
   ];
   const th = `!px-4 !py-2.5 text-left ${LBL}`;
   return (
-    <section className="bg-card" style={{ border: RULE }}>
-      <header className="px-4 py-3" style={{ borderBottom: RULE }}>
-        <h2 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em]">{projectName || "Project"} · overview</h2>
-        <p className="mt-1 text-xs text-muted-foreground">Open a block to see its floors, and a floor to see its units.</p>
+    <section className={`${GRID_CARD} rounded-xl overflow-hidden`}>
+      <header className="px-4 py-3 border-b border-border bg-muted/20">
+        <h2 className="text-sm font-bold text-foreground">{projectName || "Project"} · overview</h2>
+        <p className="mt-0.5 text-xs text-muted-foreground">Expand a block to inspect its floors, and click a floor to manage generated units.</p>
       </header>
-      <div className="statrow four" style={{ padding: "16px 16px 18px", borderBottom: RULE }}>
+      <dl className="grid grid-cols-2 lg:grid-cols-4 divide-y lg:divide-y-0 lg:divide-x divide-border border-b border-border bg-muted/10">
         {figures.map((x) => (
-          <div key={x.label}>
-            <p className="label">{x.label}</p>
-            <p className="figure" style={{ fontSize: "clamp(16px, 1.8vw, 24px)", marginTop: 9, color: x.red ? "var(--red)" : undefined }}>{x.value.toLocaleString("en-IN")}</p>
+          <div key={x.label} className="px-4 py-3">
+            <dt className="text-xs font-medium text-muted-foreground">{x.label}</dt>
+            <dd className={`mt-1 text-xl font-bold tabular-nums ${x.alert ? TONE_AMBER_TEXT : "text-foreground"}`}>{x.value.toLocaleString("en-IN")}</dd>
           </div>
         ))}
-      </div>
+      </dl>
       <div className="overflow-x-auto thin-scroll">
         <table className="w-full text-sm min-w-[560px]">
           <thead>
-            <tr style={{ borderBottom: RULE }}>
+            <tr className="border-b border-border bg-muted/25">
               <th className={th}>Block</th><th className={`${th} !text-right`}>Floors</th><th className={`${th} !text-right`}>Units generated</th><th className={th}>State</th>
             </tr>
           </thead>
@@ -359,23 +359,23 @@ export const TowerOverview: React.FC<{
               const open = !!openBlocks[b.Id];
               return (
                 <React.Fragment key={b.Id}>
-                  <tr onClick={() => setOpenBlocks((m) => ({ ...m, [b.Id]: !open }))} className="cursor-pointer hover:bg-primary/5 transition-colors" style={{ borderBottom: RULE_SOFT }}>
+                  <tr onClick={() => setOpenBlocks((m) => ({ ...m, [b.Id]: !open }))} className="cursor-pointer border-b border-border/70 last:border-0 hover:bg-primary/[0.04] transition-colors">
                     <td className="!px-4 !py-3">
-                      <span className="inline-flex items-center gap-2 font-medium">
+                      <span className="inline-flex items-center gap-2 font-medium text-foreground">
                         {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />} Block {b.BlockName}
                       </span>
                     </td>
                     <td className={`!px-4 !py-3 text-right ${NUM}`}>{bf.length}</td>
                     <td className={`!px-4 !py-3 text-right ${NUM}`}>{units}</td>
                     <td className="!px-4 !py-3">
-                      {!bf.length ? <SheetMark text="Set up floors" tone="waiting" />
-                        : pending ? <SheetMark text={`Generate units on ${plural(pending, "floor")}`} tone="waiting" />
-                        : <SheetMark text="Done" tone="done" />}
+                      {!bf.length ? <GridToneMark text="Set up floors" tone="waiting" />
+                        : pending ? <GridToneMark text={`Generate units on ${plural(pending, "floor")}`} tone="waiting" />
+                        : <GridToneMark text="Done" tone="done" />}
                     </td>
                   </tr>
                   {open && (
-                    <tr style={{ borderBottom: RULE_SOFT }}>
-                      <td colSpan={4} className="!px-4 !pt-1 !pb-3 bg-primary/[0.03]">
+                    <tr className="border-b border-border/70">
+                      <td colSpan={4} className="!px-4 !pt-1 !pb-3 bg-muted/15">
                         <BlockFloorTree blockFloors={bf} expandedFloorId={openFloorId} onToggleFloor={(f) => toggle(f, openFloorId, setOpenFloorId)} ctx={ctx} />
                       </td>
                     </tr>

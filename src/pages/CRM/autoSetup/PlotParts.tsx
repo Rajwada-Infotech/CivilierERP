@@ -6,8 +6,8 @@ import { toast } from "sonner";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Link } from "react-router-dom";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { SheetMark } from "@/components/sheet/Sheet";
-import { API, INP, KEY_INK, KEY_LINE, LBL, NUM, Notice, PANEL, RULE, RULE_SOFT, Section, TEXT_LINK, lockOf, plural, type PlotSummary } from "./config";
+import { GRID_CARD, GridToneMark } from "@/components/crm/CrmDataTable";
+import { API, INP, KEY_INK, KEY_LINE, LBL, NUM, Notice, PANEL, Section, TEXT_LINK, TONE_AMBER_TEXT, TONE_ROSE_TEXT, lockOf, plural, type PlotSummary } from "./config";
 
 type Confirm = (message: string, opts?: { okLabel?: string; danger?: boolean }) => Promise<boolean>;
 
@@ -33,23 +33,23 @@ export const PlotSummaryPanel: React.FC<{ s: PlotSummary; buildsVillas: boolean;
       await qc.invalidateQueries({ queryKey: ["plot-summary"] });
     } catch (e: any) { toast.error(e.message); } finally { setFilling(false); }
   };
-  const row = (cells: { label: string; value: number; red?: boolean; hint?: string }[]) => (
-    <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+  const row = (cells: { label: string; value: number; alert?: boolean; hint?: string }[]) => (
+    <dl className="grid grid-cols-2 lg:grid-cols-4 divide-y lg:divide-y-0 lg:divide-x divide-border">
       {cells.map((c) => (
-        <div key={c.label} title={c.hint}>
-          <p className="label">{c.label}</p>
-          <p className="figure" style={{ fontSize: "clamp(16px, 1.8vw, 24px)", marginTop: 9, color: c.red ? "var(--red)" : undefined }}>{c.value.toLocaleString("en-IN")}</p>
-          {c.hint && <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{c.hint}</p>}
+        <div key={c.label} title={c.hint} className="px-4 py-3">
+          <dt className="text-xs font-medium text-muted-foreground">{c.label}</dt>
+          <dd className={`mt-1 text-xl font-bold tabular-nums ${c.alert ? TONE_AMBER_TEXT : "text-foreground"}`}>{c.value.toLocaleString("en-IN")}</dd>
+          {c.hint && <dd className="text-[0.6875rem] text-muted-foreground mt-0.5">{c.hint}</dd>}
         </div>
       ))}
-    </div>
+    </dl>
   );
   const typesMissingLayout = s.VillaTypes - s.VillaTypesWithLayout;
   return (
-    <section className="bg-card" style={{ border: RULE }}>
-      <header className="px-4 py-3 flex flex-wrap items-center justify-between gap-2" style={{ borderBottom: RULE }}>
-        <h2 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em]">Land{buildsVillas ? " & villas" : ""}</h2>
-        <Link to="/crm/setup/plot-master" className={TEXT_LINK}>Open Plot Master</Link>
+    <section className={`${GRID_CARD} rounded-xl overflow-hidden`}>
+      <header className="px-4 py-3 border-b border-border bg-muted/20 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-bold text-foreground">Land{buildsVillas ? " & villas" : ""}</h2>
+        <Link to="/crm/setup/plot-master" className={TEXT_LINK}>Open Plot Master →</Link>
       </header>
       {row([
         { label: "Plots", value: s.Plots },
@@ -58,12 +58,12 @@ export const PlotSummaryPanel: React.FC<{ s: PlotSummary; buildsVillas: boolean;
         { label: "Sold", value: s.Sold },
       ])}
       {buildsVillas && (
-        <div style={{ borderTop: RULE_SOFT }}>
+        <div className="border-t border-border">
           {row([
             { label: "Villa types", value: s.VillaTypes },
             { label: "Built on (villas)", value: s.Villas, hint: `${s.BuiltOn} plot(s) converted` },
             { label: "Villas on DPR", value: s.VillasWithDpr },
-            { label: "Planned, not built", value: s.PlannedNotBuilt, hint: "A villa type planned, not converted yet" },
+            { label: "Planned, not built", value: s.PlannedNotBuilt, alert: s.PlannedNotBuilt > 0, hint: "A villa type planned, not converted yet" },
           ])}
         </div>
       )}
@@ -153,7 +153,7 @@ export const PlotLayoutStep: React.FC<{ blocks: any[]; projectTypeName?: string;
             const t = b.PlotTemplate;
             const working = busy === b.Id;
             const head = (mark: React.ReactNode, right?: React.ReactNode) => (
-              <div className="px-3 py-2.5 flex flex-wrap items-center gap-2" style={{ borderBottom: RULE_SOFT }}>
+              <div className="px-3.5 py-2.5 border-b border-border/70 flex flex-wrap items-center gap-2">
                 <span className="text-sm font-semibold">Block {b.BlockName}</span>
                 {mark}
                 {right && <span className="ml-auto">{right}</span>}
@@ -162,8 +162,8 @@ export const PlotLayoutStep: React.FC<{ blocks: any[]; projectTypeName?: string;
             // Plots entered or imported directly in Plot Master: nothing to lay out here.
             if (t?.FromPlotMaster) return (
               <div key={b.Id} className={PANEL}>
-                {head(<SheetMark text={`${plural(t.PlotsCreated, "plot")} in Plot Master`} tone="done" />)}
-                <p className="px-3 py-2.5 text-xs text-muted-foreground">These plots were entered in Plot Master, each with its own number and area. Edit them there.</p>
+                {head(<GridToneMark text={`${plural(t.PlotsCreated, "plot")} in Plot Master`} tone="done" />)}
+                <p className="px-3.5 py-2.5 text-xs text-muted-foreground">These plots were entered in Plot Master, each with its own number and area. Edit them there.</p>
               </div>
             );
             // Created: a locked summary — the plots are managed in Plot Master from here on.
@@ -177,9 +177,9 @@ export const PlotLayoutStep: React.FC<{ blocks: any[]; projectTypeName?: string;
               );
               return (
                 <div key={b.Id} className={PANEL}>
-                  {head(<SheetMark text={`${plural(t.PlotsCreated, "plot")} created`} tone="done" />,
-                    <Link to="/crm/setup/plot-master" className={TEXT_LINK}>Manage in Plot Master</Link>)}
-                  <div className="px-3 py-3 grid grid-cols-2 sm:grid-cols-5 gap-3">
+                  {head(<GridToneMark text={`${plural(t.PlotsCreated, "plot")} created`} tone="done" />,
+                    <Link to="/crm/setup/plot-master" className={TEXT_LINK}>Manage in Plot Master →</Link>)}
+                  <div className="px-3.5 py-3 grid grid-cols-2 sm:grid-cols-5 gap-3">
                     {cell("Plot names", `${pre}${start}, ${pre}${start + 1} … ${pre}${last}`, true)}
                     {cell("Area", t.DefaultAreaSqFt ? `${val(t.DefaultAreaSqFt)} sq ft` : "—")}
                     {cell("Rate / sq ft", t.DefaultRatePerSqFt ? `₹${val(t.DefaultRatePerSqFt)}` : "—")}
@@ -198,8 +198,8 @@ export const PlotLayoutStep: React.FC<{ blocks: any[]; projectTypeName?: string;
             const first = Number(d.StartNumber || 1);
             return (
               <div key={b.Id} className={PANEL}>
-                {head(t ? <SheetMark text={`Layout saved · ${plural(Number(t.PlotCount), "plot")}`} tone="waiting" /> : <span className="text-xs text-muted-foreground">Not laid out yet</span>)}
-                <div className="px-3 py-3 space-y-3">
+                {head(t ? <GridToneMark text={`Layout saved · ${plural(Number(t.PlotCount), "plot")}`} tone="waiting" /> : <span className="text-xs text-muted-foreground">Not laid out yet</span>)}
+                <div className="px-3.5 py-3 space-y-3">
                   <div className="grid grid-cols-3 gap-2">
                     {f("Plots", "PlotCount")}
                     {f("Start no.", "StartNumber")}
@@ -212,7 +212,7 @@ export const PlotLayoutStep: React.FC<{ blocks: any[]; projectTypeName?: string;
                         const on = (d.NumberPrefix ?? "") === pre;
                         return (
                           <button key={pre || "plain"} type="button" disabled={!canEdit || working} onClick={() => patch(b, { NumberPrefix: pre })}
-                            className={`h-7 px-2 text-xs border ${NUM} transition-colors disabled:opacity-50 ${on ? "bg-foreground text-card border-foreground" : "border-foreground/30 hover:border-foreground"}`}>
+                            className={`h-7 px-2.5 rounded-lg text-xs border ${NUM} transition-colors disabled:opacity-50 ${on ? "bg-primary text-primary-foreground border-primary shadow-sm" : "border-border bg-card text-foreground hover:border-primary/45"}`}>
                             {pre}{first}
                           </button>
                         );
@@ -220,7 +220,7 @@ export const PlotLayoutStep: React.FC<{ blocks: any[]; projectTypeName?: string;
                     </div>
                     <p className="text-xs text-muted-foreground">
                       Will be named{" "}
-                      <span className={`${NUM} text-foreground`}>
+                      <span className={`${NUM} text-foreground font-medium`}>
                         {[0, 1].map((i) => `${d.NumberPrefix ?? ""}${first + i}`).join(", ")}
                         {Number(d.PlotCount) > 2 ? ` … ${d.NumberPrefix ?? ""}${first + Number(d.PlotCount) - 1}` : ""}
                       </span>
@@ -233,7 +233,7 @@ export const PlotLayoutStep: React.FC<{ blocks: any[]; projectTypeName?: string;
                   </div>
                   {f("Facing", "DefaultFacing", "text", "e.g. North")}
                   {(canEdit || (canCreate && t)) && (
-                    <div className="flex justify-end gap-2 pt-3" style={{ borderTop: RULE_SOFT }}>
+                    <div className="flex justify-end gap-2 pt-3 border-t border-border/70">
                       {canEdit && (
                         <button onClick={() => save(b)} disabled={working} className={`${KEY_LINE} h-8 px-3`}>{working ? "Saving…" : "Save layout"}</button>
                       )}
@@ -308,21 +308,21 @@ export const PlotBlockBrowser: React.FC<{ blockId: number; canDelete: boolean; c
             const open = openId === u.Id;
             return (
               <div key={u.Id} onClick={() => setOpenId(open ? null : u.Id)}
-                className={`p-2.5 text-xs cursor-pointer transition-colors border ${open ? "border-foreground bg-primary/5" : "border-foreground/25 bg-card hover:border-foreground"}`}>
-                <div className={`${NUM} font-semibold truncate`}>{u.UnitName}</div>
+                className={`p-2.5 rounded-xl text-xs cursor-pointer transition-all border ${open ? "border-primary bg-primary/[0.06] ring-1 ring-primary/25" : "border-border bg-card hover:border-primary/45"}`}>
+                <div className={`${NUM} font-semibold text-foreground truncate`}>{u.UnitName}</div>
                 <div className="mt-0.5 text-muted-foreground truncate">
                   {u.AreaSqFt ? <><span className={NUM}>{Number(u.AreaSqFt).toLocaleString("en-IN")}</span> sq ft</> : "—"}
                   {u.RatePerSqFt ? <> · <span className={NUM}>₹{Number(u.RatePerSqFt).toLocaleString("en-IN")}</span>/sq ft</> : null}
                   {u.Facing ? ` · ${u.Facing}` : ""}
                 </div>
-                <div className="mt-1.5">{lock ? <SheetMark text={lock.text} tone={lock.tone} /> : <SheetMark text="Available" tone="done" />}</div>
+                <div className="mt-1.5">{lock ? <GridToneMark text={lock.text} tone={lock.tone} /> : <GridToneMark text="Available" tone="done" />}</div>
                 {open && (
-                  <div onClick={(e) => e.stopPropagation()} className="mt-2 pt-2 space-y-1.5" style={{ borderTop: RULE_SOFT }}>
+                  <div onClick={(e) => e.stopPropagation()} className="mt-2 pt-2 space-y-1.5 border-t border-border/70">
                     {u.RoadWidthFt ? <div className="text-muted-foreground">Road <span className={NUM}>{u.RoadWidthFt}</span> ft</div> : null}
                     <div className="flex gap-3">
                       <Link to="/crm/setup/plot-master" className={TEXT_LINK}>Plot Master</Link>
                       {canDelete && (
-                        <button onClick={() => handleDelete(u)} disabled={!!lock || deletingId === u.Id} className={`${TEXT_LINK} text-destructive`}>
+                        <button onClick={() => handleDelete(u)} disabled={!!lock || deletingId === u.Id} className={`${TEXT_LINK} !text-rose-400 [[data-theme]_&]:!text-rose-700`}>
                           {deletingId === u.Id ? "Deleting…" : "Delete"}
                         </button>
                       )}
@@ -345,15 +345,15 @@ export const LandInventory: React.FC<{ blocks: any[]; projectId: string; canDele
     return (
       <Section title="Land inventory" done={blocks.every((b) => !b.PlotTemplate || b.PlotTemplate.IsGenerated)}
         note="Live availability of each plot. Use Plot Master for filters, plot history, and conversion to Unit Master after construction."
-        right={<Link to={`/crm/setup/plot-master?projectId=${projectId}`} className={TEXT_LINK}>Open Plot Master</Link>}>
-        <div>
+        right={<Link to={`/crm/setup/plot-master?projectId=${projectId}`} className={TEXT_LINK}>Open Plot Master →</Link>}>
+        <div className="divide-y divide-border/70">
           {blocks.map((b) => {
             const tpl = b.PlotTemplate;
             const isOpen = !!open[b.Id];
             return (
-              <div key={b.Id} className="py-2" style={{ borderBottom: RULE_SOFT }}>
+              <div key={b.Id} className="py-2">
                 {tpl?.IsGenerated ? (
-                  <button onClick={() => setOpen((m) => ({ ...m, [b.Id]: !isOpen }))} className="w-full flex items-center gap-2.5 text-left text-sm">
+                  <button onClick={() => setOpen((m) => ({ ...m, [b.Id]: !isOpen }))} className="w-full flex items-center gap-2.5 text-left text-sm hover:text-primary transition-colors">
                     {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                     <span className="font-medium">Block {b.BlockName}</span>
                     <span className="ml-auto text-xs text-muted-foreground"><span className={NUM}>{tpl.PlotsCreated ?? tpl.PlotCount}</span> plot(s)</span>
@@ -384,27 +384,27 @@ export const PlotOverview: React.FC<{ projectName?: string; typeName?: string; b
       { label: "Blocks", value: blocks.length },
       { label: "Plots laid out", value: configured },
       { label: "Plots created", value: created },
-      { label: "Blocks pending", value: pending, red: pending > 0 },
+      { label: "Blocks pending", value: pending, alert: pending > 0 },
     ];
     const th = `!px-4 !py-2.5 text-left ${LBL}`;
     return (
-      <section className="bg-card" style={{ border: RULE }}>
-        <header className="px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-1" style={{ borderBottom: RULE }}>
-          <h2 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em]">{projectName || "Project"} · overview</h2>
-          <SheetMark text={typeName ?? "Plotted"} tone="moving" />
+      <section className={`${GRID_CARD} rounded-xl overflow-hidden`}>
+        <header className="px-4 py-3 border-b border-border bg-muted/20 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <h2 className="text-sm font-bold text-foreground">{projectName || "Project"} · overview</h2>
+          <GridToneMark text={typeName ?? "Plotted"} tone="moving" />
         </header>
-        <div className="statrow four" style={{ padding: "16px 16px 18px", borderBottom: RULE }}>
+        <dl className="grid grid-cols-2 lg:grid-cols-4 divide-y lg:divide-y-0 lg:divide-x divide-border border-b border-border bg-muted/10">
           {figures.map((x) => (
-            <div key={x.label}>
-              <p className="label">{x.label}</p>
-              <p className="figure" style={{ fontSize: "clamp(16px, 1.8vw, 24px)", marginTop: 9, color: x.red ? "var(--red)" : undefined }}>{x.value.toLocaleString("en-IN")}</p>
+            <div key={x.label} className="px-4 py-3">
+              <dt className="text-xs font-medium text-muted-foreground">{x.label}</dt>
+              <dd className={`mt-1 text-xl font-bold tabular-nums ${x.alert ? TONE_AMBER_TEXT : "text-foreground"}`}>{x.value.toLocaleString("en-IN")}</dd>
             </div>
           ))}
-        </div>
+        </dl>
         <div className="overflow-x-auto thin-scroll">
           <table className="w-full text-sm min-w-[560px]">
             <thead>
-              <tr style={{ borderBottom: RULE }}>
+              <tr className="border-b border-border bg-muted/25">
                 <th className={th}>Block</th><th className={`${th} !text-right`}>Laid out</th><th className={`${th} !text-right`}>Created</th><th className={th}>State</th>
               </tr>
             </thead>
@@ -414,19 +414,19 @@ export const PlotOverview: React.FC<{ projectName?: string; typeName?: string; b
                 const isOpen = !!open[b.Id];
                 return (
                   <React.Fragment key={b.Id}>
-                    <tr onClick={() => setOpen((m) => ({ ...m, [b.Id]: !isOpen }))} className="cursor-pointer hover:bg-primary/5 transition-colors" style={{ borderBottom: RULE_SOFT }}>
-                      <td className="!px-4 !py-3"><span className="inline-flex items-center gap-2 font-medium">{isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />} Block {b.BlockName}</span></td>
+                    <tr onClick={() => setOpen((m) => ({ ...m, [b.Id]: !isOpen }))} className="cursor-pointer border-b border-border/70 last:border-0 hover:bg-primary/[0.04] transition-colors">
+                      <td className="!px-4 !py-3"><span className="inline-flex items-center gap-2 font-medium text-foreground">{isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />} Block {b.BlockName}</span></td>
                       <td className={`!px-4 !py-3 text-right ${NUM}`}>{tpl ? tpl.PlotCount : "—"}</td>
                       <td className={`!px-4 !py-3 text-right ${NUM}`}>{tpl?.PlotsCreated ?? 0}</td>
                       <td className="!px-4 !py-3">
-                        {!tpl ? <SheetMark text="Set up plot layout" tone="waiting" />
-                          : !tpl.IsGenerated ? <SheetMark text={`Generate ${plural(Number(tpl.PlotCount), "plot")}`} tone="waiting" />
-                          : <SheetMark text="Done" tone="done" />}
+                        {!tpl ? <GridToneMark text="Set up plot layout" tone="waiting" />
+                          : !tpl.IsGenerated ? <GridToneMark text={`Generate ${plural(Number(tpl.PlotCount), "plot")}`} tone="waiting" />
+                          : <GridToneMark text="Done" tone="done" />}
                       </td>
                     </tr>
                     {isOpen && (
-                      <tr style={{ borderBottom: RULE_SOFT }}>
-                        <td colSpan={4} className="!px-4 !pt-1 !pb-3 bg-primary/[0.03]">
+                      <tr className="border-b border-border/70">
+                        <td colSpan={4} className="!px-4 !pt-1 !pb-3 bg-muted/15">
                           {tpl?.IsGenerated
                             ? <PlotBlockBrowser blockId={b.Id} canDelete={canDelete} confirm={confirm} onChanged={onChanged} />
                             : <p className="text-xs text-muted-foreground py-1">{tpl ? "Generate the plots first to browse them here." : "Set up the plot layout below first."}</p>}

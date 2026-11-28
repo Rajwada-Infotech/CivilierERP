@@ -455,11 +455,11 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
         {embeddedLoading ? (
           <div className="p-8 text-center text-sm text-muted-foreground">Loading…</div>
         ) : !r ? (
-          <div className="border border-dashed border-border p-8 text-center space-y-3">
+          <div className="rounded-xl border border-dashed border-border p-8 text-center space-y-3">
             <CalendarClock size={24} className="mx-auto text-muted-foreground" />
             <p className="text-sm font-medium text-foreground">Registry not started</p>
             <p className="text-xs text-muted-foreground max-w-sm mx-auto">
-              Both parties visit the Sub-Registrar's Office to register the Agreement for Sale. The registration fees must be <strong>confirmed</strong> first.
+              Both parties visit the Sub-Registrar's Office to register the Agreement for Sale (Visit 1). AFS registration fees must be <strong>Confirmed</strong> on the AFS Payment section first.
             </p>
             {canCreate && (
               <button onClick={startEmbedded} disabled={startingEmbedded}
@@ -469,7 +469,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
             )}
           </div>
         ) : (
-          <div className="border border-border bg-card overflow-hidden">
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="px-5 pt-5 pb-4 border-b border-border">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-sm font-semibold font-heading tabular-nums text-foreground">{r.AfsRegNo}</span>
@@ -482,11 +482,11 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
             </div>
             <div className="px-5 py-4 space-y-3">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                <div className="border border-border px-3 py-2">
+                <div className="rounded-lg border border-border bg-muted/20 px-3 py-2">
                   <p className="text-[0.625rem] text-muted-foreground">Agreement No</p>
                   <p className="font-heading tabular-nums font-medium mt-0.5">{r.AgreementNo || "—"}</p>
                 </div>
-                <div className="border border-border px-3 py-2">
+                <div className="rounded-lg border border-border bg-muted/20 px-3 py-2">
                   <p className="text-[0.625rem] text-muted-foreground">Agreement registration no.</p>
                   <p className="font-heading tabular-nums font-medium mt-0.5">{r.AfsRegistrationNo || "—"}</p>
                 </div>
@@ -505,13 +505,13 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
               )}
               {r.Status === "Completed" && (
                 r.AfsRegistrationNo ? (
-                  <div className="flex items-center gap-2 text-sm text-foreground bg-card border border-border px-4 py-3">
+                  <div className="rounded-xl flex items-center gap-2 text-sm text-emerald-300 [[data-theme]_&]:text-emerald-700 bg-emerald-500/10 border border-emerald-500/30 px-4 py-3">
                     <ShieldCheck size={16} className="shrink-0" /> AFS registered — details recorded on the Agreement.
                   </div>
                 ) : (
-                  <div className="flex items-start gap-2 text-sm text-foreground bg-card border border-border px-4 py-3">
+                  <div className="rounded-xl flex items-start gap-2.5 text-sm text-amber-300 [[data-theme]_&]:text-amber-700 bg-amber-500/10 border border-amber-500/30 px-4 py-3">
                     <AlertTriangle size={16} className="shrink-0 mt-0.5" />
-                    <span>Registry complete. Now click <strong>Mark Registered</strong> on the agreement above and enter the registration no. and date from the Sub-Registrar receipt.</span>
+                    <span>Registry complete. Now click <strong>Mark Registered</strong> in the Legal Work section or action banner above to enter the registration no. and date from the Sub-Registrar receipt.</span>
                   </div>
                 )
               )}

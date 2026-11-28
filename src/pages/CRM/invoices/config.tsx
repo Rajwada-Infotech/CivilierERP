@@ -155,23 +155,23 @@ export type MilestoneTone = "ready" | "invoiced" | "demand";
 export function getMilestoneInsight(m: any, existingInvoices: any[]): { tone: MilestoneTone; message: string } {
   // A Void invoice frees its milestone slot (migration 325) — a corrected invoice can be raised for it.
   const existingInv = existingInvoices.find((inv: any) => inv.MilestoneId === m.Id && inv.Status !== "Void");
-  if (existingInv) return { tone: "invoiced", message: `Already invoiced — ${existingInv.InvoiceNo}` };
+  if (existingInv) return { tone: "invoiced", message: `Invoiced (${existingInv.InvoiceNo})` };
   // Invoice is generated from the demand (billing doc for AmountDue), before On Account Adjustment settles
   // the milestone. Only gate: the demand must exist — the Booking Amount (Milestone #1) included.
-  if (m.DemandStatus === CrmStatus.PENDING) return { tone: "demand", message: "Raise the demand first" };
+  if (m.DemandStatus === CrmStatus.PENDING) return { tone: "demand", message: "Demand required first" };
   return { tone: "ready", message: "Due for invoicing" };
 }
 
 /** A milestone's billing state: the one rule above, with what only the whole booking knows (a Final invoice, a waiver). */
 export const BILLING_MARK = {
   invoiced: { label: "Invoiced", tone: "done" },
-  final: { label: "On final invoice", tone: "done" },
+  final: { label: "Included in final invoice", tone: "done" },
   ready: { label: "Due for invoicing", tone: "waiting" },
   demand: { label: "Awaiting demand", tone: "draft" },
-  later: { label: "Final invoice on full payment", tone: "draft" },
-  finalDue: { label: "Final invoice due", tone: "waiting" },
+  later: { label: "Final invoice at completion", tone: "draft" },
+  finalDue: { label: "Final invoice ready", tone: "waiting" },
   waived: { label: "Waived", tone: "draft" },
-  waiverPending: { label: "Waiver awaiting approval", tone: "waiting" },
+  waiverPending: { label: "Waiver pending approval", tone: "waiting" },
 } as const;
 export function billingStateOf(m: any, invoices: InvoiceRow[], nonInvoice = false, finalDue = false): keyof typeof BILLING_MARK {
   if (m.Status === "Waived") return "waived";
@@ -184,12 +184,27 @@ export function billingStateOf(m: any, invoices: InvoiceRow[], nonInvoice = fals
 }
 
 /** What is invoiced against all that is billable, then what is ready to invoice; the rest of the line awaits a demand. */
-export function InvoiceBar({ due, invoiced, ready, onDark, title }: { due: number; invoiced: number; ready: number; onDark?: boolean; title?: string }) {
+export function InvoiceBar({
+  due,
+  invoiced,
+  ready,
+  onDark,
+  size = "sm",
+  title,
+}: {
+  due: number;
+  invoiced: number;
+  ready: number;
+  onDark?: boolean;
+  size?: "sm" | "md";
+  title?: string;
+}) {
   const w = (n: number) => `${due > 0 ? Math.min(100, (n / due) * 100) : 0}%`;
+  const hCls = onDark || size === "md" ? "h-2.5" : "h-1.5";
   return (
-    <span className={cn("flex w-full gap-px rounded-full overflow-hidden", onDark ? "h-2.5 bg-white/15" : "h-1.5 bg-slate-200 dark:bg-slate-700")} title={title}>
-      {invoiced > 0 && <span className={onDark ? "bg-emerald-400" : "bg-emerald-500"} style={{ width: w(invoiced), minWidth: 3 }} />}
-      {ready > 0 && <span className={onDark ? "bg-amber-300" : "bg-amber-400"} style={{ width: w(ready), minWidth: 3 }} />}
+    <span className={cn("flex w-full gap-px rounded-full overflow-hidden bg-muted [[data-theme]_&]:bg-slate-200/80", hCls)} title={title}>
+      {invoiced > 0 && <span className="bg-emerald-400 [[data-theme]_&]:bg-emerald-500 transition-[width] duration-300" style={{ width: w(invoiced), minWidth: 3 }} />}
+      {ready > 0 && <span className="bg-amber-400 [[data-theme]_&]:bg-amber-500 transition-[width] duration-300" style={{ width: w(ready), minWidth: 3 }} />}
     </span>
   );
 }
