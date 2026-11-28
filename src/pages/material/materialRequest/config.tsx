@@ -132,14 +132,20 @@ export const fmtDate = (d?: string | null) =>
       })
     : "—";
 
+// One row per item line (rows from useMaterialRequest's fetchExportRows): the request's details on its first line,
+// then each item with its qty and UOM on the same line.
+const onFirst = (r: Record<string, unknown>, v: unknown) => (r.DocNo ? v : "");
 export const EXPORT_COLUMNS: ExportColumn[] = [
-  { header: "Doc No", accessor: "DocNo" },
-  { header: "Priority", accessor: "Priority" },
-  { header: "Company", accessor: "CompanyName" },
-  { header: "Project", accessor: "ProjectName" },
-  { header: "Item Count", accessor: (r) => Number(r.ItemCount) || 0 },
-  { header: "Qty (by UOM)", accessor: (r) => (r.QtyByUom as string) || "—" },
-  { header: "Requested", accessor: (r) => fmtDate(r.RequestDate as string) },
-  { header: "Required By", accessor: (r) => fmtDate(r.RequiredByDate as string) },
-  { header: "Status", accessor: "Status" },
+  { header: "Doc No", accessor: (r) => (r.DocNo as string) || "" },
+  { header: "Requested", accessor: (r) => onFirst(r, fmtDate(r.RequestDate as string)) },
+  { header: "Required By", accessor: (r) => onFirst(r, fmtDate(r.RequiredByDate as string)) },
+  { header: "Project", accessor: (r) => onFirst(r, r.ProjectName ?? "") },
+  { header: "Company", accessor: (r) => onFirst(r, r.CompanyName ?? "") },
+  { header: "Priority", accessor: (r) => onFirst(r, r.Priority ?? "") },
+  { header: "Status", accessor: (r) => onFirst(r, r.Status ?? "") },
+  { header: "#", accessor: "LineNo" },
+  { header: "Item", accessor: "ItemName" },
+  { header: "Qty", accessor: "Quantity" },
+  { header: "UOM", accessor: "UOMName" },
+  { header: "Item Remarks", accessor: "ItemRemarks" },
 ];

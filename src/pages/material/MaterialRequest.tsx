@@ -17,7 +17,7 @@ import { MRImportDialog } from "./materialRequest/MRImportDialog";
 
 export default function MaterialRequest() {
   const m = useMaterialRequest();
-  const { rights, importFileInputRef, importing, viewMode, setViewMode, listData, loadingList, handleDownloadTemplate, handleImportClick, handleImportFileChange, importPlan, setImportPlan, invalidate } = m;
+  const { rights, fetchExportRows, importFileInputRef, importing, viewMode, setViewMode, listData, loadingList, handleDownloadTemplate, handleImportClick, handleImportFileChange, importPlan, setImportPlan, invalidate } = m;
 
   return (
     <>
@@ -31,6 +31,7 @@ export default function MaterialRequest() {
             <div className="flex flex-wrap items-center gap-2">
               <ExportMenu
                 data={(listData?.data || []) as unknown as Record<string, unknown>[]}
+                fetchData={fetchExportRows}
                 columns={EXPORT_COLUMNS}
                 title="Material Requests"
                 filename="material-requests"

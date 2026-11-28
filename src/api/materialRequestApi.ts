@@ -87,9 +87,11 @@ export const getMaterialRequests = (
     status?: string;
     projectId?: number;
     groupBy?: "project";
+    /** Include each request's lines (item, qty, UOM) — used by the export. */
+    withItems?: boolean;
   } = {},
 ) => {
-  const { page = 1, limit = 10, search = "", status = "", projectId, groupBy } = query;
+  const { page = 1, limit = 10, search = "", status = "", projectId, groupBy, withItems } = query;
   const qs = new URLSearchParams({
     page: String(page),
     limit: String(limit),
@@ -97,6 +99,7 @@ export const getMaterialRequests = (
     ...(status ? { status } : {}),
     ...(projectId ? { projectId: String(projectId) } : {}),
     ...(groupBy ? { groupBy } : {}),
+    ...(withItems ? { withItems: "1" } : {}),
   });
   return fetchWithAuth(`${BASE}?${qs}`).then((r) =>
     handleResponse<MRListResponse>(r),

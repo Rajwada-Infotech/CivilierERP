@@ -466,6 +466,26 @@ router.get("/", authenticateToken, async (req, res) => {
 
     const total = result.recordset[0]?._total ?? 0;
     const data = result.recordset.map(({ _total, ...row }) => row);
+
+    // ?withItems=1 (the Excel/PDF export): each request's lines — item, qty, UOM — in one extra query.
+    if (req.query.withItems === "1" && data.length) {
+      const ids = data.map((r) => Number(r.MRId)).filter(Number.isFinite);
+      const lines = (await pool.request().query(`
+        SELECT mri.MRId, mri.MRItemId, COALESCE(NULLIF(LTRIM(RTRIM(mri.ItemName)), ''), im.M_Name) AS ItemName,
+               mri.Quantity, ISNULL(u.UOMName, mri.UOMCode) AS UOMName, mri.Remarks
+        FROM dbo.MaterialRequestItems mri WITH (NOLOCK)
+        LEFT JOIN dbo.UOMMaster u ON u.UOMCode = mri.UOMCode
+        LEFT JOIN dbo.Item_Master_Group im ON CONVERT(NVARCHAR(50), im.M_Id) = CONVERT(NVARCHAR(50), mri.ItemId)
+        WHERE mri.MRId IN (${ids.join(",")})
+        ORDER BY mri.MRId, mri.MRItemId`)).recordset;
+      const byMr = new Map();
+      for (const l of lines) {
+        if (!byMr.has(l.MRId)) byMr.set(l.MRId, []);
+        byMr.get(l.MRId).push({ ItemName: l.ItemName, Quantity: l.Quantity, UOMName: l.UOMName, Remarks: l.Remarks });
+      }
+      for (const r of data) r.Items = byMr.get(r.MRId) || [];
+    }
+
     res.json({
       data,
       page,

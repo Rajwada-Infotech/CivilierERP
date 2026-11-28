@@ -23,6 +23,7 @@ import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
 import { usePageRights } from "@/hooks/usePageRights";
 import { exportToCsv, parseCsv } from "@/lib/export";
+import { fetchAllPages } from "@/lib/fetchAllPages";
 import { planImport, type PlannedRequest } from "./mrImport";
 import { getAllItemUomAlternates } from "@/api/itemUomAlternatesApi";
 import { MR_TEMPLATE_COLUMNS, CartItem, FormHeader, defaultHeader, blankCartItem, PRIORITY_COLOR, fmtDate, TAG, ACT } from "./config";
@@ -816,6 +817,37 @@ export function useMaterialRequest() {
   ];
 
   // ── Import/Export handlers ────────────────────────────────────────────────────
+  // Export: every request matching the current search / status / project (all pages), one row per item line.
+  // The request's own details are written on its first line only, so each request reads as one block.
+  const fetchExportRows = async (): Promise<Record<string, unknown>[]> => {
+    const mrs = await fetchAllPages(
+      (p, l) =>
+        mrApi.getMaterialRequests({
+          page: p,
+          limit: l,
+          search,
+          status: statusFilter,
+          projectId: projectFilter ? Number(projectFilter) : undefined,
+          withItems: true,
+        }),
+      { limit: 500 },
+    );
+    const rows: Record<string, unknown>[] = [];
+    for (const mr of mrs as any[]) {
+      const items: any[] = mr.Items?.length ? mr.Items : [null];
+      items.forEach((it, i) =>
+        rows.push({
+          ...(i === 0 ? mr : {}),
+          LineNo: it ? i + 1 : "",
+          ItemName: it?.ItemName ?? "(no items)",
+          Quantity: it ? Number(it.Quantity) || 0 : "",
+          UOMName: it?.UOMName ?? "",
+          ItemRemarks: it?.Remarks ?? "",
+        }),
+      );
+    }
+    return rows;
+  };
   const handleDownloadTemplate = () => {
     exportToCsv([], MR_TEMPLATE_COLUMNS, "material-request-template");
   };
@@ -851,6 +883,7 @@ export function useMaterialRequest() {
 
   return {
     rights,
+    fetchExportRows,
     currentUser,
     isAdmin,
     queryClient,
