@@ -169,32 +169,57 @@ export const AuthProvider = ({
   // ref instead of trusting the cached value, so it always re-syncs with
   // the server once per session load; updateCurrentUserAvatar() below still
   // updates it instantly and optimistically after a live upload.
+  //
+  // Two more ways the picture went missing (initials instead), both fixed:
+  //  - logging out and back in without a reload: the ref still held this user's id, so the fresh login (which
+  //    carries no avatar) skipped the fetch. The ref is cleared on logout now.
+  //  - the one fetch failing (rate limit, slow/401 response while the page loads) was never retried; it now
+  //    retries a few times with a growing delay.
   const avatarHydratedRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!currentUser?.id) return;
+    if (!currentUser?.id) {
+      avatarHydratedRef.current = null; // logged out: the next login fetches again
+      return;
+    }
     if (avatarHydratedRef.current === currentUser.id) return;
     avatarHydratedRef.current = currentUser.id;
 
-    const token = sessionStorage.getItem("token");
-    if (!token) return;
-
-    fetch(`/api/user-profile/${currentUser.id}/profile`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((r) => (r.ok ? r.json().catch(() => ({})) : null))
-      .then((data) => {
-        if (!data) return;
-        const avatarUrl = data.avatar_url ?? null;
-        setCurrentUser((prev) => {
-          if (!prev) return prev;
-          const updated = { ...prev, avatarUrl };
-          sessionStorage.setItem("user", JSON.stringify(updated));
-          return updated;
-        });
+    const userId = currentUser.id;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const attempt = (n: number) => {
+      const token = sessionStorage.getItem("token");
+      if (!token || cancelled) return;
+      fetch(`/api/user-profile/${userId}/profile`, {
+        headers: { Authorization: `Bearer ${token}` },
       })
-      .catch(() => {
-        /* silently ignore — avatar is cosmetic */
-      });
+        .then((r) => {
+          if (!r.ok) throw new Error(String(r.status));
+          return r.json();
+        })
+        .then((data) => {
+          if (cancelled || !data) return;
+          const avatarUrl = data.avatar_url ?? null;
+          setCurrentUser((prev) => {
+            if (!prev || prev.id !== userId) return prev;
+            const updated = { ...prev, avatarUrl };
+            sessionStorage.setItem("user", JSON.stringify(updated));
+            return updated;
+          });
+        })
+        .catch(() => {
+          // Cosmetic, so never an error on screen — just try again: 2 s, 6 s, 15 s.
+          const delays = [2000, 6000, 15000];
+          if (!cancelled && n < delays.length) timer = setTimeout(() => attempt(n + 1), delays[n]);
+        });
+    };
+    attempt(0);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      // Unmounted / user changed before it finished: let the next run fetch again.
+      if (avatarHydratedRef.current === userId) avatarHydratedRef.current = null;
+    };
   }, [currentUser?.id]);
 
   // ── KEEP RIGHTS IN SYNC (instant push + periodic fallback) ────────────────
