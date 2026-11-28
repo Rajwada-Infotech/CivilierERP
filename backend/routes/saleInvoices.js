@@ -169,6 +169,49 @@ router.get(
   },
 );
 
+// ── GET /eligible-orders ─────────────────────────────────────────────────────
+// Approved sale orders (dbo.SaleOrders) that have no active invoice yet, with everything the Generate tab shows
+// before invoicing: buyer, selling company/project/godown, every line (item, qty, UOM, rate, GST) and the totals.
+// Gated by the Sale Invoice right itself, so invoicing doesn't also need the Sale Order page's view right.
+router.get("/eligible-orders", requirePageRight("sale-invoice", "create"), async (req, res) => {
+  try {
+    const scope = req.projectScope ? projectPredicate(req.projectScope, "so.FromProjectID") : "";
+    const r = await getPool().request().query(`
+      SELECT so.SaleOrderID, so.DocNo, so.OrderDate, so.Status, so.Remarks, so.GLPosted,
+             so.FromCompanyID, fc.name AS FromCompanyName, so.FromProjectID, fp.name AS FromProjectName,
+             fg.GodownName AS FromGodownName,
+             so.ToCompanyID, tc.name AS ToCompanyName, so.ToProjectID, tp.name AS ToProjectName,
+             so.BuyerLHeadId, ah.LHeadName AS BuyerName,
+             so.SaleItems, so.BasicAmount, so.TaxAmount, so.TotalAmount
+      FROM dbo.SaleOrders so
+      LEFT JOIN dbo.enterprise fc ON fc.id = so.FromCompanyID
+      LEFT JOIN dbo.enterprise fp ON fp.id = so.FromProjectID
+      LEFT JOIN dbo.Godowns    fg ON fg.GodownID = so.FromGodownID
+      LEFT JOIN dbo.enterprise tc ON tc.id = so.ToCompanyID
+      LEFT JOIN dbo.enterprise tp ON tp.id = so.ToProjectID
+      LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = so.BuyerLHeadId
+      WHERE so.Status = 'Approved'
+        AND NOT EXISTS (SELECT 1 FROM dbo.SaleInvoices si
+                        WHERE si.SaleOrderID = so.SaleOrderID AND si.IsDeleted = 0
+                          AND si.PaymentStatus NOT IN ('Cancelled'))
+        ${scope}
+      ORDER BY so.OrderDate DESC, so.SaleOrderID DESC`);
+    res.json(r.recordset.map((o) => ({ ...o, SaleItems: parseItems(o.SaleItems) })));
+  } catch (err) {
+    console.error("GET eligible-orders error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+function parseItems(raw) {
+  try {
+    const v = typeof raw === "string" ? JSON.parse(raw || "[]") : raw;
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
+
 // ── GET /:id/paid-invoices-for-po  ────────────────────────────────────────────
 // Returns Sale Invoices that are fully paid and not yet linked to a PO —
 // used by the Purchase Order form to populate the "Source Sale Invoice" picker.
@@ -227,8 +270,22 @@ router.get("/:id", requirePageRight("sale-invoice", "view"), async (req, res) =>
           AND  ISNULL(Status,'') NOT IN ('Deleted')
       `);
 
+    // The sale order's lines and totals, so the invoice shows (and prints) what was sold.
+    // (Matched on DocNo too: an Inter-Company Transfer invoice's SaleOrderID points into CustomerSaleOrders, whose
+    // ids overlap dbo.SaleOrders'.)
+    const so = (await pool.request().input("soId", sql.Int, result.recordset[0].SaleOrderID)
+      .input("soDocNo", sql.NVarChar(100), result.recordset[0].SaleOrderDocNo || "").query(`
+      SELECT so.SaleItems, so.BasicAmount, so.TaxAmount, so.OrderDate, fp.name AS FromProjectName
+      FROM dbo.SaleOrders so LEFT JOIN dbo.enterprise fp ON fp.id = so.FromProjectID
+      WHERE so.SaleOrderID = @soId AND so.DocNo = @soDocNo`)).recordset[0];
+
     res.json({
       ...result.recordset[0],
+      SaleItems: so ? parseItems(so.SaleItems) : [],
+      BasicAmount: so?.BasicAmount ?? null,
+      TaxAmount: so?.TaxAmount ?? null,
+      OrderDate: so?.OrderDate ?? null,
+      FromProjectName: so?.FromProjectName ?? null,
       LinkedPurchaseOrders: pos.recordset,
     });
   } catch (err) {

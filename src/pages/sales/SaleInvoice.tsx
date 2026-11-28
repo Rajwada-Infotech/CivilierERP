@@ -1,5 +1,4 @@
 import React, { useMemo, useState } from "react";
-import { fetchAllPages } from "@/lib/fetchAllPages";
 import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -7,12 +6,10 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { SheetShell, SheetMark, type MarkTone } from "@/components/sheet/Sheet";
 import { KEY_INK, KEY_LINE } from "@/components/sheet/sheetParts";
 import { HR_NUM } from "@/components/hrpayroll/HrUi";
-import { SheetBox, SheetTabs, TH, TD, ICON_ACT } from "@/components/maintenance/maintParts";
+import { SheetBox, TH, TD, ICON_ACT } from "@/components/maintenance/maintParts";
 import {
-  FileText,
   Banknote,
   Send,
-  ClipboardList,
   ChevronDown,
   Search,
   X,
@@ -25,10 +22,13 @@ import {
   Landmark,
 } from "lucide-react";
 import { toast } from "sonner";
-import { getSaleOrders, type SaleOrder } from "@/api/saleOrdersApi";
+import type { SaleOrderItem } from "@/api/saleOrdersApi";
 import {
   getSaleInvoices,
+  getSaleInvoiceById,
+  getEligibleSaleOrders,
   createSaleInvoice,
+  type EligibleSaleOrder,
   type SaleInvoice as SaleInvoiceDoc,
 } from "@/api/saleInvoicesApi";
 import { createReceivedPayment } from "@/api/receivedPaymentApi";
@@ -95,9 +95,9 @@ function EligibleOrderPicker({
   selected,
   onSelect,
 }: {
-  orders: SaleOrder[];
-  selected: SaleOrder | null;
-  onSelect: (o: SaleOrder | null) => void;
+  orders: EligibleSaleOrder[];
+  selected: EligibleSaleOrder | null;
+  onSelect: (o: EligibleSaleOrder | null) => void;
 }) {
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
@@ -187,6 +187,99 @@ function EligibleOrderPicker({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Sale lines (the order's items, as invoiced) ───────────────────────────────
+
+const r2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
+/** A line's figures; older orders saved only qty × rate. */
+const lineFigures = (it: SaleOrderItem) => {
+  const amount = it.amount != null ? Number(it.amount) : r2((Number(it.qty) || 0) * (Number(it.rate) || 0));
+  const tax = it.taxAmount != null ? Number(it.taxAmount) : r2((amount * (Number(it.gstRate) || 0)) / 100);
+  return { amount, tax, total: it.total != null ? Number(it.total) : r2(amount + tax) };
+};
+
+const NUM_HEADS = ["Qty", "Rate", "Amount", "GST %", "GST", "Total"];
+
+function SaleLinesTable({
+  items,
+  basic,
+  tax,
+  total,
+}: {
+  items: SaleOrderItem[];
+  basic?: number | null;
+  tax?: number | null;
+  total: number;
+}) {
+  const sums = items.reduce(
+    (t, it) => {
+      const f = lineFigures(it);
+      return { amount: t.amount + f.amount, tax: t.tax + f.tax };
+    },
+    { amount: 0, tax: 0 },
+  );
+  const basicAmt = basic ?? r2(sums.amount);
+  const taxAmt = tax ?? r2(sums.tax);
+  const NUMC = `${TD} ${HR_NUM} text-right whitespace-nowrap`;
+  return (
+    <div className="border border-foreground/20">
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr>
+              {["#", "Item", ...NUM_HEADS.slice(0, 1), "UOM", ...NUM_HEADS.slice(1)].map((h) => (
+                <th key={h} className={`${TH} ${NUM_HEADS.includes(h) ? "text-right" : ""}`}>
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {items.length === 0 ? (
+              <tr>
+                <td colSpan={9} className="px-4 py-6 text-center text-muted-foreground">
+                  No line items on this sale order.
+                </td>
+              </tr>
+            ) : (
+              items.map((it, i) => {
+                const f = lineFigures(it);
+                return (
+                  <tr key={i}>
+                    <td className={`${TD} ${HR_NUM} text-muted-foreground`}>{i + 1}</td>
+                    <td className={`${TD} text-foreground`}>
+                      {it.itemName || it.itemId}
+                      {it.remarks && <span className="block text-[0.625rem] text-muted-foreground">{it.remarks}</span>}
+                    </td>
+                    <td className={NUMC}>{Number(it.qty) || 0}</td>
+                    <td className={`${TD} text-muted-foreground whitespace-nowrap`}>{it.uom || "—"}</td>
+                    <td className={NUMC}>{fmtAmt(Number(it.rate) || 0)}</td>
+                    <td className={NUMC}>{fmtAmt(f.amount)}</td>
+                    <td className={NUMC}>{Number(it.gstRate) || 0}%</td>
+                    <td className={NUMC}>{fmtAmt(f.tax)}</td>
+                    <td className={`${NUMC} font-semibold text-foreground`}>{fmtAmt(f.total)}</td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+      <div className="grid grid-cols-3 border-t border-foreground/20">
+        {[
+          { label: "Taxable value", value: basicAmt },
+          { label: "GST", value: taxAmt },
+          { label: "Invoice total", value: total, big: true },
+        ].map((c) => (
+          <div key={c.label} className="px-3 py-2.5 border-r border-foreground/20 last:border-r-0 text-right">
+            <p className={`${LBL} mb-0.5`}>{c.label}</p>
+            <p className={`${HR_NUM} text-foreground ${c.big ? "text-sm font-bold" : "text-xs font-semibold"}`}>{fmtAmt(c.value)}</p>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -385,35 +478,26 @@ function CollectPaymentModal({
 function GenerateInvoiceTab() {
   const rights = usePageRights("sale-invoice");
   const qc = useQueryClient();
-  const [selectedOrder, setSelectedOrder] = useState<SaleOrder | null>(null);
+  const today = new Date().toISOString().slice(0, 10);
+  const [selectedOrder, setSelectedOrder] = useState<EligibleSaleOrder | null>(null);
+  const [invoiceDate, setInvoiceDate] = useState(today);
+  const [remarks, setRemarks] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
 
-  const { data: soData, isLoading: soLoading } = useQuery({
-    queryKey: ["sale-orders"],
-    queryFn: async () => ({ data: await fetchAllPages((page, limit) => getSaleOrders({ page, limit }), { limit: 500 }) }),
-    staleTime: 60_000,
-  });
-  const orders: SaleOrder[] = soData?.data ?? [];
-
-  const { data: siData, isLoading: siLoading } = useQuery({
-    queryKey: ["sale-invoices"],
-    queryFn: async () => ({ data: await fetchAllPages((page, limit) => getSaleInvoices({ page, limit }), { limit: 500 }) }),
+  // Approved sale orders not invoiced yet, each with its lines and totals.
+  const { data: eligibleOrders = [], isLoading: loading } = useQuery({
+    queryKey: ["sale-invoices", "eligible-orders"],
+    queryFn: getEligibleSaleOrders,
     staleTime: 30_000,
   });
-  const invoicedSoIds = useMemo(
-    () => new Set((siData?.data ?? []).map((i) => i.SaleOrderID)),
-    [siData],
-  );
 
-  const eligibleOrders = useMemo(
-    () =>
-      orders.filter(
-        (o) =>
-          o.Status?.includes("Approved") && !invoicedSoIds.has(o.SaleOrderID),
-      ),
-    [orders, invoicedSoIds],
-  );
+  const pickOrder = (o: EligibleSaleOrder | null) => {
+    setSelectedOrder(o);
+    setErrorMsg("");
+    setRemarks(o ? `Against sale order ${o.DocNo}` : "");
+  };
+  const dateBeforeOrder = !!selectedOrder && !!invoiceDate && invoiceDate < String(selectedOrder.OrderDate).slice(0, 10);
 
   const createMut = useMutation({
     mutationFn: createSaleInvoice,
@@ -422,7 +506,8 @@ function GenerateInvoiceTab() {
         `Sale invoice ${res.DocNo} generated — ${fmtAmt(res.TotalAmount)} pending payment.`,
       );
       setErrorMsg("");
-      setSelectedOrder(null);
+      pickOrder(null);
+      setInvoiceDate(today);
       qc.invalidateQueries({ queryKey: ["sale-invoices"] });
       setTimeout(() => setSuccessMsg(""), 6000);
     },
@@ -430,12 +515,10 @@ function GenerateInvoiceTab() {
   });
 
   const handleSubmit = () => {
-    if (!selectedOrder) return;
+    if (!selectedOrder || dateBeforeOrder) return;
     setErrorMsg("");
-    createMut.mutate({ SaleOrderID: selectedOrder.SaleOrderID });
+    createMut.mutate({ SaleOrderID: selectedOrder.SaleOrderID, InvoiceDate: invoiceDate, Remarks: remarks.trim() || undefined });
   };
-
-  const loading = soLoading || siLoading;
 
   return (
     <div className="space-y-4">
@@ -466,40 +549,78 @@ function GenerateInvoiceTab() {
             <div className="border border-dashed border-foreground/30 py-14 text-center">
               <p className="text-sm text-foreground">No approved sale orders awaiting invoicing.</p>
               <p className="text-xs text-muted-foreground mt-1">
-                Approve a sale order first, or check History for invoices already generated.
+                Approve a sale order first. Invoices already generated are listed below.
               </p>
             </div>
           ) : (
             <>
-              <EligibleOrderPicker orders={eligibleOrders} selected={selectedOrder} onSelect={setSelectedOrder} />
+              <EligibleOrderPicker orders={eligibleOrders} selected={selectedOrder} onSelect={pickOrder} />
 
               {selectedOrder && (
-                <div className="grid grid-cols-2 sm:grid-cols-4 border-t border-l border-foreground/20">
+                <>
+                {/* Bill To is the invoice's main party: twice the width and larger type than Sold From. */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 xl:grid-cols-5 border-t border-l border-foreground/20">
+                  <div className="sm:col-span-3 xl:col-span-2 px-4 py-3 border-r border-b border-foreground/20 min-w-0 bg-foreground/[0.03]">
+                    <p className={`${LBL} mb-1`}>{selectedOrder.BuyerName ? "Bill To (Buyer)" : "Bill To"}</p>
+                    <p className="text-lg font-bold tracking-tight text-foreground break-words leading-snug">
+                      {selectedOrder.BuyerName || selectedOrder.ToCompanyName || "—"}
+                    </p>
+                    {!selectedOrder.BuyerName && selectedOrder.ToProjectName && (
+                      <p className="text-xs text-muted-foreground mt-0.5">{selectedOrder.ToProjectName}</p>
+                    )}
+                  </div>
                   {[
-                    { label: "Customer", value: selectedOrder.ToCompanyName, sub: selectedOrder.ToProjectName },
-                    { label: "From", value: selectedOrder.FromCompanyName, sub: selectedOrder.FromProjectName },
-                    { label: "Order Date", value: fmtDate(selectedOrder.OrderDate), num: true },
+                    {
+                      label: "Sold From",
+                      value: selectedOrder.FromCompanyName,
+                      sub: [selectedOrder.FromProjectName, selectedOrder.FromGodownName].filter(Boolean).join(" · "),
+                    },
+                    { label: "Order", value: `${selectedOrder.DocNo} · ${fmtDate(selectedOrder.OrderDate)}`, num: true },
                     { label: "Invoice Amount", value: fmtAmt(selectedOrder.TotalAmount), num: true, big: true },
-                  ].map((c) => (
+                  ].map((c: { label: string; value: React.ReactNode; sub?: string | null; num?: boolean; big?: boolean }) => (
                     <div key={c.label} className="px-3 py-2.5 border-r border-b border-foreground/20 min-w-0">
                       <p className={`${LBL} mb-0.5`}>{c.label}</p>
-                      <p className={`text-foreground ${c.big ? "text-sm font-bold" : "text-xs font-medium"} ${c.num ? HR_NUM : ""}`}>
+                      <p className={`text-foreground ${c.big ? "text-sm font-bold" : "text-xs font-medium"} ${c.num ? HR_NUM : ""} ${c.big ? "whitespace-nowrap" : ""}`}>
                         {c.value}
                       </p>
                       {c.sub && <p className="text-[0.625rem] text-muted-foreground">{c.sub}</p>}
                     </div>
                   ))}
                 </div>
+
+                <SaleLinesTable
+                  items={selectedOrder.SaleItems ?? []}
+                  basic={selectedOrder.BasicAmount}
+                  tax={selectedOrder.TaxAmount}
+                  total={selectedOrder.TotalAmount}
+                />
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <FieldLabel required>Invoice Date</FieldLabel>
+                    <DateInput value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} className={INPUT} />
+                    {dateBeforeOrder && (
+                      <p className="text-[0.6875rem] text-destructive mt-1">
+                        Can't be before the order date ({fmtDate(selectedOrder.OrderDate)}).
+                      </p>
+                    )}
+                  </div>
+                  <div className="sm:col-span-2">
+                    <FieldLabel>Remarks</FieldLabel>
+                    <input value={remarks} onChange={(e) => setRemarks(e.target.value)} maxLength={500} className={INPUT} />
+                  </div>
+                </div>
+                </>
               )}
 
               <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-foreground/20">
                 <p className="text-xs text-muted-foreground">
-                  Amount is locked to the sale order total. The invoice starts as Pending Payment.
+                  The lines and amount come from the sale order and can't be changed here. The invoice starts as Pending Payment.
                 </p>
                 {rights.canCreate && (
                   <button
                     onClick={handleSubmit}
-                    disabled={!selectedOrder || createMut.isPending}
+                    disabled={!selectedOrder || !invoiceDate || dateBeforeOrder || createMut.isPending}
                     className={`${KEY_INK} h-9 px-5`}
                   >
                     {createMut.isPending ? (
@@ -544,6 +665,13 @@ function SaleInvoiceHistory({ dummyBank }: { dummyBank: BankRecord | null }) {
   const [viewingInvoice, setViewingInvoice] = useState<SaleInvoiceDoc | null>(
     null,
   );
+  // The invoice's lines come from its sale order (loaded when the invoice is opened).
+  const { data: viewingDetail, isLoading: detailLoading } = useQuery({
+    queryKey: ["sale-invoices", "detail", viewingInvoice?.SaleInvoiceID],
+    queryFn: () => getSaleInvoiceById(viewingInvoice!.SaleInvoiceID),
+    enabled: !!viewingInvoice,
+    staleTime: 30_000,
+  });
   const [payingInvoice, setPayingInvoice] = useState<SaleInvoiceDoc | null>(
     null,
   );
@@ -651,7 +779,7 @@ function SaleInvoiceHistory({ dummyBank }: { dummyBank: BankRecord | null }) {
           `}</style>
           <div
             role="dialog"
-            className="si-print-modal bg-card border border-foreground w-full max-w-lg h-[100dvh] max-h-[100dvh] sm:h-auto sm:max-h-[88vh] overflow-y-auto"
+            className="si-print-modal bg-card border border-foreground w-full max-w-3xl h-[100dvh] max-h-[100dvh] sm:h-auto sm:max-h-[88vh] overflow-y-auto"
           >
             <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-6 py-4 border-b border-foreground">
               <div>
@@ -671,14 +799,20 @@ function SaleInvoiceHistory({ dummyBank }: { dummyBank: BankRecord | null }) {
             </div>
 
             <div className="p-5 sm:p-6 space-y-5">
-              <div className="grid grid-cols-2 border-t border-l border-foreground/20">
+              {/* Sold To is the invoice's main party: full width, larger type; Sold From sits beside the doc details. */}
+              <div className="grid grid-cols-2 sm:grid-cols-5 border-t border-l border-foreground/20">
+                <div className="col-span-2 sm:col-span-5 px-4 py-3 border-r border-b border-foreground/20 min-w-0 bg-foreground/[0.03]">
+                  <p className={`${LBL} mb-1`}>Sold To</p>
+                  <p className="text-lg font-bold tracking-tight text-foreground break-words leading-snug">
+                    {viewingInvoice.ToCompanyName || "—"}
+                  </p>
+                </div>
                 {[
+                  { label: "Sold From", value: viewingInvoice.FromCompanyName },
                   { label: "Doc No", value: viewingInvoice.DocNo, num: true },
                   { label: "Date", value: fmtDate(viewingInvoice.InvoiceDate), num: true },
-                  { label: "Created By", value: viewingInvoice.CreatedByName || viewingInvoice.CreatedBy },
                   { label: "Sale Order", value: viewingInvoice.SaleOrderDocNo, num: true },
-                  { label: "Customer", value: viewingInvoice.ToCompanyName },
-                  { label: "From Company", value: viewingInvoice.FromCompanyName },
+                  { label: "Created By", value: viewingInvoice.CreatedByName || viewingInvoice.CreatedBy },
                 ].map(({ label, value, num }) => (
                   <div key={label} className="px-3 py-2.5 border-r border-b border-foreground/20 min-w-0">
                     <p className={`${LBL} mb-0.5`}>{label}</p>
@@ -686,6 +820,19 @@ function SaleInvoiceHistory({ dummyBank }: { dummyBank: BankRecord | null }) {
                   </div>
                 ))}
               </div>
+
+              {detailLoading ? (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <RefreshCw size={12} className="animate-spin" /> Loading lines…
+                </div>
+              ) : (viewingDetail?.SaleItems?.length ?? 0) > 0 ? (
+                <SaleLinesTable
+                  items={viewingDetail!.SaleItems!}
+                  basic={viewingDetail!.BasicAmount}
+                  tax={viewingDetail!.TaxAmount}
+                  total={viewingInvoice.TotalAmount}
+                />
+              ) : null}
 
               <div className="border-t border-foreground pt-3 flex items-end justify-between gap-3">
                 <div>
@@ -733,9 +880,6 @@ function SaleInvoiceHistory({ dummyBank }: { dummyBank: BankRecord | null }) {
 
 export default function SaleInvoice() {
   const rights = usePageRights("sale-invoice");
-  const [activeTab, setActiveTab] = useState<"generate" | "history">(
-    "generate",
-  );
 
   const { data: banksRaw } = useQuery({
     queryKey: ["bank-master"],
@@ -747,11 +891,6 @@ export default function SaleInvoice() {
     [banksRaw],
   );
 
-  const tabs = [
-    ...(rights.canCreate ? [{ value: "generate" as const, label: <><FileText size={12} /> Generate</> }] : []),
-    { value: "history" as const, label: <><ClipboardList size={12} /> History</> },
-  ];
-
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Sales Module", "Sale Invoice"]} />
@@ -761,8 +900,6 @@ export default function SaleInvoice() {
         title="Sale Invoice"
         subtitle="Generate invoices from approved sale orders and collect cash payment against them"
       >
-        <SheetTabs<"generate" | "history"> tabs={tabs} value={activeTab} onChange={setActiveTab} />
-
         {!dummyBank && (
           <div className="px-4 py-3 bg-destructive/10 text-destructive border border-destructive/30 flex items-center gap-2 text-sm">
             <AlertCircle size={15} /> No "Dummy Bank" account found in Bank
@@ -771,8 +908,9 @@ export default function SaleInvoice() {
           </div>
         )}
 
-        {activeTab === "generate" && <GenerateInvoiceTab />}
-        {activeTab === "history" && <SaleInvoiceHistory dummyBank={dummyBank} />}
+        {/* The form on top, every invoice listed below it (no tabs). */}
+        {rights.canCreate && <GenerateInvoiceTab />}
+        <SaleInvoiceHistory dummyBank={dummyBank} />
       </SheetShell>
     </>
   );

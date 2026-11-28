@@ -1,4 +1,5 @@
-﻿import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import type { SaleOrder, SaleOrderItem } from "./saleOrdersApi";
 
 const BASE = "/api/sale-invoices";
 
@@ -42,7 +43,29 @@ export interface SaleInvoicePurchaseOrderRef {
 
 export interface SaleInvoiceDetail extends SaleInvoice {
   purchaseOrders?: SaleInvoicePurchaseOrderRef[];
+  /** The sale order's lines and totals (empty for an Inter-Company Transfer invoice). */
+  SaleItems?: SaleOrderItem[];
+  BasicAmount?: number | null;
+  TaxAmount?: number | null;
+  OrderDate?: string | null;
+  FromProjectName?: string | null;
 }
+
+/** An approved sale order with no active invoice yet, with its lines — the Generate tab's picker. */
+export type EligibleSaleOrder = Pick<
+  SaleOrder,
+  | "SaleOrderID" | "DocNo" | "OrderDate" | "Status" | "Remarks" | "GLPosted"
+  | "FromCompanyID" | "FromCompanyName" | "FromProjectID" | "FromProjectName" | "FromGodownName"
+  | "ToCompanyID" | "ToCompanyName" | "ToProjectID" | "ToProjectName"
+  | "BuyerLHeadId" | "BuyerName" | "SaleItems" | "BasicAmount" | "TaxAmount" | "TotalAmount"
+>;
+
+export const getEligibleSaleOrders = async (): Promise<EligibleSaleOrder[]> => {
+  const res = await fetchWithAuth(`${BASE}/eligible-orders`);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.error || `Failed to load sale orders: ${res.status}`);
+  return Array.isArray(body) ? body : [];
+};
 
 export const getSaleInvoices = async (params?: {
   paymentStatus?: PaymentStatus;
@@ -81,6 +104,8 @@ export const getPaidSaleInvoicesForPO = async (): Promise<SaleInvoice[]> => {
 
 export interface CreateSaleInvoicePayload {
   SaleOrderID: number;
+  InvoiceDate?: string;
+  Remarks?: string;
 }
 
 export const createSaleInvoice = async (
