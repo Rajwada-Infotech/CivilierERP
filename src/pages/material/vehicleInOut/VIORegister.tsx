@@ -1,12 +1,12 @@
 import { DataTable } from "@/components/ui/DataTable";
 import { Input } from "@/components/ui/input";
-import { Search, X, ChevronDown, ChevronLeft, ChevronRight, FileText } from "lucide-react";
+import { Search, X, ChevronDown, ChevronLeft, ChevronRight, FileText, Building2 } from "lucide-react";
 import { VehicleCard, COLUMNS } from "./config";
 import { bridge } from "./config";
 import { HEAD, RULE } from "./config";
 import type { VIOState } from "./useVehicleInOut";
 
-// The register: search, filters, entries grouped by purchase order.
+// The register: search, filters, entries grouped by project, then by purchase order within it.
 export function VIORegister({ m }: { m: VIOState }) {
   const { rights, finYears, search, setSearch, page, setPage, filterFY, setFilterFY, records, totalPages, total, filteredRecords, vehicleApprovalTrails, vehicleApprovalTrailsLoading, groupedRecords, collapsedGroups, toggleGroup, isFetching } = m;
   return (
@@ -84,15 +84,39 @@ export function VIORegister({ m }: { m: VIOState }) {
               No Vehicle In/Out records. Click 'New Entry' to create one.
             </p>
           ) : (
-            groupedRecords.map((group) => {
+            groupedRecords.map((project) => {
+              const projectCollapsed = !!collapsedGroups[project.key];
+              return (
+                <div key={project.key} className="border-b border-foreground/30 last:border-0">
+                  {/* Project header — every PO delivered to this project */}
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(project.key)}
+                    className="w-full flex items-center gap-2.5 px-4 py-3 bg-foreground/[0.04] hover:bg-primary/5 transition-colors text-left"
+                  >
+                    {projectCollapsed ? (
+                      <ChevronRight size={15} className="text-muted-foreground shrink-0" />
+                    ) : (
+                      <ChevronDown size={15} className="text-muted-foreground shrink-0" />
+                    )}
+                    <Building2 size={14} className="text-primary shrink-0" />
+                    <span className="text-sm font-heading font-bold text-foreground truncate">
+                      {project.projectName || "No Project"}
+                    </span>
+                    <span className="ml-auto shrink-0 text-[0.625rem] font-medium text-muted-foreground">
+                      {project.pos.length} PO{project.pos.length !== 1 ? "s" : ""} · {project.lots} lot{project.lots !== 1 ? "s" : ""}
+                    </span>
+                  </button>
+
+                  {!projectCollapsed && project.pos.map((group) => {
               const collapsed = !!collapsedGroups[group.key];
               return (
-                <div key={group.key} className="border-b border-foreground/30 last:border-0">
-                  {/* Group header — one PO's lots grouped together */}
+                <div key={group.key} className="border-t border-foreground/15">
+                  {/* PO header — one PO's lots grouped together, indented under its project */}
                   <button
                     type="button"
                     onClick={() => toggleGroup(group.key)}
-                    className="w-full flex items-center gap-2.5 px-4 py-3 bg-card hover:bg-primary/5 transition-colors text-left"
+                    className="w-full flex items-center gap-2.5 pl-9 pr-4 py-2.5 bg-card hover:bg-primary/5 transition-colors text-left"
                   >
                     {collapsed ? (
                       <ChevronRight size={14} className="text-muted-foreground shrink-0" />
@@ -150,6 +174,9 @@ export function VIORegister({ m }: { m: VIOState }) {
                       </div>
                     </>
                   )}
+                </div>
+              );
+                  })}
                 </div>
               );
             })

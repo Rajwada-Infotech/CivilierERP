@@ -694,21 +694,22 @@ export function useVehicleInOut() {
   // Records with no PO link fall into a single "No PO Linked" bucket.
   // Group order follows first-appearance in the (already recency-sorted)
   // list, so the most recently active PO's group surfaces first.
+  // Two levels: Project → its POs → the lots. Both keep first-appearance order (most recent activity first).
   const groupedRecords = useMemo(() => {
-    const groups = new Map<string, { key: string; poNumber: string | null; supplierName: string | null; rows: any[] }>();
+    type PoGroup = { key: string; poNumber: string | null; supplierName: string | null; rows: any[] };
+    const projects = new Map<string, { key: string; projectName: string | null; pos: Map<string, PoGroup>; lots: number }>();
     for (const r of filteredRecords) {
-      const key = r.POID ? `po-${r.POID}` : "no-po";
-      if (!groups.has(key)) {
-        groups.set(key, {
-          key,
-          poNumber: r.PONumber || null,
-          supplierName: r.SupplierName || null,
-          rows: [],
-        });
+      const pKey = r.ProjectID ? `prj-${r.ProjectID}` : "no-project";
+      if (!projects.has(pKey)) projects.set(pKey, { key: pKey, projectName: r.ProjectName || null, pos: new Map(), lots: 0 });
+      const proj = projects.get(pKey)!;
+      const key = `${pKey}|${r.POID ? `po-${r.POID}` : "no-po"}`;
+      if (!proj.pos.has(key)) {
+        proj.pos.set(key, { key, poNumber: r.PONumber || null, supplierName: r.SupplierName || null, rows: [] });
       }
-      groups.get(key)!.rows.push(r);
+      proj.pos.get(key)!.rows.push(r);
+      proj.lots++;
     }
-    return Array.from(groups.values());
+    return Array.from(projects.values()).map((p) => ({ ...p, pos: Array.from(p.pos.values()) }));
   }, [filteredRecords]);
 
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
