@@ -10,7 +10,7 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import { DateInput } from "@/components/ui/date-input";
-import { GridDialog, GridFormField, GridFormSection, GRID_BTN, GRID_BTN_BRAND, GRID_INPUT } from "@/components/crm/CrmDataTable";
+import { GridDialog, GridFormField, GridFormSection, GRID_BTN, GRID_BTN_BRAND, GRID_CARD, GRID_INPUT } from "@/components/crm/CrmDataTable";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { translateError } from "@/lib/translateError";
 import { cn } from "@/lib/utils";
@@ -762,20 +762,20 @@ export const BookingReminders: React.FC<{ bookingId: number; canEdit: boolean }>
     finally { setBusy(false); }
   };
   return (
-    <section className="bg-card px-4 py-3 text-xs" style={{ border: RULE }}>
+    <section className={cn(GRID_CARD, "rounded-xl px-5 py-3.5 text-xs")}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="flex items-center gap-1.5 text-sm font-semibold"><BellRing size={14} /> Reminders</p>
+        <p className="flex items-center gap-2 text-sm font-semibold text-foreground"><BellRing size={14} className="text-primary" /> Payment reminders</p>
         {canEdit && <div className="flex gap-1.5">
-          <button type="button" onClick={() => setSending(true)} className={`${KEY_LINE} h-7 px-2 text-xs`}><BellRing size={11} className="mr-1" />Send reminder</button>
+          <button type="button" onClick={() => setSending(true)} className={cn(GRID_BTN, "!h-8 !px-2.5 text-xs")}><BellRing size={12} /> Send reminder</button>
           {pause
-            ? <button type="button" onClick={doResume} disabled={busy} className={`${KEY_LINE} h-7 px-2 text-xs`}><Play size={11} className="mr-1" />Resume</button>
-            : live.length > 0 && !pausing && <button type="button" onClick={() => setPausing(true)} className={`${KEY_LINE} h-7 px-2 text-xs`}><Pause size={11} className="mr-1" />Pause</button>}
+            ? <button type="button" onClick={doResume} disabled={busy} className={cn(GRID_BTN, "!h-8 !px-2.5 text-xs")}><Play size={12} /> Resume</button>
+            : live.length > 0 && !pausing && <button type="button" onClick={() => setPausing(true)} className={cn(GRID_BTN, "!h-8 !px-2.5 text-xs")}><Pause size={12} /> Pause</button>}
         </div>}
       </div>
       {sending && <SendReminderDialog bookingId={bookingId} onClose={() => setSending(false)} />}
-      {!live.length && !pause && <p className="mt-2 text-muted-foreground">No automatic reminder is running for this booking.</p>}
-      {lastSend && <p className="mt-2 text-muted-foreground">Last reminded: <span className={cn(lastSend.Today && "font-medium text-foreground")}>{recentLine(lastSend)}{lastSend.Today ? " (today)" : ""}</span></p>}
-      {pause && <p className="mt-2 text-amber-700 dark:text-amber-400">Paused{pause.PausedUntil ? ` until ${fmtDay(pause.PausedUntil)}` : ""}: {pause.Reason}{pause.PausedByName ? ` · ${pause.PausedByName}` : ""}</p>}
+      {!live.length && !pause && <p className="mt-1.5 text-muted-foreground">No automatic reminder is currently active for this booking.</p>}
+      {lastSend && <p className="mt-1.5 text-muted-foreground">Last reminded: <span className={cn(lastSend.Today && "font-medium text-foreground")}>{recentLine(lastSend)}{lastSend.Today ? " (today)" : ""}</span></p>}
+      {pause && <p className="mt-1.5 text-amber-300 [[data-theme]_&]:text-amber-700 font-medium">Paused{pause.PausedUntil ? ` until ${fmtDay(pause.PausedUntil)}` : ""}: {pause.Reason}{pause.PausedByName ? ` · ${pause.PausedByName}` : ""}</p>}
       {live.map((x) => (
         <p key={`${x.RuleId}-${x.EntityKey}`} className="mt-2">
           <span className="font-medium">{x.RuleName}</span> · <span className={cn(NUM, "font-semibold")}>Reminder {x.ReminderNo ?? "—"}</span>

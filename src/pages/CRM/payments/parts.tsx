@@ -5,12 +5,16 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { CrmStatus } from "@/constants/crmStatuses";
 import { translateError } from "@/lib/translateError";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { AlertTriangle, ArrowRight, CheckCircle2, Clock, Hourglass, MessageSquare, Percent, Undo2 } from "lucide-react";
-import { GRID_CARD, GRID_SHEET_KEYS, GridMiniTable, GridRelated, GridStatusPill, GridToneMark, type GridCol } from "@/components/crm/CrmDataTable";
+import { AlertTriangle, ArrowRight, CheckCircle2, Clock, Hourglass, MessageSquare, Percent, Send, Undo2, Wallet } from "lucide-react";
+import { CrmRowMenu, GRID_CARD, GRID_SHEET_KEYS, GridDialog, GridMiniTable, GridRelated, GridStatusPill, GridToneMark, type GridCol } from "@/components/crm/CrmDataTable";
 import { cn } from "@/lib/utils";
-import { fmt, fmtDate, fmtShort, isOverdue, milestoneFill, nextOpenMilestone, pct, MONEY_STAGE, RIBBON, TRAIL_STAGE, type LedgerRow, type LedgerSummary } from "./config";
+import { daysLate, fmt, fmtDate, fmtShort, isOverdue, milestoneFill, nextOpenMilestone, pct, MONEY_STAGE, RIBBON, TRAIL_STAGE, type LedgerRow, type LedgerSummary } from "./config";
 import { reverseWaiver, waiverState } from "./config";
+
+export const TONE_EMERALD_TEXT = "text-emerald-400 [[data-theme]_&]:text-emerald-700";
+export const TONE_AMBER_TEXT = "text-amber-300 [[data-theme]_&]:text-amber-700";
+export const TONE_ROSE_TEXT = "text-rose-400 [[data-theme]_&]:text-rose-700";
+export const TONE_SKY_TEXT = "text-sky-400 [[data-theme]_&]:text-sky-700";
 
 const { KEY_INK, KEY_LINE, LBL, TEXTAREA } = GRID_SHEET_KEYS;
 const SMALL_KEY = "h-7 px-2.5";
@@ -58,7 +62,7 @@ export function PlanRibbon({ plan, activeId, onPick, onDark }: { plan: any[]; ac
 export function RibbonLegend() {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.6875rem] text-muted-foreground">
-      {[RIBBON.settled, RIBBON.held, RIBBON.finance, RIBBON.overdue, RIBBON.open].map((k) => (
+      {[RIBBON.settled, RIBBON.held, RIBBON.finance, RIBBON.recorded, RIBBON.overdue, RIBBON.open].map((k) => (
         <span key={k.label} className="inline-flex items-center gap-1"><span className={cn("w-2.5 h-2 rounded-[2px]", k.cls)} /> {k.label}</span>
       ))}
     </div>
@@ -116,8 +120,8 @@ export const BAND_KEY_MAIN = "inline-flex items-center justify-center gap-1.5 h-
 export const BAND_DOT = { collected: "bg-emerald-400", held: RIBBON.held.cls, finance: "bg-amber-300", recorded: RIBBON.recorded.cls, notDue: "bg-slate-500", overdue: "bg-rose-400" };
 const ROW_FILL = { collected: "bg-emerald-500", finance: "bg-amber-400", overdue: "bg-rose-500" };
 
-/** Every rupee received as one line against all that is due: verified by Finance, with Finance, not yet with Finance. */
-export function CollectionBar({ due, collected, finance, recorded, onDark, title }: { due: number; collected: number; finance: number; recorded: number; onDark?: boolean; title?: string }) {
+/** Every rupee received (plus overdue exposure) as one line against all that is due. */
+export function CollectionBar({ due, collected, finance, recorded, overdue = 0, onDark, title }: { due: number; collected: number; finance: number; recorded: number; overdue?: number; onDark?: boolean; title?: string }) {
   let remaining = 100;
   const w = (n: number) => {
     const width = due > 0 ? Math.min(remaining, Math.max(0, (n / due) * 100)) : 0;
@@ -127,11 +131,13 @@ export function CollectionBar({ due, collected, finance, recorded, onDark, title
   const collectedWidth = w(collected);
   const financeWidth = w(finance);
   const recordedWidth = w(recorded);
+  const overdueWidth = w(overdue);
   return (
-    <span aria-hidden="true" className={cn("flex w-full rounded-full overflow-hidden", onDark ? "h-2.5 bg-white/15" : "h-1.5 bg-slate-200 dark:bg-slate-700")} title={title}>
+    <span aria-hidden="true" className={cn("flex w-full rounded-full overflow-hidden", onDark ? "h-2.5 bg-white/15" : "h-1.5 bg-muted [[data-theme]_&]:bg-slate-200")} title={title}>
       {collected > 0 && <span className={onDark ? BAND_DOT.collected : "bg-emerald-500"} style={{ width: collectedWidth }} />}
       {finance > 0 && <span className={onDark ? BAND_DOT.finance : "bg-amber-400"} style={{ width: financeWidth }} />}
       {recorded > 0 && <span className={RIBBON.recorded.cls} style={{ width: recordedWidth }} />}
+      {overdue > 0 && <span className={onDark ? BAND_DOT.overdue : RIBBON.late.cls} style={{ width: overdueWidth }} />}
     </span>
   );
 }
@@ -192,7 +198,7 @@ function nextStep(r: LedgerRow) {
   if (!m) {
     const pendingStages = [
       Number(r.WithFinance) > 0 ? `${fmtShort(r.WithFinance)} pending with Finance` : null,
-      Number(r.Recorded) > 0 ? `${fmtShort(r.Recorded)} not sent to Finance` : null,
+      Number(r.Recorded) > 0 ? `${fmtShort(r.Recorded)} awaiting booking approval` : null,
     ].filter(Boolean);
     return <span className="text-muted-foreground">{pendingStages.length ? pendingStages.join(" · ") : "All covered"}</span>;
   }
@@ -200,8 +206,10 @@ function nextStep(r: LedgerRow) {
 }
 // An ageing figure: a dash for nothing, so the eye goes to the money, and the later the money the stronger the ink.
 const AGE_INK: Record<string, string> = {
-  d30: "text-amber-700 dark:text-amber-300", d60: "text-orange-700 dark:text-orange-300",
-  d90: "text-rose-600 dark:text-rose-300", d90p: "text-rose-700 dark:text-rose-300 font-semibold",
+  d30: "text-amber-300 [[data-theme]_&]:text-amber-700",
+  d60: "text-orange-300 [[data-theme]_&]:text-orange-700",
+  d90: "text-rose-400 [[data-theme]_&]:text-rose-600",
+  d90p: "text-rose-400 [[data-theme]_&]:text-rose-700 font-semibold",
 };
 const money = (n: number, ink?: string) => (Number(n) > 0 ? <span className={cn("tabular-nums", ink)}>{fmt(n)}</span> : dash);
 const notDue = (r: LedgerRow) => Math.max(0, Math.round((Number(r.ToCollect) - Number(r.OverdueAmount)) * 100) / 100);
@@ -238,7 +246,7 @@ export const LEDGER_COLS: GridCol<LedgerRow>[] = [
     );
     return (
       <span className="block min-w-[15rem] py-1.5" title={collectionTitle(r)}>
-        <CollectionBar due={Number(r.TotalDue)} collected={Number(r.Collected)} finance={Number(r.WithFinance)} recorded={Number(r.Recorded)} />
+        <CollectionBar due={Number(r.TotalDue)} collected={Number(r.Collected)} finance={Number(r.WithFinance)} recorded={Number(r.Recorded)} overdue={Number(r.OverdueAmount)} />
         <span className="mt-1.5 flex justify-between gap-3 text-xs tabular-nums">
           <span className="text-muted-foreground"><span className="font-medium text-foreground">{fmtShort(received)}</span> of {fmtShort(r.TotalDue)}</span>
           <span className="font-medium">{pct(received, r.TotalDue)}%</span>
@@ -246,15 +254,20 @@ export const LEDGER_COLS: GridCol<LedgerRow>[] = [
       </span>
     );
   } },
-  { id: "verified", label: "Approved by Finance", align: "right", sortKey: "Collected", csv: (r) => r.Collected, cell: (r) => (Number(r.Collected) > 0 ? <span className="tabular-nums" title={fmt(r.Collected)}>{fmtShort(r.Collected)}</span> : dash) },
+  { id: "verified", label: "Approved by Finance", align: "right", sortKey: "Collected", csv: (r) => r.Collected, cell: (r) => (Number(r.Collected) > 0 ? (
+    <span className="inline-flex flex-col items-end leading-tight" title={`Adjusted ${fmt(r.Settled)} · On account ${fmt(r.Held)}`}>
+      <span className="tabular-nums font-medium">{fmtShort(r.Collected)}</span>
+      {Number(r.Held) > 0 && <span className="mt-0.5 text-[0.6875rem] text-teal-400 [[data-theme]_&]:text-teal-700 whitespace-nowrap tabular-nums">{fmtShort(r.Held)} on account</span>}
+    </span>
+  ) : dash) },
   { id: "pending", label: "Not yet approved", align: "right", csv: (r) => Number(r.WithFinance) + Number(r.Recorded), cell: (r) => {
     const n = Number(r.WithFinance) + Number(r.Recorded);
     if (!(n > 0)) return dash;
-    // Named as on the band, so the same money reads the same everywhere.
+    // Named as on the summary header, so the same money reads the same everywhere.
     const parts = [{ amount: Number(r.WithFinance), label: RIBBON.finance.label }, { amount: Number(r.Recorded), label: RIBBON.recorded.label }].filter((x) => x.amount > 0);
     return (
       <span className="inline-flex flex-col items-end leading-tight" title={parts.map((x) => `${x.label} ${fmt(x.amount)}`).join(" · ")}>
-        <span className="tabular-nums text-amber-700 dark:text-amber-300">{fmtShort(n)}</span>
+        <span className={cn("tabular-nums font-medium", TONE_AMBER_TEXT)}>{fmtShort(n)}</span>
         {parts.map((x) => <span key={x.label} className="mt-0.5 text-xs text-muted-foreground whitespace-nowrap">{parts.length > 1 ? `${fmtShort(x.amount)} ` : ""}{x.label}</span>)}
       </span>
     );
@@ -262,7 +275,7 @@ export const LEDGER_COLS: GridCol<LedgerRow>[] = [
   { id: "toCollect", label: "Balance", align: "right", sortKey: "ToCollect", csv: (r) => r.ToCollect, cell: (r) => (!r.Closed && Number(r.ToCollect) > 0 ? <span className="tabular-nums font-medium" title={fmt(r.ToCollect)}>{fmtShort(r.ToCollect)}</span> : dash) },
   { id: "overdue", label: "Overdue", align: "right", sortKey: "OverdueAmount", csv: (r) => r.OverdueAmount, cell: (r) => (!r.Closed && r.OverdueAmount > 0 ? (
     <span className="inline-flex flex-col items-end leading-tight" title={fmt(r.OverdueAmount)}>
-      <span className="tabular-nums font-semibold text-destructive">{fmtShort(r.OverdueAmount)}</span>
+      <span className={cn("tabular-nums font-semibold", TONE_ROSE_TEXT)}>{fmtShort(r.OverdueAmount)}</span>
       <span className="mt-0.5 text-xs text-muted-foreground tabular-nums">{r.DaysLate} day{r.DaysLate === 1 ? "" : "s"} late</span>
     </span>
   ) : dash) },
@@ -292,7 +305,7 @@ export function LedgerMobileCard({ row, onOpen }: { row: LedgerRow; onOpen: () =
   const recorded = Number(row.Recorded);
   const accessibleSummary = row.Closed
     ? `${received > 0 ? `${fmt(received)} received` : "Nothing received"}; closed, no balance owed`
-    : `${fmt(received)} received of ${fmt(row.TotalDue)} due; ${fmt(row.ToCollect)} to collect; ${row.OverdueAmount > 0 ? `${fmt(row.OverdueAmount)} overdue by ${row.DaysLate} days` : "nothing overdue"}; ${withFinance > 0 ? `${fmt(withFinance)} pending with Finance` : "nothing pending with Finance"}${recorded > 0 ? `; ${fmt(recorded)} not sent to Finance` : ""}`;
+    : `${fmt(received)} received of ${fmt(row.TotalDue)} due; ${fmt(row.ToCollect)} to collect; ${row.OverdueAmount > 0 ? `${fmt(row.OverdueAmount)} overdue by ${row.DaysLate} days` : "nothing overdue"}; ${withFinance > 0 ? `${fmt(withFinance)} pending with Finance` : "nothing pending with Finance"}${recorded > 0 ? `; ${fmt(recorded)} awaiting booking approval` : ""}`;
   return (
     <article role="button" tabIndex={0} onClick={onOpen}
       onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(); } }}
@@ -311,18 +324,18 @@ export function LedgerMobileCard({ row, onOpen }: { row: LedgerRow; onOpen: () =
         </div>
       ) : (
         <>
-          <div className="mt-3"><CollectionBar due={Number(row.TotalDue)} collected={Number(row.Collected)} finance={Number(row.WithFinance)} recorded={Number(row.Recorded)} /></div>
+          <div className="mt-3"><CollectionBar due={Number(row.TotalDue)} collected={Number(row.Collected)} finance={Number(row.WithFinance)} recorded={Number(row.Recorded)} overdue={Number(row.OverdueAmount)} /></div>
           <div className="mt-1.5 flex justify-between gap-3 text-xs tabular-nums">
             <span className="text-muted-foreground"><strong className="text-foreground">{fmtShort(received)}</strong> of {fmtShort(row.TotalDue)}</span>
             <span className="font-medium">{pct(received, row.TotalDue)}%</span>
           </div>
           <div className="mt-3 grid grid-cols-2 gap-3 border-t border-border/70 pt-2.5 text-xs">
             <div><span className="block text-muted-foreground">Balance to collect</span><span className="mt-0.5 block font-semibold tabular-nums">{fmtShort(row.ToCollect)}</span></div>
-            <div className="text-right"><span className="block text-muted-foreground">Overdue</span><span className={cn("mt-0.5 block font-semibold tabular-nums", row.OverdueAmount > 0 && "text-destructive")}>{row.OverdueAmount > 0 ? `${fmtShort(row.OverdueAmount)} · ${row.DaysLate}d` : "—"}</span></div>
+            <div className="text-right"><span className="block text-muted-foreground">Overdue</span><span className={cn("mt-0.5 block font-semibold tabular-nums", row.OverdueAmount > 0 && TONE_ROSE_TEXT)}>{row.OverdueAmount > 0 ? `${fmtShort(row.OverdueAmount)} · ${row.DaysLate}d` : "—"}</span></div>
           </div>
           <div className="mt-2 flex flex-wrap justify-between gap-x-3 gap-y-1 text-[0.6875rem] text-muted-foreground">
             <span>{withFinance > 0 ? `${fmtShort(withFinance)} pending with Finance` : "None pending with Finance"}</span>
-            {recorded > 0 && <span>{fmtShort(recorded)} not sent to Finance</span>}
+            {recorded > 0 && <span>{fmtShort(recorded)} awaiting booking approval</span>}
             {row.AssignedToName && <span className="truncate">Owner: {row.AssignedToName}</span>}
           </div>
           {row.PlanCount > 0 && <p className="mt-2 border-t border-border/70 pt-2 text-xs">Next: {nextStep(row)}</p>}
@@ -332,26 +345,27 @@ export function LedgerMobileCard({ row, onOpen }: { row: LedgerRow; onOpen: () =
   );
 }
 
-export function TokenNote({ booking, moneyReceipts }: { booking: any; moneyReceipts: any[] }) {
+export function TokenNote({ booking, bookingId, moneyReceipts }: { booking: any; bookingId?: string | number; moneyReceipts: any[] }) {
   if (!(Number(booking?.TokenValue) > 0)) return null;
   const receipt = moneyReceipts[0];
   const tokenAmt = Number(booking.TokenValue);
   const pmode = booking.PaymentMode || "—";
+  const bookingLink = bookingId ? <Link to={`/crm/bookings?view=${bookingId}`} className="text-primary font-semibold underline underline-offset-2 ml-1.5">Check booking approval</Link> : null;
   let note: { red?: boolean; icon: React.ReactNode; title: string; text: React.ReactNode } | null = null;
   if (receipt?.Status === "Bounced") {
     note = { red: true, icon: <AlertTriangle size={13} />, title: `Token payment bounced: ${fmt(tokenAmt)}`, text: <>{receipt.BouncedReason ? `Reason: ${receipt.BouncedReason}. ` : ""}A new Money Receipt must be submitted.</> };
   } else if (receipt?.Status === CrmStatus.PENDING && receipt?.RPStatus === CrmStatus.PENDING) {
-    note = { icon: <Hourglass size={13} />, title: `${fmt(receipt.Amount || tokenAmt)} pending with Finance`, text: <>Receipt {receipt.ReceiptNo} · {pmode} · sent to Finance. It counts as received once approved.</> };
+    note = { icon: <Hourglass size={13} />, title: `${fmt(receipt.Amount || tokenAmt)} pending with Finance`, text: <>Receipt {receipt.ReceiptNo} · {pmode} · sent to Finance. Counts as received once approved.</> };
   } else if (receipt?.Status === CrmStatus.PENDING && !receipt?.RPStatus) {
-    note = { icon: <Clock size={13} />, title: `${fmt(receipt.Amount || tokenAmt)} on hold: Money Receipt not sent to Finance`, text: <>Receipt {receipt.ReceiptNo} · {pmode} · created, not sent to Finance yet.</> };
+    note = { icon: <Clock size={13} />, title: `Token ${fmt(receipt.Amount || tokenAmt)} held pre-Finance (awaiting booking approval)`, text: <>Money Receipt {receipt.ReceiptNo} ({pmode}) is ready and hands off to Finance automatically when Booking Approval completes.{bookingLink}</> };
   } else if (!receipt) {
-    note = { icon: <Clock size={13} />, title: `Token ${fmt(tokenAmt)} on hold, via ${pmode}`, text: <>A Money Receipt is made when the booking is sent for approval. It counts as received once Finance approves it.</> };
+    note = { icon: <Clock size={13} />, title: `Booking token ${fmt(tokenAmt)} recorded via ${pmode} — awaiting booking approval`, text: <>Allocated across schedule milestones so payments stay transparent. A Money Receipt is sent to Finance automatically once this booking passes approval (no send action needed here).{bookingLink}</> };
   }
   if (!note) return null;
   return (
-    <div className={cn("flex items-start gap-2.5 px-3 py-2 text-xs rounded-md border", note.red ? "border-destructive/40 bg-destructive/5" : "border-border bg-card")}>
-      <span className={cn("shrink-0 mt-0.5", note.red && "text-destructive")}>{note.icon}</span>
-      <p><span className={cn("font-semibold", note.red && "text-destructive")}>{note.title}.</span> <span className="text-muted-foreground">{note.text}</span></p>
+    <div className={cn("flex items-start gap-2.5 px-4 py-3 text-xs rounded-xl border", note.red ? "border-rose-500/35 bg-rose-500/10" : "border-border bg-card")}>
+      <span className={cn("shrink-0 mt-0.5", note.red ? TONE_ROSE_TEXT : "text-primary")}>{note.icon}</span>
+      <p><span className={cn("font-semibold", note.red && TONE_ROSE_TEXT)}>{note.title}.</span> <span className="text-muted-foreground">{note.text}</span></p>
     </div>
   );
 }
@@ -388,11 +402,11 @@ export function PriceTable({ booking }: { booking: any }) {
     { l: "Booking amount (milestone 1)", v: booking.BookingAmount, optional: true },
   ].filter((x) => !x.optional || Number(x.v) > 0);
   return (
-    <dl className="max-w-md px-4 py-2 text-[0.8125rem]">
+    <dl className="w-full px-4 py-3 text-[0.8125rem]">
       {lines.map((x) => (
-        <div key={x.l} className={cn("flex items-baseline justify-between gap-3 py-1", x.strong && "border-t border-border/70 mt-1 pt-2")}>
+        <div key={x.l} className={cn("flex items-baseline justify-between gap-4 py-1.5", x.strong && "border-t border-border/70 mt-1.5 pt-2.5")}>
           <dt className={x.strong ? "font-semibold" : "text-muted-foreground"}>{x.l}</dt>
-          <dd className={cn("tabular-nums", x.strong ? "font-bold" : "font-medium")}>{fmt(Number(x.v) || 0)}</dd>
+          <dd className={cn("tabular-nums", x.strong ? "font-bold text-foreground" : "font-medium")}>{fmt(Number(x.v) || 0)}</dd>
         </div>
       ))}
     </dl>
@@ -411,8 +425,8 @@ export function MoneyTrail({ trail, totalDue }: { trail: any; totalDue: number }
   return (
     <>
       {differs && (
-        <div className="px-4 py-2 border-b border-border text-xs flex items-center gap-2 bg-amber-500/5">
-          <AlertTriangle size={13} className="shrink-0 text-amber-600" />
+        <div className="px-4 py-2.5 border-b border-border text-xs flex items-center gap-2 bg-amber-500/10">
+          <AlertTriangle size={13} className={cn("shrink-0", TONE_AMBER_TEXT)} />
           <span>Application amount <b className="tabular-nums">{fmt(trail.applicationToken)}</b>; Money Receipt amount <b className="tabular-nums">{fmt(trail.receiptAmount)}</b>. The Money Receipt amount is taken as received.</span>
         </div>
       )}
@@ -458,7 +472,7 @@ export function MoneyTrail({ trail, totalDue }: { trail: any; totalDue: number }
               <td className="h-9 px-3 border-t border-border text-right">{amt(t.refunded)}</td>
               <td className="h-9 px-3 border-t border-border text-right">{amt(t.otherOut)}</td>
               <td className="h-9 px-3 border-t border-border text-xs font-medium text-muted-foreground whitespace-nowrap">
-                {[Number(t.finance) > 0 ? `${fmt(t.finance)} pending with Finance` : null, Number(t.recorded) > 0 ? `${fmt(t.recorded)} not sent to Finance` : null].filter(Boolean).join(" · ")}
+                {[Number(t.finance) > 0 ? `${fmt(t.finance)} pending with Finance` : null, Number(t.recorded) > 0 ? `${fmt(t.recorded)} awaiting booking approval` : null].filter(Boolean).join(" · ")}
               </td>
             </tr>
             <tr className="bg-muted/60">
@@ -509,7 +523,7 @@ export function WaiverSection({ waivers, canEdit, onChanged }: { waivers: any[];
         { header: "Taxable value", align: "right", cell: (w: any) => <span className="tabular-nums">{fmt(w.TaxableValue)}</span> },
         { header: "GST", align: "right", cell: (w: any) => <span className="tabular-nums">{fmt(w.GstAmount)}</span> },
         { header: "Amount", align: "right", cell: (w: any) => <span className="tabular-nums font-semibold">{fmt(w.Amount)}</span> },
-        { header: "Reason", cell: (w: any) => <span className="block max-w-[20rem] whitespace-normal text-xs" title={w.Reason}>{w.Reason}{w.RejectionNote ? <span className="block text-destructive">Rejected: {w.RejectionNote}</span> : null}{w.ReversalReason ? <span className="block text-muted-foreground">Reversal: {w.ReversalReason}{w.ReversalRejectionNote ? ` (rejected: ${w.ReversalRejectionNote})` : ""}</span> : null}</span> },
+        { header: "Reason", cell: (w: any) => <span className="block max-w-[20rem] whitespace-normal text-xs" title={w.Reason}>{w.Reason}{w.RejectionNote ? <span className={cn("block", TONE_ROSE_TEXT)}>Rejected: {w.RejectionNote}</span> : null}{w.ReversalReason ? <span className="block text-muted-foreground">Reversal: {w.ReversalReason}{w.ReversalRejectionNote ? ` (rejected: ${w.ReversalRejectionNote})` : ""}</span> : null}</span> },
         { header: "Asked by", cell: (w: any) => <span className="text-xs text-muted-foreground">{w.RequestedByName || "—"} · {fmtDate(w.RequestedAt)}</span> },
         { header: "Decided by", cell: (w: any) => <span className="text-xs text-muted-foreground">{w.DecidedAt ? `${w.DecidedByName || "—"} · ${fmtDate(w.DecidedAt)}` : "—"}</span> },
         { header: "Status", cell: (w: any) => { const st = waiverState(w); return <GridToneMark text={st.label} tone={st.tone} />; } },
@@ -518,22 +532,25 @@ export function WaiverSection({ waivers, canEdit, onChanged }: { waivers: any[];
           : <button type="button" onClick={() => { setReversing(w); setReason(""); }} aria-label={`Reverse waiver for ${w.MilestoneName || "milestone"}`} className={cn(KEY_LINE, SMALL_KEY)}><Undo2 size={12} /> Reverse</button>) },
       ]} />
       {reversing && (
-        <Dialog open onOpenChange={(o) => { if (!o && !busy) setReversing(null); }}>
-          <DialogContent className="max-w-md p-5 gap-4">
-            <DialogHeader>
-              <DialogTitle>Reverse this waiver?</DialogTitle>
-              <DialogDescription className="text-xs tabular-nums">{reversing.MilestoneName}: {fmt(reversing.Amount)} becomes due again once the reversal is approved.</DialogDescription>
-            </DialogHeader>
-            <div>
-              <label className={cn("block mb-1.5", LBL)} htmlFor="waiver-reversal-reason">Reason</label>
-              <textarea id="waiver-reversal-reason" value={reason} onChange={(e) => setReason(e.target.value)} rows={3} autoFocus className={TEXTAREA} />
-            </div>
-            <DialogFooter className="gap-2">
+        <GridDialog
+          open
+          onClose={() => { if (!busy) setReversing(null); }}
+          icon={Undo2}
+          title="Reverse this waiver?"
+          description={`${reversing.MilestoneName}: ${fmt(reversing.Amount)} becomes due again once the reversal is approved.`}
+          width="max-w-lg"
+          footer={
+            <>
               <button type="button" onClick={() => setReversing(null)} disabled={busy} className={cn(KEY_LINE, "h-9 px-4")}>Cancel</button>
               <button type="button" onClick={submit} disabled={busy || reason.trim().length < 10} title={reason.trim().length < 10 ? "Say why: at least 10 characters" : undefined} className={cn(KEY_INK, "h-9 px-4")}>{busy ? "Sending…" : "Send for approval"}</button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+            </>
+          }
+        >
+          <div>
+            <label className={cn("block mb-1.5", LBL)} htmlFor="waiver-reversal-reason">Reason *</label>
+            <textarea id="waiver-reversal-reason" value={reason} onChange={(e) => setReason(e.target.value)} rows={3} autoFocus placeholder="Say why this waiver is being reversed (at least 10 characters)…" className={TEXTAREA} />
+          </div>
+        </GridDialog>
       )}
     </GridRelated>
   );
@@ -549,20 +566,56 @@ export function OnAccountPanel({ onAccountData, loading, error, onRetry, notFull
 }) {
   if (loading || error) return (
     <div className="flex flex-wrap items-center gap-2 px-4 py-4 text-sm">
-      {loading ? <span role="status" className="text-muted-foreground">Loading deposit balances…</span> : <span role="alert" className="text-destructive">Could not load deposit balances: {error}</span>}
+      {loading ? <span role="status" className="text-muted-foreground">Loading deposit balances…</span> : <span role="alert" className={TONE_ROSE_TEXT}>Could not load deposit balances: {error}</span>}
       {!loading && <button type="button" onClick={onRetry} className="font-semibold text-primary underline underline-offset-2">Retry</button>}
     </div>
   );
   const hasOutstanding = milestones.some((m: any) => m.Status !== CrmStatus.PAID && m.Status !== "Waived" && Number(m.AmountDue) > Number(m.AmountPaid || 0));
   const usableLeft = (onAccountData?.payments || []).some((p: any) => !UNAVAILABLE.includes(p.Status) && Number(p.Amount) > Number(p.AppliedAmount || 0));
+  const availBal = Number(onAccountData?.availableBalance || 0);
+  const clearedPct = requiredAmount > 0 ? Math.min(100, Math.round((fundsOnHand / requiredAmount) * 100)) : 0;
+  const pendingPct = requiredAmount > 0 ? Math.min(100 - clearedPct, Math.round((inVerification / requiredAmount) * 100)) : 0;
   return (
     <>
-      <p className="px-4 py-2 text-xs text-muted-foreground border-b border-border/70">
-        {notFullyPaid ? (
-          <>{fmt(fundsOnHand)} of {fmt(requiredAmount)} approved by Finance. A further {fmt(fullPaymentShortfall)} is needed before these deposits are adjusted to the milestones{inVerification > 0 ? ` (${fmt(Math.min(inVerification, fullPaymentShortfall))} of it is pending with Finance)` : ""}.</>
-        ) : <span className="inline-flex items-center gap-1.5"><CheckCircle2 size={12} /> Full booking amount received. Deposits are adjusted to the milestones automatically, in order.</span>}
-        {milestones.length > 0 && !hasOutstanding && usableLeft && " No milestone balance is outstanding; the remainder stays on account."}
-      </p>
+      <div className="px-4 py-3 border-b border-border/70 bg-muted/15 space-y-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <span>
+              <span className="text-muted-foreground">Available unapplied:</span>{" "}
+              <strong className="font-bold tabular-nums text-foreground">{fmt(availBal)}</strong>
+            </span>
+            <span className="text-muted-foreground">·</span>
+            <span className="tabular-nums text-muted-foreground">
+              Total cleared towards booking:{" "}
+              <strong className={cn("font-semibold", notFullyPaid ? TONE_AMBER_TEXT : TONE_EMERALD_TEXT)}>{fmt(fundsOnHand)}</strong>{" "}
+              of {fmt(requiredAmount)} ({clearedPct}%)
+            </span>
+          </div>
+          {notFullyPaid ? (
+            <span className={cn("font-semibold tabular-nums", TONE_AMBER_TEXT)}>
+              {fmt(fullPaymentShortfall)} shortfall to auto-adjust
+              {inVerification > 0 ? ` (${fmt(Math.min(inVerification, fullPaymentShortfall))} pending Finance)` : ""}
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-400 [[data-theme]_&]:text-emerald-700">
+              <CheckCircle2 size={13} className="shrink-0" />
+              <span>
+                100% funded — adjusts on{" "}
+                <Link to="/crm/demands" className="text-primary underline underline-offset-2">demanded</Link> milestones
+              </span>
+            </span>
+          )}
+        </div>
+        {requiredAmount > 0 && (
+          <div className="h-1.5 w-full rounded-full bg-muted [[data-theme]_&]:bg-slate-200 overflow-hidden flex" title={`Cleared ${fmt(fundsOnHand)} · Pending with Finance ${fmt(inVerification)} · Required ${fmt(requiredAmount)}`}>
+            {clearedPct > 0 && <span className="h-full bg-emerald-500 [[data-theme]_&]:bg-emerald-600" style={{ width: `${clearedPct}%` }} />}
+            {pendingPct > 0 && <span className="h-full bg-amber-400" style={{ width: `${pendingPct}%` }} />}
+          </div>
+        )}
+        {milestones.length > 0 && !hasOutstanding && usableLeft && (
+          <p className="text-[0.6875rem] text-muted-foreground">No milestone balance is outstanding; the unapplied remainder stays on account.</p>
+        )}
+      </div>
       <GridMiniTable rows={onAccountData?.payments || []} rowKey={(p: any) => p.Id} empty="No on-account deposits" cols={[
         { header: "Receipt", cell: (p: any) => <span className="tabular-nums font-medium">{p.ReceiptNo}</span> },
         { header: "Received", cell: (p: any) => <span className="tabular-nums">{fmtDate(p.ReceivedDate)}</span> },
@@ -591,10 +644,10 @@ export function moneyWords(m: any) {
   const f = milestoneFill(m);
   if (f.waived) return <span className="text-muted-foreground">Waived</span>;
   const bits = [
-    f.settled > 0 ? <span key="s">{fmt(f.settled)} adjusted</span> : null,
-    f.held > 0 ? <span key="h" className="text-teal-700 dark:text-teal-300" title={MONEY_STAGE.Verified.hint}>{fmt(f.held)} on account</span> : null,
-    f.finance > 0 ? <span key="f" className="text-amber-700 dark:text-amber-300" title={MONEY_STAGE.InVerification.hint}>{fmt(f.finance)} pending with Finance</span> : null,
-    f.recorded > 0 ? <span key="r" className="text-sky-700 dark:text-sky-300" title={MONEY_STAGE.Recorded.hint}>{fmt(f.recorded)} not sent to Finance</span> : null,
+    f.settled > 0 ? <span key="s" className={TONE_EMERALD_TEXT}>{fmt(f.settled)} adjusted</span> : null,
+    f.held > 0 ? <span key="h" className="text-teal-300 [[data-theme]_&]:text-teal-700" title={MONEY_STAGE.Verified.hint}>{fmt(f.held)} on account</span> : null,
+    f.finance > 0 ? <span key="f" className={TONE_AMBER_TEXT} title={MONEY_STAGE.InVerification.hint}>{fmt(f.finance)} pending with Finance</span> : null,
+    f.recorded > 0 ? <span key="r" className={TONE_SKY_TEXT} title={MONEY_STAGE.Recorded.hint}>{fmt(f.recorded)} token (booking approval)</span> : null,
   ].filter(Boolean);
   if (!bits.length) return dash;
   return <span className="tabular-nums inline-flex flex-wrap gap-x-2">{bits}</span>;
@@ -615,27 +668,78 @@ function milestoneDetails(m: any) {
   return lines;
 }
 
-export function MilestoneTable({ milestones, canEdit, closed = false, onAccountData, onAccountBalance, notFullyPaid, fullPaymentShortfall, nextMilestone, canManuallyApply, activeId, pendingWaivers, onPay, onApply, onWaive, onRemarks }: {
+export function MilestoneTable({ milestones, canEdit, closed = false, onAccountData, onAccountBalance, notFullyPaid, fullPaymentShortfall, nextMilestone, canManuallyApply, activeId, pendingWaivers, onPay, onApply, onWaive, onRemarks, onRaiseDemand, onUndoDemand, onInspectWallet }: {
   milestones: any[]; canEdit: boolean;
   /** The booking is closed (cancelled, unit changed …): its schedule is history, nothing on it is due or overdue. */
   closed?: boolean; onAccountData: any; onAccountBalance: number; notFullyPaid: boolean; fullPaymentShortfall: number;
   nextMilestone: any; canManuallyApply: boolean; activeId: number | null; pendingWaivers?: Set<number>;
   onPay: (m: any) => void; onApply: (payment: any, m: any) => void; onWaive: (m: any) => void; onRemarks: (m: any) => void;
+  onRaiseDemand?: (m: any) => void; onUndoDemand?: (m: any) => void; onInspectWallet?: () => void;
 }) {
   const th = "h-8 px-3 text-xs font-semibold text-muted-foreground whitespace-nowrap bg-muted border-b border-border text-left";
   const td = "h-10 px-3 border-b border-border/70 align-middle";
-  const passive = "inline-flex items-center h-7 px-2.5 rounded-md border border-border text-xs text-muted-foreground cursor-help";
+  const passive = cn("inline-flex items-center h-7 px-2.5 rounded-md border border-amber-500/35 bg-amber-500/10 text-[0.6875rem] font-medium transition hover:bg-amber-500/20", TONE_AMBER_TEXT);
   // One main action on the page: paying the milestone money is missing on next.
   const nextOpenId = nextOpenMilestone(milestones)?.Id;
+  const totalScheduled = milestones.reduce((n, m) => n + (m.Status === "Waived" ? 0 : Number(m.AmountDue) || 0), 0);
+  const totalCleared = milestones.reduce((n, m) => { const f = milestoneFill(m); return n + (f.waived ? 0 : f.settled + f.held); }, 0);
+  const totalPipeline = milestones.reduce((n, m) => { const f = milestoneFill(m); return n + (f.waived ? 0 : f.finance + f.recorded); }, 0);
+  const totalRemaining = milestones.reduce((n, m) => n + (milestoneFill(m).waived ? 0 : milestoneFill(m).missing), 0);
+  const renderActions = (m: any, covered: boolean, missing: number, pmt: any) => {
+    const noBalanceLeft = covered || missing <= 0;
+    const menuItems = [
+      { label: "Record additional payment", icon: Wallet, onClick: () => onPay(m), hidden: !noBalanceLeft || covered },
+      { label: "Raise payment demand", icon: Send, onClick: () => onRaiseDemand!(m), hidden: covered || m.DemandStatus !== CrmStatus.PENDING || !onRaiseDemand },
+      { label: "Undo demand", icon: Undo2, onClick: () => onUndoDemand!(m), hidden: covered || m.DemandStatus !== CrmStatus.DEMANDED || Number(m.AmountPaid || 0) > 0 || !onUndoDemand },
+      { label: "Request waiver", icon: Percent, onClick: () => onWaive(m), hidden: noBalanceLeft || !!pendingWaivers?.has(m.Id) },
+      { label: "View remarks", icon: MessageSquare, onClick: () => onRemarks(m), hidden: !m.Remarks },
+    ];
+    return (
+      <>
+        {!noBalanceLeft && (
+          <button type="button" onClick={() => onPay(m)} aria-label={`Record payment for ${m.MilestoneName}`} className={cn(m.Id === nextOpenId ? KEY_INK : KEY_LINE, SMALL_KEY)}>Pay</button>
+        )}
+        {pmt && (notFullyPaid ? (
+          onInspectWallet ? (
+            <button type="button" onClick={onInspectWallet} title={`On-account deposits auto-adjust once full booking due is approved (${fmt(fullPaymentShortfall)} shortfall). Click to open On-Account Wallet.`} className={passive}>
+              Held · Auto
+            </button>
+          ) : (
+            <span title={`Adjusted automatically once the full booking amount is received: a further ${fmt(fullPaymentShortfall)} is needed`} className={passive}>Auto</span>
+          )
+        ) : !canManuallyApply ? (
+          onRaiseDemand ? (
+            <button type="button" onClick={() => onRaiseDemand(m)} title="Raise this milestone's Demand now so held On-Account funds can adjust automatically" className={cn(KEY_LINE, SMALL_KEY, "border-amber-500/40", TONE_AMBER_TEXT)}>
+              Raise demand
+            </button>
+          ) : (
+            <span title="Raise the Demand before applying on-account money to this milestone" className={passive}>Raise demand</span>
+          )
+        ) : (
+          <button type="button" onClick={() => onApply(pmt, m)} aria-label={`Apply on-account money to ${m.MilestoneName}`} title="The full booking amount is received, so this should adjust automatically: use this only if it has not" className={cn(KEY_LINE, SMALL_KEY)}>Apply</button>
+        ))}
+        {covered && <span className="text-[0.6875rem] font-medium text-muted-foreground mr-1">Covered</span>}
+        <CrmRowMenu items={menuItems} />
+      </>
+    );
+  };
   return (
     <>
     <div className="divide-y divide-border md:hidden">
       {milestones.length === 0 ? <p className="px-4 py-10 text-center text-sm text-muted-foreground">No milestones on this booking.</p> : milestones.map((m) => {
         const overdue = !closed && isOverdue(m);
+        const lateDays = overdue ? daysLate(m) : 0;
         const f = milestoneFill(m);
         const stage = MONEY_STAGE[m.MoneyStage as string] || null;
         const covered = m.MoneyStage === "Verified";
-        const status = closed && m.Status !== CrmStatus.PAID ? "Closed" : stage ? stage.label : overdue ? (f.held + f.finance + f.recorded > 0 ? "Overdue · part received" : "Overdue") : m.Status === CrmStatus.PENDING ? "Due" : m.Status;
+        const scheduledLater = !overdue && !stage && m.Status === CrmStatus.PENDING && m.DemandStatus !== "Demanded" && daysLate(m) < 0;
+        const status = closed && m.Status !== CrmStatus.PAID ? "Closed"
+          : stage ? stage.label
+          : overdue ? (f.held + f.finance + f.recorded > 0 ? "Overdue · part received" : "Overdue")
+          : scheduledLater ? "Upcoming"
+          : m.DemandStatus === "Demanded" ? "Demanded"
+          : m.Status === CrmStatus.PENDING ? "Due" : m.Status;
+        const tone = pendingWaivers?.has(m.Id) ? "waiting" : closed || scheduledLater ? "draft" : overdue ? "stopped" : stage?.tone ?? "waiting";
         const open = !closed && m.Status !== CrmStatus.PAID && m.Status !== "Waived";
         const pmt = onAccountBalance > 0 && m.Id === nextMilestone?.Id
           ? onAccountData?.payments?.find((p: any) => !UNAVAILABLE.includes(p.Status) && Number(p.Amount) - Number(p.AppliedAmount || 0) > 0)
@@ -650,9 +754,12 @@ export function MilestoneTable({ milestones, canEdit, closed = false, onAccountD
                 <h4 className="font-medium text-sm leading-snug"><span className="text-muted-foreground tabular-nums mr-1.5">{m.MilestoneNo}.</span>{m.MilestoneName}
                   {m.Remarks && <button type="button" onClick={() => onRemarks(m)} title={m.Remarks} aria-label={`Read remarks for ${m.MilestoneName}`} className="ml-1.5 align-middle text-muted-foreground hover:text-foreground inline-flex"><MessageSquare size={12} /></button>}
                 </h4>
-                <p className="mt-0.5 text-xs text-muted-foreground">Due {fmtDate(m.DueDate)}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Due {fmtDate(m.DueDate)}
+                  {lateDays > 0 && <span className={cn("ml-2 font-semibold tabular-nums", TONE_ROSE_TEXT)}>{lateDays}d overdue</span>}
+                </p>
               </div>
-              <span title={stage?.hint}>{m.Status === "Waived" ? <GridStatusPill status="Waived" /> : <GridToneMark text={pendingWaivers?.has(m.Id) ? "Waiver awaiting approval" : status} tone={pendingWaivers?.has(m.Id) ? "waiting" : closed ? "draft" : overdue ? "stopped" : stage?.tone ?? "waiting"} />}</span>
+              <span title={stage?.hint}>{m.Status === "Waived" ? <GridStatusPill status="Waived" /> : <GridToneMark text={pendingWaivers?.has(m.Id) ? "Waiver awaiting approval" : status} tone={tone} />}</span>
             </div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
               <div><span className="block text-muted-foreground">Amount due</span><span className="font-semibold tabular-nums">{noAmount ? "No amount due" : fmt(m.AmountDue)}</span></div>
@@ -660,20 +767,12 @@ export function MilestoneTable({ milestones, canEdit, closed = false, onAccountD
               <div className="col-span-2"><span className="block text-muted-foreground mb-0.5">Received against it</span>{moneyWords(m)}</div>
             </div>
             {details.length > 0 && <div className="flex flex-wrap gap-x-3 gap-y-1 text-[0.6875rem] text-muted-foreground">{details.map(([label, value]) => <span key={label}>{label}: <span className="text-foreground/80 tabular-nums">{value}</span></span>)}</div>}
-            {canEdit && open && <div className="flex flex-wrap items-center gap-1.5 border-t border-border/70 pt-2">
-              {!covered && <button type="button" onClick={() => onPay(m)} aria-label={`Record payment for ${m.MilestoneName}`} className={cn(m.Id === nextOpenId ? KEY_INK : KEY_LINE, SMALL_KEY)}>Pay</button>}
-              {pmt && (notFullyPaid
-                ? <span title={`Adjusted automatically once the full booking amount is received: a further ${fmt(fullPaymentShortfall)} is needed`} className={passive}>Auto</span>
-                : !canManuallyApply
-                ? <span title="Raise the Demand before applying on-account money to this milestone" className={passive}>Raise demand</span>
-                : <button type="button" onClick={() => onApply(pmt, m)} aria-label={`Apply on-account money to ${m.MilestoneName}`} title="The full booking amount is received, so this should adjust automatically: use this only if it has not" className={cn(KEY_LINE, SMALL_KEY)}>Apply</button>)}
-              {!covered && !pendingWaivers?.has(m.Id) && <button type="button" onClick={() => onWaive(m)} aria-label={`Request waiver for ${m.MilestoneName}`} className={cn(KEY_LINE, SMALL_KEY)}>Waive</button>}
-            </div>}
+            {canEdit && open && <div className="flex flex-wrap items-center gap-1.5 border-t border-border/70 pt-2">{renderActions(m, covered, f.missing, pmt)}</div>}
           </article>
         );
       })}
       {milestones.length > 0 && <div className="flex justify-between gap-4 bg-muted px-3 py-2.5 text-xs font-semibold">
-        <span>Total</span><span className="text-right tabular-nums">{fmt(milestones.reduce((n, m) => n + (m.Status === "Waived" ? 0 : Number(m.AmountDue) || 0), 0))}<span className="ml-2 text-muted-foreground font-normal">{closed ? "—" : `${fmt(milestones.reduce((n, m) => n + (milestoneFill(m).waived ? 0 : milestoneFill(m).missing), 0))} remaining`}</span></span>
+        <span>Total</span><span className="text-right tabular-nums">{fmt(totalScheduled)}<span className="ml-2 text-muted-foreground font-normal">{closed ? "—" : `${fmt(totalRemaining)} remaining`}</span></span>
       </div>}
     </div>
     <div className="hidden overflow-x-auto thin-scroll md:block">
@@ -690,12 +789,20 @@ export function MilestoneTable({ milestones, canEdit, closed = false, onAccountD
             <tr><td colSpan={7} className={cn(td, "py-10 text-center text-muted-foreground")}>No milestones on this booking.</td></tr>
           ) : milestones.map((m) => {
             const overdue = !closed && isOverdue(m);
+            const lateDays = overdue ? daysLate(m) : 0;
             const f = milestoneFill(m);
             // The server's money stage (MONEY_STAGE): verified money On Account covers it (no Pay / Waive, which
             // would read as owed / forgiven), or an entry for it is with Finance.
             const stage = MONEY_STAGE[m.MoneyStage as string] || null;
             const covered = m.MoneyStage === "Verified";
-            const status = closed && m.Status !== CrmStatus.PAID ? "Closed" : stage ? stage.label : overdue ? (f.held + f.finance + f.recorded > 0 ? "Overdue · part received" : "Overdue") : m.Status === CrmStatus.PENDING ? "Due" : m.Status;
+            const scheduledLater = !overdue && !stage && m.Status === CrmStatus.PENDING && m.DemandStatus !== "Demanded" && daysLate(m) < 0;
+            const status = closed && m.Status !== CrmStatus.PAID ? "Closed"
+              : stage ? stage.label
+              : overdue ? (f.held + f.finance + f.recorded > 0 ? "Overdue · part received" : "Overdue")
+              : scheduledLater ? "Upcoming"
+              : m.DemandStatus === "Demanded" ? "Demanded"
+              : m.Status === CrmStatus.PENDING ? "Due" : m.Status;
+            const tone = pendingWaivers?.has(m.Id) ? "waiting" : closed || scheduledLater ? "draft" : overdue ? "stopped" : stage?.tone ?? "waiting";
             const open = !closed && m.Status !== CrmStatus.PAID && m.Status !== "Waived";
             const pmt = onAccountBalance > 0 && m.Id === nextMilestone?.Id
               ? onAccountData?.payments?.find((p: any) => !UNAVAILABLE.includes(p.Status) && Number(p.Amount) - Number(p.AppliedAmount || 0) > 0)
@@ -717,23 +824,16 @@ export function MilestoneTable({ milestones, canEdit, closed = false, onAccountD
                       </div>
                     )}
                   </td>
-                  <td className={cn(td, "text-xs tabular-nums whitespace-nowrap text-muted-foreground")}>{fmtDate(m.DueDate)}</td>
+                  <td className={cn(td, "text-xs tabular-nums whitespace-nowrap")}>
+                    <span className="text-muted-foreground">{fmtDate(m.DueDate)}</span>
+                    {lateDays > 0 && <span className={cn("block text-[0.6875rem] font-semibold", TONE_ROSE_TEXT)}>{lateDays}d overdue</span>}
+                  </td>
                   <td className={cn(td, "text-right tabular-nums whitespace-nowrap font-medium")}>{noAmount ? <span className="text-xs font-normal text-muted-foreground">No amount due</span> : fmt(m.AmountDue)}</td>
                   <td className={cn(td, "text-xs")}>{moneyWords(m)}</td>
                   <td className={cn(td, "text-right tabular-nums whitespace-nowrap", f.missing > 0 && "font-semibold")}>{closed || f.waived || f.missing <= 0 ? dash : fmt(f.missing)}</td>
-                  <td className={td} title={stage?.hint}>{m.Status === "Waived" ? <GridStatusPill status="Waived" /> : <GridToneMark text={pendingWaivers?.has(m.Id) ? "Waiver awaiting approval" : status} tone={pendingWaivers?.has(m.Id) ? "waiting" : closed ? "draft" : overdue ? "stopped" : stage?.tone ?? "waiting"} />}</td>
+                  <td className={td} title={stage?.hint}>{m.Status === "Waived" ? <GridStatusPill status="Waived" /> : <GridToneMark text={pendingWaivers?.has(m.Id) ? "Waiver awaiting approval" : status} tone={tone} />}</td>
                   <td className={cn(td, "whitespace-nowrap")}>
-                    {canEdit && open && (
-                      <div className="flex items-center justify-end gap-1.5">
-                        {!covered && <button type="button" onClick={() => onPay(m)} aria-label={`Record payment for ${m.MilestoneName}`} className={cn(m.Id === nextOpenId ? KEY_INK : KEY_LINE, SMALL_KEY)}>Pay</button>}
-                        {pmt && (notFullyPaid
-                          ? <span title={`Adjusted automatically once the full booking amount is received: a further ${fmt(fullPaymentShortfall)} is needed`} className={passive}>Auto</span>
-                          : !canManuallyApply
-                          ? <span title="Raise the Demand before applying on-account money to this milestone" className={passive}>Raise demand</span>
-                          : <button type="button" onClick={() => onApply(pmt, m)} aria-label={`Apply on-account money to ${m.MilestoneName}`} title="The full booking amount is received, so this should adjust automatically: use this only if it has not" className={cn(KEY_LINE, SMALL_KEY)}>Apply</button>)}
-                        {!covered && !pendingWaivers?.has(m.Id) && <button type="button" onClick={() => onWaive(m)} aria-label={`Request waiver for ${m.MilestoneName}`} className={cn(KEY_LINE, SMALL_KEY)}>Waive</button>}
-                      </div>
-                    )}
+                    {canEdit && open && <div className="flex items-center justify-end gap-1.5">{renderActions(m, covered, f.missing, pmt)}</div>}
                   </td>
                 </tr>
               </React.Fragment>
@@ -744,9 +844,12 @@ export function MilestoneTable({ milestones, canEdit, closed = false, onAccountD
           <tfoot>
             <tr className="bg-muted font-semibold">
               <td className="h-9 px-3 border-t border-border" colSpan={2}>Total</td>
-              <td className="h-9 px-3 border-t border-border text-right tabular-nums">{fmt(milestones.reduce((n, m) => n + (m.Status === "Waived" ? 0 : Number(m.AmountDue) || 0), 0))}</td>
-              <td className="h-9 px-3 border-t border-border" />
-              <td className="h-9 px-3 border-t border-border text-right tabular-nums">{closed ? dash : fmt(milestones.reduce((n, m) => n + (milestoneFill(m).waived ? 0 : milestoneFill(m).missing), 0))}</td>
+              <td className="h-9 px-3 border-t border-border text-right tabular-nums">{fmt(totalScheduled)}</td>
+              <td className="h-9 px-3 border-t border-border text-xs font-medium tabular-nums">
+                {totalCleared > 0 && <span className={TONE_EMERALD_TEXT}>{fmt(totalCleared)} cleared</span>}
+                {totalPipeline > 0 && <span className={cn("ml-2", TONE_AMBER_TEXT)}>{fmt(totalPipeline)} pending</span>}
+              </td>
+              <td className="h-9 px-3 border-t border-border text-right tabular-nums">{closed ? dash : fmt(totalRemaining)}</td>
               <td className="h-9 px-3 border-t border-border" colSpan={2} />
             </tr>
           </tfoot>
